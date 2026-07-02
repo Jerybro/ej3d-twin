@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const ACCENT = new THREE.Color('#46c2e0');
 const ALARM_RED = new THREE.Color('#ff2a2d');
@@ -47,6 +48,13 @@ controls.minDistance = 4;
 controls.maxDistance = 70;
 
 scene.add(new THREE.HemisphereLight(0xbdd2e2, 0x1a222b, 1.25));
+// 環境貼圖：金屬 PBR 材質（如掃描資產）沒有環境反射會渲染成全黑
+{
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environmentIntensity = 0.45;
+  pmrem.dispose();
+}
 const sun = new THREE.DirectionalLight(0xfff4e0, 1.6);
 sun.position.set(18, 26, 10);
 sun.castShadow = true;
@@ -215,6 +223,14 @@ for (const pipe of plantData.pipes) {
 }
 
 // 掃描/外部資產載入：把重建出的 .glb/.gltf 丟進 scans/ 並在 plant.json 的 scan_models 設定位置
+function flyToScanAsset(sm) {
+  const focus = new THREE.Vector3(...(sm.pos ?? [0, 0, 0])).add(new THREE.Vector3(0, 1.2, 0));
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  const toPos = focus.clone().addScaledVector(dir, 8);
+  toPos.y = Math.max(toPos.y, 4);
+  flyCam(toPos, focus);
+}
+
 for (const sm of plantData.scan_models ?? []) {
   new GLTFLoader().load(`/scans/${sm.file}`, (gltf) => {
     const holder = new THREE.Group();
@@ -224,10 +240,16 @@ for (const sm of plantData.scan_models ?? []) {
     const s = sm.scale ?? 1;
     holder.scale.set(s, s, s);
     markShadow(holder);
+    // 掃描資產通常自帶較暗的 PBR 貼圖，補一盞填充光
+    const fill = new THREE.PointLight(0xcfe3f0, 30, 16, 2);
+    fill.position.set(0, 3, 0);
+    holder.add(fill);
     if (sm.label) {
       const el = document.createElement('div');
       el.className = 'eq-label';
       el.textContent = sm.label;
+      el.style.pointerEvents = 'auto';
+      el.addEventListener('pointerdown', (e) => { e.stopPropagation(); flyToScanAsset(sm); });
       const lbl = new CSS2DObject(el);
       lbl.position.set(0, 2.2, 0);
       holder.add(lbl);
@@ -251,6 +273,21 @@ for (const unit of plantData.plant.units) {
     eqMap[eq.tag].treeEl = item;
   }
   treeRoot.appendChild(unitDiv);
+}
+
+// 外部資產也列進設備樹，點擊飛到定位
+if (plantData.scan_models?.length) {
+  const extDiv = document.createElement('div');
+  extDiv.className = 'tree-unit';
+  extDiv.innerHTML = '<div class="tree-unit-name">EXT｜外部資產（公開資料示範）</div>';
+  for (const sm of plantData.scan_models) {
+    const item = document.createElement('div');
+    item.className = 'tree-eq';
+    item.innerHTML = `<span class="eq-tag">GLB</span><span class="eq-name">${sm.label ?? sm.file}</span>`;
+    item.addEventListener('click', () => flyToScanAsset(sm));
+    extDiv.appendChild(item);
+  }
+  treeRoot.appendChild(extDiv);
 }
 
 // ---------------------------------------------------------------- 選取邏輯

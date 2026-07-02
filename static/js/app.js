@@ -54,16 +54,20 @@ sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -28, right: 28, top: 28, bottom: -28, far: 80 });
 scene.add(sun);
 
+// 程式生成示範廠的所有內容都掛在 plantGroup 下，方便與 3DGS 掃描檢視模式互切
+const plantGroup = new THREE.Group();
+scene.add(plantGroup);
+
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(70, 45),
   new THREE.MeshStandardMaterial({ color: 0x1c232b, roughness: 1 })
 );
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
-scene.add(ground);
+plantGroup.add(ground);
 const grid = new THREE.GridHelper(70, 35, 0x2a3844, 0x1f2a33);
 grid.position.y = 0.02;
-scene.add(grid);
+plantGroup.add(grid);
 
 // ---------------------------------------------------------------- 設備建模
 function std(color, extra = {}) {
@@ -176,7 +180,7 @@ for (const unit of plantData.plant.units) {
         o.userData.baseIntensity = o.material.emissiveIntensity ?? 1;
       }
     });
-    scene.add(group);
+    plantGroup.add(group);
 
     const labelEl = document.createElement('div');
     labelEl.className = 'eq-label';
@@ -203,19 +207,33 @@ for (const pipe of plantData.pipes) {
     cyl.position.copy(a).addScaledVector(dir, 0.5);
     cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
     cyl.castShadow = true;
-    scene.add(cyl);
+    plantGroup.add(cyl);
     const joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
     joint.position.copy(b);
-    scene.add(joint);
+    plantGroup.add(joint);
   }
 }
 
-// 掃描場景載入（之後把手機拍攝重建的 .glb 丟進 scans/ 並在 plant.json 設 scan_model）
-if (plantData.scan_model) {
-  new GLTFLoader().load(`/scans/${plantData.scan_model}`, (gltf) => {
-    markShadow(gltf.scene);
-    scene.add(gltf.scene);
-  });
+// 掃描/外部資產載入：把重建出的 .glb/.gltf 丟進 scans/ 並在 plant.json 的 scan_models 設定位置
+for (const sm of plantData.scan_models ?? []) {
+  new GLTFLoader().load(`/scans/${sm.file}`, (gltf) => {
+    const holder = new THREE.Group();
+    holder.add(gltf.scene);
+    holder.position.set(...(sm.pos ?? [0, 0, 0]));
+    holder.rotation.y = sm.rot_y ?? 0;
+    const s = sm.scale ?? 1;
+    holder.scale.set(s, s, s);
+    markShadow(holder);
+    if (sm.label) {
+      const el = document.createElement('div');
+      el.className = 'eq-label';
+      el.textContent = sm.label;
+      const lbl = new CSS2DObject(el);
+      lbl.position.set(0, 2.2, 0);
+      holder.add(lbl);
+    }
+    plantGroup.add(holder);
+  }, undefined, (err) => console.error('scan model 載入失敗:', sm.file, err));
 }
 
 // ---------------------------------------------------------------- 設備樹 UI
@@ -239,6 +257,15 @@ for (const unit of plantData.plant.units) {
 let selectedTag = null;
 const camTween = { active: false, t: 0, fromPos: new THREE.Vector3(), toPos: new THREE.Vector3(), fromTgt: new THREE.Vector3(), toTgt: new THREE.Vector3() };
 
+function flyCam(toPos, toTgt) {
+  camTween.fromPos.copy(camera.position);
+  camTween.toPos.copy(toPos);
+  camTween.fromTgt.copy(controls.target);
+  camTween.toTgt.copy(toTgt);
+  camTween.t = 0;
+  camTween.active = true;
+}
+
 function selectEquipment(tag, flyTo = false) {
   if (selectedTag && eqMap[selectedTag]) eqMap[selectedTag].treeEl.classList.remove('active');
   selectedTag = tag;
@@ -249,13 +276,9 @@ function selectEquipment(tag, flyTo = false) {
     const p = entry.group.position;
     const focus = new THREE.Vector3(p.x, labelHeight(entry.def) * 0.45, p.z);
     const dir = camera.position.clone().sub(controls.target).normalize();
-    camTween.fromPos.copy(camera.position);
-    camTween.toPos.copy(focus).addScaledVector(dir, 11);
-    camTween.toPos.y = Math.max(camTween.toPos.y, 5);
-    camTween.fromTgt.copy(controls.target);
-    camTween.toTgt.copy(focus);
-    camTween.t = 0;
-    camTween.active = true;
+    const toPos = focus.clone().addScaledVector(dir, 11);
+    toPos.y = Math.max(toPos.y, 5);
+    flyCam(toPos, focus);
   }
 }
 
@@ -284,6 +307,7 @@ const pointer = new THREE.Vector2();
 let downXY = null;
 renderer.domElement.addEventListener('pointerdown', (e) => { downXY = [e.clientX, e.clientY]; });
 renderer.domElement.addEventListener('pointerup', (e) => {
+  if (splatMode) return; // 掃描檢視模式下不做設備選取
   if (!downXY || Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]) > 5) return;
   pointer.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
@@ -361,7 +385,7 @@ class Emitter {
 }
 
 function clearFx() {
-  if (fx.group) { scene.remove(fx.group); fx.group = null; }
+  if (fx.group) { plantGroup.remove(fx.group); fx.group = null; }
   fx.gas = fx.fire = fx.smoke = fx.path = fx.dangerMat = null;
   fx.arrows = [];
 }
@@ -453,7 +477,7 @@ function applyScenario(sid) {
   if (sc.kind === 'normal') return;
 
   fx.group = new THREE.Group();
-  scene.add(fx.group);
+  plantGroup.add(fx.group);
   buildDangerZone(sc, fx.group);
   buildEvacPath(sc, fx.group);
 
@@ -515,6 +539,64 @@ function setScenario(sid) {
   Object.entries(scButtons).forEach(([id, b]) => b.classList.toggle('active', id === sid));
   applyScenario(sid);
 }
+
+// ------------------------------------------------------- 3DGS 掃描檢視模式
+// 真實掃描（3D Gaussian Splatting）與程式生成示範廠互切：
+// 之後 Luma/Postshot 匯出的 .ply/.splat/.ksplat 丟進 scans/、改 plant.json 的 splat_scene 即可
+const DEFAULT_VIEW = { pos: new THREE.Vector3(17, 13, 20), target: new THREE.Vector3(0, 1, 0) };
+let splatMode = false;
+let splatViewer = null;
+const viewToggle = document.getElementById('view-toggle');
+if (!plantData.splat_scene) viewToggle.style.display = 'none';
+
+async function ensureSplatLoaded() {
+  if (splatViewer) return;
+  const cfg = plantData.splat_scene;
+  const GS = await import('@mkkellogg/gaussian-splats-3d');
+  // 無 COOP/COEP 標頭的環境不能用 SharedArrayBuffer，關閉共享記憶體排序
+  splatViewer = new GS.DropInViewer({ sharedMemoryForWorkers: false, gpuAcceleratedSort: false });
+  await splatViewer.addSplatScene(`/scans/${cfg.file}`, {
+    position: cfg.pos ?? [0, 0, 0],
+    rotation: cfg.rot ?? [0, 0, 0, 1],
+    scale: [cfg.scale ?? 1, cfg.scale ?? 1, cfg.scale ?? 1],
+    splatAlphaRemovalThreshold: 5,
+    progressiveLoad: false,
+  });
+  splatViewer.visible = false;
+  scene.add(splatViewer);
+}
+
+viewToggle.addEventListener('click', async () => {
+  if (viewToggle.disabled) return;
+  try {
+    if (!splatMode) {
+      viewToggle.disabled = true;
+      viewToggle.textContent = '3DGS 載入中…';
+      await ensureSplatLoaded();
+      splatMode = true;
+      plantGroup.visible = false;
+      splatViewer.visible = true;
+      renderer.setPixelRatio(1); // 3DGS 過繪很重，降取樣減輕內顯負擔
+      document.body.classList.add('splat-mode');
+      const c = plantData.splat_scene.camera;
+      flyCam(new THREE.Vector3(...c.pos), new THREE.Vector3(...c.target));
+      viewToggle.textContent = '返回示範廠';
+    } else {
+      splatMode = false;
+      plantGroup.visible = true;
+      if (splatViewer) splatViewer.visible = false;
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      document.body.classList.remove('splat-mode');
+      flyCam(DEFAULT_VIEW.pos.clone(), DEFAULT_VIEW.target.clone());
+      viewToggle.textContent = '3DGS 掃描檢視';
+    }
+  } catch (err) {
+    console.error('3DGS 載入失敗:', err);
+    viewToggle.textContent = '3DGS 載入失敗';
+  } finally {
+    viewToggle.disabled = false;
+  }
+});
 
 // ---------------------------------------------------------------- WebSocket
 const wsStatus = document.getElementById('ws-status');

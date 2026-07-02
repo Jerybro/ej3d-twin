@@ -149,6 +149,23 @@
       }
     ]
   },
+  "scan_models": [
+    {
+      "file": "pipes01/modular_industrial_pipes_01_2k.gltf",
+      "pos": [-0.5, 0, 6.5],
+      "rot_y": 0.6,
+      "scale": 1.6,
+      "label": "掃描資產示範｜Poly Haven CC0"
+    }
+  ],
+  "splat_scene": {
+    "file": "nike.splat",
+    "note": "公開 3DGS 重建樣本（antimatter15/splat demo 資料）。筆電內顯用小檔驗證；桌機（RTX）可改 train.splat（工業感場景，1.4M splats）",
+    "pos": [0, 1.5, 0],
+    "rot": [1, 0, 0, 0],
+    "scale": 1.0,
+    "camera": { "pos": [0, 2.5, 6], "target": [0, 1.5, 0] }
+  },
   "pipes": [
     { "r": 0.1, "pts": [[-4, 0.9, 1.6], [-5.5, 0.9, -1], [-7.2, 0.9, -3.2]] },
     { "r": 0.1, "pts": [[-10.5, 0.9, 1.2], [-9.6, 0.9, -1.5], [-8.6, 1.4, -3.4]] },

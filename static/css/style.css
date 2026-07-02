@@ -157,3 +157,9 @@ html, body {
 }
 
 .hidden { display: none !important; }
+
+/* 3DGS 掃描檢視模式：隱藏示範廠的標籤與情境元素 */
+body.splat-mode .eq-label,
+body.splat-mode .muster-label { display: none !important; }
+#view-toggle { font-family: inherit; }
+#view-toggle:disabled { opacity: 0.55; cursor: wait; }

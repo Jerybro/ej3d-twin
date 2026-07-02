@@ -11,7 +11,8 @@
     {
       "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/",
+        "@mkkellogg/gaussian-splats-3d": "https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.7/build/gaussian-splats-3d.module.min.js"
       }
     }
   </script>
@@ -28,6 +29,9 @@
         GD-001 <b id="gd-value">--</b> <span class="unit">ppm</span>
       </div>
       <div class="chip" id="ws-status">連線中…</div>
+      <button class="chip chip-btn" id="view-toggle" title="切換：程式生成示範廠 / 真實 3DGS 掃描場景">
+        3DGS 掃描檢視
+      </button>
       <a class="chip chip-btn" href="/api/export/usd" download title="匯出 OpenUSD，可直接以 NVIDIA Omniverse 開啟">
         匯出 USD ↓
       </a>

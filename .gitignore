@@ -6,13 +6,11 @@ __pycache__/
 # 產出物（可由程式重新生成）
 exports/*.usda
 
-# 掃描重建模型（檔案過大，不進版控；用雲端硬碟共享）
-scans/*.glb
-scans/*.ply
-scans/*.splat
+# 掃描重建模型與示範資產（檔案過大，不進版控；跑 tools/fetch_demo_assets.py 補齊）
+scans/*
+!scans/.gitkeep
 
 # 保留資料夾結構
-!scans/.gitkeep
 !exports/.gitkeep
 
 # IDE / OS

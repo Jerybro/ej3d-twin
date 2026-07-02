@@ -11,6 +11,32 @@
 - **工安 AI 影像監識**：AI 攝影機視錐、儲槽區電子圍籬、人員動線模擬；「🚧 模擬闖入」演示闖入管制區告警、承攬商未戴安全帽（PPE）辨識
 - **Omniverse 相容**：一鍵匯出 OpenUSD（.usda），可直接用 USD Composer / usdview 開啟
 
+## Omniverse 前導平台定位（無痛遷移路徑）
+
+真 Omniverse 需要 RTX 工作站等級硬體；本平台的定位是**前導平台**——資料層以
+OpenUSD 為唯一交換格式，展示層用 Three.js 跑在任何筆電（含內顯），之後上
+Omniverse **不需要重做資料**：
+
+| 階段 | 硬體 | 內容 |
+|---|---|---|
+| 0（現在） | 任何 PC／內顯筆電 | Three.js 前導平台＋USD 匯出 |
+| 1 | 單機 RTX | `plant.usda` 直接開進 USD Composer／usdview：同一座廠（幾何＋UsdPreviewSurface 材質＋管線＋情境層＋施工層） |
+| 2 | 工作站／伺服器 | 接 Omniverse Nucleus（omni.client 推送同一份 USD）；AI 攝影機已是 UsdGeomCamera，可直接進 Isaac Sim 產工安辨識合成訓練影像 |
+
+USD 匯出內容（經 pip `usd-core`（Pixar OpenUSD）解析驗證，119 prims）：
+- `/Plant/U_*`：設備階層＋幾何＋材質＋`ej:*` 自訂屬性（tag／pid／instruments，供下游綁即時數據）
+- `/Plant/Piping`：逐段管線（含方位四元數）
+- `/Plant/Surveillance`：AI 攝影機 → **UsdGeomCamera**（FOV 換算 focalLength）
+- `/Plant/Scenarios`：10 個工安情境（危險區／洩漏點／疏散路徑，預設 invisible，Composer 切 visibility 重現）
+- `/Plant/Safety`＋`/Plant/Construction`：電子圍籬＋施工規劃（purpose=guide）
+
+## 渲染負擔（簡報筆電對策）
+
+topbar「效能」chip：**自動（FPS 降階）→ 高 → 中 → 低** 循環切換。
+- 低檔：pixelRatio 0.75（渲染像素 −86%）、關陰影、關環境反射、粒子 35%
+- 自動：FPS < 28 持續 3 秒自動降檔；> 55 持續 10 秒升檔
+- 簡報用內顯筆電建議直接點成「低」鎖定
+
 ## 啟動
 
 ```bash

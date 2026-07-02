@@ -62,6 +62,62 @@ sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -28, right: 28, top: 28, bottom: -28, far: 80 });
 scene.add(sun);
 
+// ------------------------------------------------- 效能分級（減渲染負擔）
+// 簡報現場常是內顯筆電：三檔畫質＋FPS 自動降階，讓前導平台在任何機器都跑得動
+const QUALITY = {
+  high: { pr: Math.min(devicePixelRatio, 2), shadows: true, shadowSize: 2048, env: 0.45, particles: 1.0, label: '高' },
+  med: { pr: Math.min(devicePixelRatio, 1.25), shadows: true, shadowSize: 1024, env: 0.3, particles: 0.6, label: '中' },
+  low: { pr: 0.75, shadows: false, shadowSize: 512, env: 0, particles: 0.35, label: '低' },
+};
+const TIER_ORDER = ['low', 'med', 'high'];
+let qualityMode = 'auto'; // auto | high | med | low
+let qualityTier = 'high';
+let particleScale = 1;
+const perf = { acc: 0, frames: 0, fps: 60, lowSecs: 0, highSecs: 0 };
+
+function applyQuality(tier) {
+  qualityTier = tier;
+  const q = QUALITY[tier];
+  if (typeof splatMode === 'undefined' || !splatMode) renderer.setPixelRatio(q.pr);
+  renderer.shadowMap.enabled = q.shadows;
+  sun.castShadow = q.shadows;
+  sun.shadow.mapSize.set(q.shadowSize, q.shadowSize);
+  if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+  scene.environmentIntensity = q.env;
+  particleScale = q.particles;
+  // 切陰影開關需要重編材質
+  scene.traverse((o) => { if (o.isMesh) o.material.needsUpdate = true; });
+  updatePerfChip();
+}
+
+function updatePerfChip() {
+  const el = document.getElementById('perf-chip');
+  if (!el) return;
+  const modeTxt = qualityMode === 'auto' ? `自動·${QUALITY[qualityTier].label}` : QUALITY[qualityTier].label;
+  el.innerHTML = `效能 <b>${modeTxt}</b> <span class="unit">${Math.round(perf.fps)}fps</span>`;
+}
+
+document.getElementById('perf-chip')?.addEventListener('click', () => {
+  const cycle = ['auto', 'high', 'med', 'low'];
+  qualityMode = cycle[(cycle.indexOf(qualityMode) + 1) % cycle.length];
+  perf.lowSecs = perf.highSecs = 0;
+  applyQuality(qualityMode === 'auto' ? qualityTier : qualityMode);
+});
+
+function autoAdaptQuality() {
+  if (qualityMode !== 'auto') return;
+  const i = TIER_ORDER.indexOf(qualityTier);
+  if (perf.fps < 28) {
+    perf.highSecs = 0;
+    if (++perf.lowSecs >= 3 && i > 0) { perf.lowSecs = 0; applyQuality(TIER_ORDER[i - 1]); }
+  } else if (perf.fps > 55) {
+    perf.lowSecs = 0;
+    if (++perf.highSecs >= 10 && i < TIER_ORDER.length - 1) { perf.highSecs = 0; applyQuality(TIER_ORDER[i + 1]); }
+  } else {
+    perf.lowSecs = perf.highSecs = 0;
+  }
+}
+
 // 程式生成示範廠的所有內容都掛在 plantGroup 下，方便與 3DGS 掃描檢視模式互切
 const plantGroup = new THREE.Group();
 scene.add(plantGroup);
@@ -652,7 +708,7 @@ viewToggle.addEventListener('click', async () => {
       splatMode = false;
       plantGroup.visible = true;
       if (splatViewer) splatViewer.visible = false;
-      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setPixelRatio(QUALITY[qualityTier].pr);
       document.body.classList.remove('splat-mode');
       flyCam(DEFAULT_VIEW.pos.clone(), DEFAULT_VIEW.target.clone());
       viewToggle.textContent = '3DGS 掃描檢視';
@@ -1227,10 +1283,21 @@ function animate() {
     });
   }
 
-  // 情境特效
-  if (fx.gas) fx.gas.update(dt, 42);
-  if (fx.fire) fx.fire.update(dt, fx.shock ? 130 : 80);
-  if (fx.smoke) fx.smoke.update(dt, fx.shock ? 40 : 26);
+  // FPS 統計＋自動降階（每秒結算一次）
+  perf.acc += dt;
+  perf.frames++;
+  if (perf.acc >= 1) {
+    perf.fps = perf.frames / perf.acc;
+    perf.acc = 0;
+    perf.frames = 0;
+    autoAdaptQuality();
+    updatePerfChip();
+  }
+
+  // 情境特效（粒子生成率隨畫質檔位縮放）
+  if (fx.gas) fx.gas.update(dt, 42 * particleScale);
+  if (fx.fire) fx.fire.update(dt, (fx.shock ? 130 : 80) * particleScale);
+  if (fx.smoke) fx.smoke.update(dt, (fx.shock ? 40 : 26) * particleScale);
   if (fx.shock) {
     fx.shock.t = (fx.shock.t + dt / 1.8) % 1;
     const r = 0.5 + fx.shock.t * fx.shock.rMax;

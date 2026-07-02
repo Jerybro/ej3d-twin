@@ -830,6 +830,9 @@ function flyCam(toPos, toTgt) {
   camTween.active = true;
 }
 
+// console／導覽用：EJ3D.fly([camX,camY,camZ],[lookX,lookY,lookZ])
+window.EJ3D = { fly: (p, t) => flyCam(new THREE.Vector3(...p), new THREE.Vector3(...t)) };
+
 function selectEquipment(tag, flyTo = false) {
   if (selectedTag && eqMap[selectedTag]) eqMap[selectedTag].treeEl.classList.remove('active');
   selectedTag = tag;
@@ -1507,6 +1510,34 @@ function updateSafety(dt, t) {
   }
 }
 
+// -------------------------------- 真實掃描道具（Poly Haven CC0，施工場景敷設）
+const propsGroup = new THREE.Group();
+plantGroup.add(propsGroup);
+{
+  const loader = new GLTFLoader();
+  for (const p of plantData.props ?? []) {
+    loader.load(`/scans/${p.model}`, (gltf) => {
+      // modular kit 的 gltf 是整組零件攤開；pick 指定子件名稱只取那一件
+      let source = gltf.scene;
+      if (p.pick) {
+        const picked = gltf.scene.getObjectByName(p.pick);
+        if (!picked) { console.warn('pick 不到子件:', p.model, p.pick); return; }
+        picked.position.set(0, 0, 0);
+        picked.rotation.set(0, 0, 0);
+        source = picked;
+      }
+      for (const [x, y, z, ry = 0, s = 1] of p.instances) {
+        const inst = source.clone(true);
+        inst.position.set(x, y, z);
+        inst.rotation.y = ry;
+        inst.scale.setScalar(s);
+        markShadow(inst);
+        propsGroup.add(inst);
+      }
+    }, undefined, () => console.warn('道具載入失敗（先跑 tools/fetch_demo_assets.py）:', p.model));
+  }
+}
+
 // ------------------------------------------ 精細/低耗能 模型切換
 // 精細＝真實化工廠建模（簡報用）；低耗能＝原簡易幾何（弱機/內顯保底）
 // 效能自動降階掉到「低」檔時強制退回低耗能，回升後恢復使用者選擇
@@ -1525,6 +1556,7 @@ function setDetail(on) {
     plantGroup.add(dressGroup);
   }
   if (dressGroup) dressGroup.visible = on;
+  propsGroup.visible = on; // 真實掃描道具跟精細模式連動（低耗能版一併卸載負擔）
   const btn = document.getElementById('detail-toggle');
   if (btn) {
     btn.classList.toggle('active', on);
@@ -1919,9 +1951,15 @@ function animate() {
 }
 animate();
 
-addEventListener('resize', () => {
+function onResize() {
+  if (!innerWidth || !innerHeight) return;
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   labelRenderer.setSize(innerWidth, innerHeight);
-});
+}
+addEventListener('resize', onResize);
+// 視窗在背景/尚未 layout 時啟動 innerWidth 可能是 0 → canvas 0×0 全黑；
+// ResizeObserver 在視窗真正有尺寸時補一次
+new ResizeObserver(onResize).observe(document.body);
+onResize();

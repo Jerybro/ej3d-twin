@@ -158,6 +158,96 @@
       "label": "掃描資產示範｜Poly Haven CC0"
     }
   ],
+  "props": [
+    {
+      "model": "ph/modular_chainlink_fence/modular_chainlink_fence_1k.gltf",
+      "pick": "modular_chainlink_fence_post",
+      "note": "施工圍籬桿（自組段）",
+      "instances": [
+        [4.5, 0, -13.6, 0, 1], [6.36, 0, -13.6, 0, 1], [8.22, 0, -13.6, 0, 1], [10.08, 0, -13.6, 0, 1], [11.94, 0, -13.6, 0, 1], [13.8, 0, -13.6, 0, 1],
+        [14.2, 0, -12.6, 0, 1], [14.2, 0, -10.74, 0, 1], [14.2, 0, -8.88, 0, 1]
+      ]
+    },
+    {
+      "model": "ph/modular_chainlink_fence/modular_chainlink_fence_1k.gltf",
+      "pick": "Plane020",
+      "note": "施工圍籬網面（自組段；網面 pivot 在 -x 側，座標=段終點桿）",
+      "instances": [
+        [6.43, 0, -13.6, 0, 1], [8.29, 0, -13.6, 0, 1], [10.15, 0, -13.6, 0, 1], [12.01, 0, -13.6, 0, 1], [13.87, 0, -13.6, 0, 1],
+        [14.2, 0, -12.67, 1.5708, 1], [14.2, 0, -10.81, 1.5708, 1]
+      ]
+    },
+    {
+      "model": "ph/concrete_road_barrier/concrete_road_barrier_1k.gltf",
+      "note": "施工區入口護欄",
+      "instances": [[4.6, 0, -9.6, 0.3, 1], [5.2, 0, -11.2, 0.15, 1], [4.9, 0, -12.8, -0.2, 1]]
+    },
+    {
+      "model": "ph/cement_bag/cement_bag_1k.gltf",
+      "note": "水泥袋堆",
+      "instances": [[10.4, 0, -12.6, 0.4, 1], [10.9, 0, -12.4, 1.2, 1], [10.6, 0.25, -12.5, 0.8, 1], [11.1, 0, -12.9, 2.1, 1]]
+    },
+    {
+      "model": "ph/Barrel_01/Barrel_01_1k.gltf",
+      "note": "工業桶",
+      "instances": [[12.5, 0, -12, 0, 1], [13.1, 0, -11.5, 0.8, 1]]
+    },
+    {
+      "model": "ph/barrel_03/barrel_03_1k.gltf",
+      "note": "鏽蝕鋼桶",
+      "instances": [[12.9, 0, -12.7, 1.7, 1], [13.6, 0, -12.2, 2.6, 1]]
+    },
+    {
+      "model": "ph/propane_tank/propane_tank_1k.gltf",
+      "note": "瓦斯桶",
+      "instances": [[6.5, 0, -13, 0.5, 1], [7.05, 0, -13.15, 1.9, 1]]
+    },
+    {
+      "model": "ph/wooden_ladder/wooden_ladder_1k.gltf",
+      "note": "木梯",
+      "instances": [[9.5, 0, -12.9, 0.9, 1]]
+    },
+    {
+      "model": "ph/hand_truck/hand_truck_1k.gltf",
+      "note": "手推車",
+      "instances": [[7.8, 0, -12.2, -0.6, 1]]
+    },
+    {
+      "model": "ph/plastic_crate_01/plastic_crate_01_1k.gltf",
+      "note": "塑膠棧箱",
+      "instances": [[11.3, 0, -13.1, 0.2, 1], [11.9, 0, -13.25, 1.1, 1], [11.6, 0.35, -13.15, 0.6, 1]]
+    },
+    {
+      "model": "ph/WetFloorSign_01/WetFloorSign_01_1k.gltf",
+      "note": "警示立牌",
+      "instances": [[5.9, 0, -9.9, 0.9, 1]]
+    },
+    {
+      "model": "ph/utility_box_01/utility_box_01_1k.gltf",
+      "note": "施工臨時配電箱",
+      "instances": [[13.75, 0, -9.4, -1.5708, 1]]
+    },
+    {
+      "model": "ph/fire_hydrant/fire_hydrant_1k.gltf",
+      "note": "消防栓",
+      "instances": [[-1.5, 0, -5.5, 0, 1]]
+    },
+    {
+      "model": "ph/korean_fire_extinguisher_01/korean_fire_extinguisher_01_1k.gltf",
+      "note": "控制室門口滅火器",
+      "instances": [[5.5, 0, 14.3, 0.6, 1]]
+    },
+    {
+      "model": "ph/street_lamp_01/street_lamp_01_1k.gltf",
+      "note": "路燈",
+      "instances": [[0, 0, -9, 1.5708, 1]]
+    },
+    {
+      "model": "ph/security_camera_01/security_camera_01_1k.gltf",
+      "note": "AI 攝影機桿頂實體監視器",
+      "instances": [[-14, 4.35, -8, 0.85, 1], [15, 4.35, -9, -0.85, 1], [-1, 4.35, 8.5, 2.62, 1]]
+    }
+  ],
   "environment": {
     "file": "env/abandoned_tank_farm_03.jpg",
     "label": "實景背景｜Poly Haven Abandoned Tank Farm 03（CC0）",

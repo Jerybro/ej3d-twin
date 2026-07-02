@@ -42,6 +42,52 @@ FILES = {
         "https://dl.polyhaven.org/file/ph-assets/HDRIs/extra/Tonemapped%20JPG/abandoned_tank_farm_03.jpg",
 }
 
+# 真實施工場景道具（Poly Haven 照片掃描級 PBR，CC0）→ scans/ph/{slug}/
+# 走 files API 自動解析 gltf + bin + 貼圖清單；1k 貼圖（道具尺寸夠用、省記憶體）
+PH_PROPS = [
+    "concrete_road_barrier",      # 混凝土護欄
+    "modular_chainlink_fence",    # 鐵絲網圍籬
+    "cement_bag",                 # 水泥袋
+    "Barrel_01",                  # 工業桶
+    "barrel_03",                  # 鏽蝕鋼桶
+    "propane_tank",               # 瓦斯桶
+    "wooden_ladder",              # 木梯
+    "hand_truck",                 # 手推車
+    "plastic_crate_01",           # 塑膠棧箱
+    "WetFloorSign_01",            # 警示立牌
+    "fire_hydrant",               # 消防栓
+    "korean_fire_extinguisher_01",# 滅火器
+    "security_camera_01",         # 監視器（AI 攝影機桿用）
+    "street_lamp_01",             # 路燈
+    "utility_box_01",             # 配電箱
+]
+
+
+UA = {"User-Agent": "ej3d-twin-demo/1.0 (asset fetcher)"}
+
+
+def fetch_polyhaven_model(slug: str, res: str = "1k") -> None:
+    import json
+
+    dest = SCANS / "ph" / slug
+    api = f"https://api.polyhaven.com/files/{slug}"
+    with urllib.request.urlopen(urllib.request.Request(api, headers=UA)) as r:
+        files = json.load(r)
+    entry = files["gltf"].get(res) or next(iter(files["gltf"].values()))
+    gltf = entry["gltf"]
+    todo = {f"{slug}_{res}.gltf": gltf["url"]}
+    for rel, meta in gltf.get("include", {}).items():
+        todo[rel] = meta["url"]
+    for rel, url in todo.items():
+        out = dest / rel
+        if out.exists():
+            print(f"已存在: ph/{slug}/{rel}")
+            continue
+        out.parent.mkdir(parents=True, exist_ok=True)
+        print(f"下載: ph/{slug}/{rel}")
+        with urllib.request.urlopen(urllib.request.Request(url, headers=UA)) as r:
+            out.write_bytes(r.read())
+
 if __name__ == "__main__":
     for rel, url in FILES.items():
         dest = SCANS / rel
@@ -51,4 +97,6 @@ if __name__ == "__main__":
         dest.parent.mkdir(parents=True, exist_ok=True)
         print(f"下載: {rel} …")
         urllib.request.urlretrieve(url, dest)
+    for slug in PH_PROPS:
+        fetch_polyhaven_model(slug)
     print("完成。")

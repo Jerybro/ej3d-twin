@@ -156,6 +156,108 @@ html, body {
   color: var(--safe); font-size: 12px; font-weight: 700; white-space: nowrap;
 }
 
+/* ------------------------------------------------------ AI 情境比對面板 */
+#match-panel {
+  position: absolute; bottom: 70px; left: 12px; width: 300px;
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: 10px; padding: 12px; z-index: 25;
+  backdrop-filter: blur(6px);
+}
+.match-status { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+.match-status.confirmed { color: var(--safe); font-weight: 700; }
+.match-row { margin-bottom: 7px; }
+.match-row-head { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 2px; }
+.match-row-head .conf { font-weight: 700; color: var(--accent); }
+.match-row.best .conf { color: var(--safe); }
+.match-bar { height: 5px; border-radius: 3px; background: rgba(70, 194, 224, 0.15); overflow: hidden; }
+.match-bar > i {
+  display: block; height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent-deep), var(--accent));
+  transition: width 0.5s ease;
+}
+.match-row.best .match-bar > i { background: linear-gradient(90deg, #1d7a4f, var(--safe)); }
+
+/* -------------------------------------------------------- 施工衝突面板 */
+#conflict-panel {
+  position: absolute; bottom: 70px; right: 12px; width: 320px;
+  max-height: 42vh; overflow-y: auto;
+  background: var(--panel); border: 1px solid rgba(255, 170, 60, 0.45);
+  border-radius: 10px; padding: 12px; z-index: 25;
+  backdrop-filter: blur(6px);
+}
+#conflict-panel .panel-title { color: #ffaa3c; }
+.conflict-item {
+  padding: 7px 9px; border-radius: 7px; margin-bottom: 6px;
+  font-size: 12px; line-height: 1.5;
+  background: rgba(255, 170, 60, 0.08); border: 1px solid rgba(255, 170, 60, 0.25);
+}
+.conflict-item.hard {
+  background: rgba(255, 77, 79, 0.1); border-color: rgba(255, 77, 79, 0.45);
+}
+.conflict-item .c-kind { font-weight: 700; }
+.conflict-item.hard .c-kind { color: var(--alarm); }
+.conflict-item:not(.hard) .c-kind { color: #ffaa3c; }
+.conflict-item .c-dist { color: var(--text-dim); }
+.conflict-ok { font-size: 12px; color: var(--safe); padding: 6px 2px; }
+#mode-construction.active { background: rgba(255, 170, 60, 0.3); border-color: #ffaa3c; font-weight: 700; }
+
+/* ----------------------------------------------------------- P&ID 彈窗 */
+#pid-modal {
+  position: absolute; inset: 0; z-index: 60;
+  background: rgba(5, 9, 13, 0.7); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+}
+.pid-box {
+  position: relative; width: min(760px, 92vw);
+  background: #0c1319; border: 1px solid var(--panel-border);
+  border-radius: 12px; padding: 18px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+}
+#pid-close {
+  position: absolute; top: 10px; right: 14px;
+  background: none; border: none; color: var(--text-dim);
+  font-size: 20px; cursor: pointer;
+}
+#pid-close:hover { color: var(--text); }
+.pid-title { font-weight: 700; color: var(--accent); font-size: 15px; margin-bottom: 10px; }
+#pid-svg svg { width: 100%; height: auto; display: block; border-radius: 8px; }
+.pid-note { margin-top: 10px; font-size: 11px; color: var(--text-dim); }
+.pid-btn {
+  margin-top: 12px; width: 100%; padding: 8px;
+  border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 13px;
+  background: rgba(31, 110, 168, 0.25); border: 1px solid var(--panel-border);
+  color: var(--text);
+}
+.pid-btn:hover { background: rgba(70, 194, 224, 0.28); }
+
+/* ----------------------------------------------------- 工安 AI／人員標籤 */
+#vision-chip.alarm { animation: blink 1s step-end infinite; }
+.worker-label {
+  padding: 2px 8px; border-radius: 10px;
+  background: rgba(12, 20, 28, 0.85); border: 1px solid rgba(139, 160, 179, 0.4);
+  color: var(--text-dim); font-size: 10px; white-space: nowrap;
+}
+.worker-label.violation {
+  background: rgba(80, 12, 14, 0.92); border-color: var(--alarm);
+  color: #ffd7d7; font-weight: 700; font-size: 11px;
+  animation: blink 1s step-end infinite;
+}
+.cam-label {
+  padding: 2px 8px; border-radius: 10px;
+  background: rgba(20, 30, 44, 0.85); border: 1px solid rgba(126, 226, 245, 0.35);
+  color: #7ee2f5; font-size: 10px; white-space: nowrap;
+}
+body.splat-mode .worker-label,
+body.splat-mode .cam-label { display: none !important; }
+
+/* ------------------------------------------------ scenario bar 擴充排版 */
+#scenario-buttons { overflow-x: auto; scrollbar-width: thin; max-width: 46vw; }
+#scenario-buttons .sc-btn { white-space: nowrap; flex-shrink: 0; padding: 7px 12px; font-size: 12px; }
+.bar-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.sc-btn.inject { border-color: rgba(255, 170, 60, 0.5); }
+.sc-btn.inject:hover { background: rgba(255, 170, 60, 0.22); }
+.sc-btn.inject.active { background: rgba(163, 100, 20, 0.8); border-color: #ffaa3c; font-weight: 700; }
+
 .hidden { display: none !important; }
 
 /* 3DGS 掃描檢視模式：隱藏示範廠的標籤與情境元素 */

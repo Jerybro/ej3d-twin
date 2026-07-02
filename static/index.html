@@ -25,6 +25,12 @@
       <span class="brand-sub">領航示範 MVP｜穎杰科技</span>
     </div>
     <div class="topbar-right">
+      <button class="chip chip-btn" id="mode-construction" title="施工模擬：規劃中設備/管線 ghost 檢視＋路徑衝突檢測">
+        施工模擬
+      </button>
+      <div class="chip" id="vision-chip" title="AI 攝影機影像辨識（電子圍籬／PPE）">
+        AI 影像監識 <b id="vision-status">正常</b>
+      </div>
       <div class="chip" id="gd-chip" title="廠區酸霧偵測 GD-001">
         GD-001 <b id="gd-value">--</b> <span class="unit">ppm</span>
       </div>
@@ -58,11 +64,42 @@
     <table class="info-table" id="info-design"></table>
     <div class="info-section">即時儀錶（模擬 DCS 數據）</div>
     <table class="info-table" id="info-instruments"></table>
+    <button class="pid-btn" id="info-pid-btn">📐 開啟 P&amp;ID 圖面</button>
   </aside>
 
+  <aside id="match-panel" class="hidden">
+    <div class="panel-title">AI 情境比對引擎</div>
+    <div class="match-status" id="match-status">監看 DCS 特徵中…</div>
+    <div id="match-list"></div>
+    <div class="panel-hint">預載 10 個典型風險情境｜依感測偏移特徵即時比對</div>
+  </aside>
+
+  <aside id="conflict-panel" class="hidden">
+    <div class="panel-title">施工衝突檢測</div>
+    <div id="conflict-list"></div>
+    <div class="panel-hint">規劃管線取樣點 vs 既有設備／安全淨距 1.0 m</div>
+  </aside>
+
+  <div id="pid-modal" class="hidden">
+    <div class="pid-box">
+      <button id="pid-close" title="關閉">×</button>
+      <div class="pid-title" id="pid-title">P&amp;ID</div>
+      <div id="pid-svg"></div>
+      <div class="pid-note">示意圖面（自 plant.json 生成）｜實際專案掛接 P&amp;ID／ISO 配管圖／電氣系統圖／設備配置圖</div>
+    </div>
+  </div>
+
   <footer id="scenario-bar">
-    <span class="bar-label">工安情境模擬</span>
+    <span class="bar-label">工安情境</span>
     <div id="scenario-buttons"></div>
+    <div class="bar-actions">
+      <button class="sc-btn inject" id="btn-inject" title="盲測：隨機注入一組異常感測訊號，由 AI 比對引擎自動找出最接近的預載情境">
+        ⚡ 異常注入（盲測）
+      </button>
+      <button class="sc-btn" id="btn-intrude" title="演示：模擬人員闖入儲槽區電子圍籬，AI 攝影機辨識告警">
+        🚧 模擬闖入
+      </button>
+    </div>
     <span class="bar-hint" id="scenario-desc">預載情境比對法：實際洩漏時依 DCS 感測值比對最接近情境</span>
   </footer>
 

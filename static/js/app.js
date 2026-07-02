@@ -356,7 +356,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 });
 
 // ---------------------------------------------------------------- 情境特效
-const fx = { group: null, gas: null, fire: null, smoke: null, arrows: [], path: null, dangerMat: null };
+const fx = { group: null, gas: null, fire: null, smoke: null, shock: null, arrows: [], path: null, dangerMat: null };
 
 function makeSpriteTexture(inner = 'rgba(255,255,255,0.9)') {
   const c = document.createElement('canvas');
@@ -423,7 +423,7 @@ class Emitter {
 
 function clearFx() {
   if (fx.group) { plantGroup.remove(fx.group); fx.group = null; }
-  fx.gas = fx.fire = fx.smoke = fx.path = fx.dangerMat = null;
+  fx.gas = fx.fire = fx.smoke = fx.shock = fx.path = fx.dangerMat = null;
   fx.arrows = [];
 }
 
@@ -551,6 +551,36 @@ function applyScenario(sid) {
       opacity: 0.4,
     });
     fx.group.add(fx.fire.group, fx.smoke.group);
+  } else if (sc.kind === 'explosion') {
+    // 火球（加色混合、向四面八方噴）＋濃煙＋地面衝擊波環（循環擴張）
+    fx.fire = new Emitter({
+      count: 240,
+      color: new THREE.Color('#ff8420'),
+      origin: sc.leak_point,
+      velFn: () => new THREE.Vector3((Math.random() - 0.5) * 3.2, 1.4 + Math.random() * 2.4, (Math.random() - 0.5) * 3.2),
+      life: [0.5, 1.1],
+      sizeFn: (k) => 1.7 * (1 - k * 0.35),
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+    });
+    fx.smoke = new Emitter({
+      count: 220,
+      color: new THREE.Color('#2f3338'),
+      origin: [sc.leak_point[0], sc.leak_point[1] + 1.2, sc.leak_point[2]],
+      velFn: () => new THREE.Vector3((Math.random() - 0.5) * 1.4, 1.4 + Math.random() * 1.0, (Math.random() - 0.5) * 1.4),
+      life: [3.5, 6],
+      sizeFn: (k) => 1.2 + k * 4.5,
+      opacity: 0.5,
+    });
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.94, 1, 64),
+      new THREE.MeshBasicMaterial({ color: 0xffc46a, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(sc.leak_point[0], 0.12, sc.leak_point[2]);
+    fx.group.add(ring);
+    fx.shock = { ring, t: 0, rMax: Math.max(sc.danger_zone.rx, sc.danger_zone.rz) };
+    fx.group.add(fx.fire.group, fx.smoke.group);
   }
 }
 
@@ -635,6 +665,475 @@ viewToggle.addEventListener('click', async () => {
   }
 });
 
+// ------------------------------------------------- AI 情境比對（異常注入盲測）
+// 簡報「預設情境比對法」：注入異常感測訊號 → 後端依 DCS 偏移特徵向量
+// 對 10 個預載情境做相似度比對 → 信心值過門檻自動確認並觸發 3D 情境
+const matchPanel = document.getElementById('match-panel');
+const matchStatus = document.getElementById('match-status');
+const matchList = document.getElementById('match-list');
+const injectBtn = document.getElementById('btn-inject');
+let injectActive = false;
+
+function renderMatch(m) {
+  const active = !!(m && m.active);
+  if (active !== injectActive) {
+    injectActive = active;
+    injectBtn.classList.toggle('active', active);
+    injectBtn.textContent = active ? '⏹ 停止注入' : '⚡ 異常注入（盲測）';
+    matchPanel.classList.toggle('hidden', !active);
+    if (!active) {
+      matchStatus.textContent = '監看 DCS 特徵中…';
+      matchStatus.classList.remove('confirmed');
+      matchList.innerHTML = '';
+    }
+  }
+  if (!active) return;
+  const top = m.ranked[0];
+  if (m.confirmed && top) {
+    matchStatus.textContent = `✔ 已確認（信心 ${Math.round(top.conf * 100)}%）：${scenarioDefs[m.truth]?.name ?? top.name}`;
+    matchStatus.classList.add('confirmed');
+  } else {
+    matchStatus.textContent = '⟳ DCS 感測偏移發展中，比對進行中…';
+    matchStatus.classList.remove('confirmed');
+  }
+  matchList.innerHTML = m.ranked.map((r, i) => `
+    <div class="match-row${i === 0 ? ' best' : ''}">
+      <div class="match-row-head"><span>${r.name}</span><span class="conf">${Math.round(r.conf * 100)}%</span></div>
+      <div class="match-bar"><i style="width:${Math.min(100, r.conf * 100)}%"></i></div>
+    </div>`).join('');
+}
+
+injectBtn.addEventListener('click', async () => {
+  await fetch(injectActive ? '/api/inject/stop' : '/api/inject/random', { method: 'POST' });
+});
+
+// ----------------------------------------------- 工安 AI：圍籬／攝影機／人員
+const fencePoly = plantData.fence?.polygon ?? [];
+const FENCE_H = 1.4;
+const safetyGroup = new THREE.Group();
+plantGroup.add(safetyGroup);
+const fenceMats = [];
+
+if (fencePoly.length) {
+  for (let i = 0; i < fencePoly.length; i++) {
+    const a = fencePoly[i], b = fencePoly[(i + 1) % fencePoly.length];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffd23c, transparent: true, opacity: 0.09, side: THREE.DoubleSide, depthWrite: false });
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(len, FENCE_H), mat);
+    wall.position.set((a[0] + b[0]) / 2, FENCE_H / 2, (a[1] + b[1]) / 2);
+    wall.rotation.y = -Math.atan2(b[1] - a[1], b[0] - a[0]);
+    safetyGroup.add(wall);
+    fenceMats.push(mat);
+  }
+  const ring = [...fencePoly, fencePoly[0]];
+  const topLineMat = new THREE.LineBasicMaterial({ color: 0xffd23c, transparent: true, opacity: 0.8 });
+  const topLine = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(ring.map((p) => new THREE.Vector3(p[0], FENCE_H, p[1]))),
+    topLineMat
+  );
+  safetyGroup.add(topLine);
+  fenceMats.push(topLineMat);
+  const fenceEl = document.createElement('div');
+  fenceEl.className = 'cam-label';
+  fenceEl.textContent = `⛔ ${plantData.fence.name}`;
+  const fenceLabel = new CSS2DObject(fenceEl);
+  const cx = fencePoly.reduce((s, p) => s + p[0], 0) / fencePoly.length;
+  const cz = Math.max(...fencePoly.map((p) => p[1]));
+  fenceLabel.position.set(cx, FENCE_H + 0.5, cz);
+  safetyGroup.add(fenceLabel);
+}
+
+function inFence(x, z) {
+  let inside = false;
+  for (let i = 0, j = fencePoly.length - 1; i < fencePoly.length; j = i++) {
+    const [xi, zi] = fencePoly[i], [xj, zj] = fencePoly[j];
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// AI 攝影機：桿＋雲台＋視錐（實際專案由 NVR/AI box 推播辨識事件，這裡以幾何模擬）
+const cams = [];
+for (const c of plantData.cameras ?? []) {
+  const pos = new THREE.Vector3(...c.pos);
+  const look = new THREE.Vector3(...c.look);
+  const dir = look.clone().sub(pos).normalize();
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, pos.y, 10), std(0x4a5560));
+  pole.position.set(pos.x, pos.y / 2, pos.z);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.28, 0.32), std(0x1f6ea8, { emissive: 0x0d2f47, emissiveIntensity: 0.7 }));
+  head.position.copy(pos);
+  head.lookAt(look);
+  const coneR = Math.tan(THREE.MathUtils.degToRad(c.fov / 2)) * c.range;
+  const coneGeo = new THREE.ConeGeometry(coneR, c.range, 24, 1, true);
+  coneGeo.translate(0, -c.range / 2, 0); // 錐頂移到原點（攝影機處）
+  const coneMat = new THREE.MeshBasicMaterial({ color: 0x46c2e0, transparent: true, opacity: 0.05, side: THREE.DoubleSide, depthWrite: false });
+  const cone = new THREE.Mesh(coneGeo, coneMat);
+  cone.position.copy(pos);
+  cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
+  const el = document.createElement('div');
+  el.className = 'cam-label';
+  el.textContent = `📹 ${c.id}`;
+  el.title = c.name;
+  const label = new CSS2DObject(el);
+  label.position.set(pos.x, pos.y + 0.55, pos.z);
+  g.add(pole, head, cone, label);
+  markShadow(pole);
+  safetyGroup.add(g);
+  cams.push({ def: c, pos, dir, cosHalf: Math.cos(THREE.MathUtils.degToRad(c.fov / 2)), range: c.range, coneMat });
+}
+
+function seenByCamera(p) {
+  for (const c of cams) {
+    const v = p.clone().sub(c.pos);
+    const d = v.length();
+    if (d < c.range && v.normalize().dot(c.dir) > c.cosHalf) return c;
+  }
+  return null;
+}
+
+// 模擬人員：沿巡檢動線走，AI 攝影機視野內做闖入／PPE 判定
+const workers = [];
+for (const w of plantData.workers ?? []) {
+  const g = new THREE.Group();
+  const vest = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.62, 6, 12), std(0xff7a1a, { metalness: 0.1, roughness: 0.8 }));
+  vest.position.y = 0.75;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.155, 16, 12), std(0xe0b48c, { metalness: 0, roughness: 0.9 }));
+  head.position.y = 1.35;
+  g.add(vest, head);
+  if (w.helmet) {
+    const helmet = new THREE.Mesh(
+      new THREE.SphereGeometry(0.175, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2),
+      std(0xffd23c, { metalness: 0.2, roughness: 0.5 })
+    );
+    helmet.position.y = 1.37;
+    g.add(helmet);
+  }
+  markShadow(g);
+  const el = document.createElement('div');
+  el.className = 'worker-label';
+  el.textContent = w.name;
+  const label = new CSS2DObject(el);
+  label.position.set(0, 1.9, 0);
+  g.add(label);
+  g.position.set(w.loop[0][0], 0, w.loop[0][1]);
+  safetyGroup.add(g);
+  workers.push({ def: w, group: g, labelEl: el, wp: 1, mode: 'loop', dwell: 0, path: null, pi: 0 });
+}
+
+const visionChip = document.getElementById('vision-chip');
+const visionStatus = document.getElementById('vision-status');
+const intrudeBtn = document.getElementById('btn-intrude');
+
+intrudeBtn.addEventListener('click', () => {
+  const w = workers.find((x) => x.def.intrude_to);
+  if (!w || w.mode !== 'loop') return;
+  w.mode = 'intrude';
+  w.path = [...w.def.intrude_to];
+  w.pi = 0;
+});
+
+function stepWorker(w, dt) {
+  const speed = w.def.speed;
+  let target;
+  if (w.mode === 'loop') {
+    target = w.def.loop[w.wp];
+  } else if (w.mode === 'intrude') {
+    target = w.path[w.pi];
+  } else if (w.mode === 'dwell') {
+    w.dwell -= dt;
+    if (w.dwell <= 0) { w.mode = 'return'; w.pi = w.path.length - 1; }
+    return;
+  } else { // return（原路走回）
+    target = w.path[w.pi];
+  }
+  const p = w.group.position;
+  const dx = target[0] - p.x, dz = target[1] - p.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist < 0.15) {
+    if (w.mode === 'loop') w.wp = (w.wp + 1) % w.def.loop.length;
+    else if (w.mode === 'intrude') {
+      w.pi++;
+      if (w.pi >= w.path.length) { w.mode = 'dwell'; w.dwell = 5; }
+    } else { // return
+      w.pi--;
+      if (w.pi < 0) { w.mode = 'loop'; w.path = null; }
+    }
+    return;
+  }
+  const step = Math.min(speed * dt, dist);
+  p.x += (dx / dist) * step;
+  p.z += (dz / dist) * step;
+  w.group.rotation.y = Math.atan2(dx, dz);
+}
+
+const _wp = new THREE.Vector3();
+function updateSafety(dt, t) {
+  const events = [];
+  for (const w of workers) {
+    stepWorker(w, dt);
+    _wp.set(w.group.position.x, 0.9, w.group.position.z);
+    const cam = seenByCamera(_wp);
+    let violation = null;
+    if (cam && fencePoly.length && inFence(_wp.x, _wp.z)) {
+      violation = `闖入管制區（${cam.def.id}）`;
+    } else if (cam && !w.def.helmet) {
+      violation = `未戴安全帽（${cam.def.id}）`;
+    }
+    if (violation) {
+      w.labelEl.className = 'worker-label violation';
+      w.labelEl.textContent = `⚠ ${w.def.name}｜${violation}`;
+      events.push(`${w.def.id} ${violation}`);
+    } else {
+      w.labelEl.className = 'worker-label';
+      w.labelEl.textContent = w.def.name;
+    }
+  }
+  const alarm = events.length > 0;
+  visionChip.classList.toggle('alarm', alarm);
+  visionStatus.textContent = alarm ? events[0] : '正常';
+  const fencePulse = alarm ? 0.25 + 0.3 * Math.abs(Math.sin(t * 5)) : 0.09;
+  for (const m of fenceMats) {
+    m.color.setHex(alarm ? 0xff4d4f : 0xffd23c);
+    if (m.transparent && m.opacity !== undefined && !m.isLineBasicMaterial) m.opacity = fencePulse;
+  }
+}
+
+// -------------------------------------------- 施工模擬：規劃資產＋衝突檢測
+const conGroup = new THREE.Group();
+conGroup.visible = false;
+plantGroup.add(conGroup);
+const conflictPanel = document.getElementById('conflict-panel');
+const conflictList = document.getElementById('conflict-list');
+const conBtn = document.getElementById('mode-construction');
+let constructionMode = false;
+const conflictMarkers = [];
+const conLabels = []; // CSS2DRenderer 不吃父層 visible，標籤要自己開關
+
+function ghostMat(color = 0x46c2e0, opacity = 0.35) {
+  return new THREE.MeshStandardMaterial({ color, transparent: true, opacity, metalness: 0.2, roughness: 0.6, depthWrite: false });
+}
+
+// 既有設備 → 2D 足跡障礙模型（圓柱 or 方框），供淨距計算
+function buildObstacles() {
+  const obs = [];
+  for (const unit of plantData.plant.units) {
+    for (const eq of unit.equipment) {
+      const [x, , z] = eq.pos;
+      const d = eq.dims;
+      if (eq.type === 'reactor' || eq.type === 'tank') obs.push({ tag: eq.tag, kind: 'cyl', x, z, r: d.r, y0: 0, y1: d.h + (eq.type === 'reactor' ? d.r : 0) });
+      else if (eq.type === 'hx') obs.push({ tag: eq.tag, kind: 'box', x, z, hx: d.len / 2, hz: d.r, y0: 0, y1: d.r * 2 + 0.3 });
+      else if (eq.type === 'pump') obs.push({ tag: eq.tag, kind: 'box', x, z, hx: d.w / 2, hz: d.d / 2, y0: 0, y1: d.h });
+      else if (eq.type === 'valve') obs.push({ tag: eq.tag, kind: 'box', x, z, hx: d.s / 2, hz: d.s / 2, y0: eq.pos[1] - d.s, y1: eq.pos[1] + d.s });
+      else if (eq.type === 'detector') obs.push({ tag: eq.tag, kind: 'cyl', x, z, r: 0.2, y0: 0, y1: d.h });
+      else if (eq.type === 'building') obs.push({ tag: eq.tag, kind: 'box', x, z, hx: d.w / 2, hz: d.d / 2, y0: 0, y1: d.h });
+    }
+  }
+  return obs;
+}
+
+function obstacleGap(o, x, z) {
+  if (o.kind === 'cyl') return Math.hypot(x - o.x, z - o.z) - o.r;
+  const ax = Math.abs(x - o.x) - o.hx, az = Math.abs(z - o.z) - o.hz;
+  if (ax <= 0 && az <= 0) return Math.max(ax, az); // 在框內 → 負值
+  return Math.hypot(Math.max(ax, 0), Math.max(az, 0));
+}
+
+function detectConflicts() {
+  const con = plantData.construction;
+  if (!con) return [];
+  const obstacles = buildObstacles();
+  const clearance = con.clearance ?? 1.0;
+  const found = {};
+  for (const pipe of con.planned_pipes ?? []) {
+    const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const segLen = a.distanceTo(b);
+      const n = Math.max(2, Math.ceil(segLen / 0.25));
+      for (let k = 0; k <= n; k++) {
+        const p = a.clone().lerp(b, k / n);
+        for (const o of obstacles) {
+          if (p.y < o.y0 - pipe.r || p.y > o.y1 + pipe.r) continue;
+          const gap = obstacleGap(o, p.x, p.z) - pipe.r;
+          if (gap >= clearance) continue;
+          const key = `${pipe.id}|${o.tag}`;
+          if (!found[key] || gap < found[key].gap) {
+            found[key] = { pipe: pipe.id, note: pipe.note, tag: o.tag, gap, pos: p.clone() };
+          }
+        }
+      }
+    }
+  }
+  return Object.values(found).sort((a, b) => a.gap - b.gap);
+}
+
+function buildConstruction() {
+  const con = plantData.construction;
+  if (!con) return;
+  for (const eq of con.planned_equipment ?? []) {
+    const g = builders[eq.type](eq.dims);
+    g.traverse((o) => { if (o.isMesh) o.material = ghostMat(); });
+    g.position.set(...eq.pos);
+    const el = document.createElement('div');
+    el.className = 'eq-label';
+    el.textContent = `${eq.tag}（規劃）`;
+    el.title = eq.note ?? '';
+    const label = new CSS2DObject(el);
+    label.position.set(0, (eq.dims.h ?? 2) + 1.2, 0);
+    label.visible = false;
+    conLabels.push(label);
+    g.add(label);
+    conGroup.add(g);
+  }
+  const conflicts = detectConflicts();
+  const conflictSet = new Set(conflicts.map((c) => c.pipe));
+  for (const pipe of con.planned_pipes ?? []) {
+    const mat = ghostMat(conflictSet.has(pipe.id) ? 0xffaa3c : 0x46c2e0, 0.5);
+    const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const dir = b.clone().sub(a);
+      const len = dir.length();
+      const cyl = new THREE.Mesh(new THREE.CylinderGeometry(pipe.r, pipe.r, len, 12), mat);
+      cyl.position.copy(a).addScaledVector(dir, 0.5);
+      cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+      conGroup.add(cyl);
+    }
+    const el = document.createElement('div');
+    el.className = 'eq-label';
+    el.textContent = `${pipe.id}（規劃）`;
+    el.title = pipe.note ?? '';
+    const label = new CSS2DObject(el);
+    label.position.copy(pts[0]).add(new THREE.Vector3(0, 0.9, 0));
+    label.visible = false;
+    conLabels.push(label);
+    conGroup.add(label);
+  }
+  // 衝突標記＋清單
+  conflictList.innerHTML = conflicts.length
+    ? conflicts.map((c, i) => {
+        const hard = c.gap < 0;
+        return `<div class="conflict-item ${hard ? 'hard' : ''}" data-ci="${i}" style="cursor:pointer">
+          <span class="c-kind">${hard ? '⛔ 硬碰撞' : '⚠ 淨距不足'}</span>｜${c.pipe} × ${c.tag}<br>
+          <span class="c-dist">${c.note ?? ''}｜${hard ? `干涉 ${(-c.gap).toFixed(2)} m` : `淨距 ${c.gap.toFixed(2)} m（需 ≥ ${con.clearance} m）`}</span>
+        </div>`;
+      }).join('')
+    : '<div class="conflict-ok">✔ 規劃路徑無衝突</div>';
+  conflictList.querySelectorAll('[data-ci]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const c = conflicts[+el.dataset.ci];
+      const focus = c.pos.clone();
+      const dir = camera.position.clone().sub(controls.target).normalize();
+      flyCam(focus.clone().addScaledVector(dir, 9).setY(Math.max(6, focus.y + 4)), focus);
+    });
+  });
+  for (const c of conflicts) {
+    const hard = c.gap < 0;
+    const marker = new THREE.Mesh(
+      new THREE.SphereGeometry(0.35, 16, 12),
+      new THREE.MeshBasicMaterial({ color: hard ? 0xff4d4f : 0xffaa3c, transparent: true, opacity: 0.9, depthWrite: false })
+    );
+    marker.position.copy(c.pos);
+    conGroup.add(marker);
+    conflictMarkers.push(marker);
+  }
+}
+buildConstruction();
+
+conBtn.addEventListener('click', () => {
+  constructionMode = !constructionMode;
+  conGroup.visible = constructionMode;
+  for (const l of conLabels) l.visible = constructionMode;
+  conBtn.classList.toggle('active', constructionMode);
+  conflictPanel.classList.toggle('hidden', !constructionMode);
+  if (constructionMode) {
+    // 飛到二期擴建區俯瞰
+    flyCam(new THREE.Vector3(16, 14, -16), new THREE.Vector3(8, 1, -6));
+  }
+});
+
+// ------------------------------------------------------------- P&ID 圖面
+const pidModal = document.getElementById('pid-modal');
+const pidTitle = document.getElementById('pid-title');
+const pidSvg = document.getElementById('pid-svg');
+document.getElementById('pid-close').addEventListener('click', () => pidModal.classList.add('hidden'));
+pidModal.addEventListener('click', (e) => { if (e.target === pidModal) pidModal.classList.add('hidden'); });
+document.getElementById('info-pid-btn').addEventListener('click', () => {
+  if (selectedTag) openPid(eqMap[selectedTag].def, eqMap[selectedTag].unitName);
+});
+
+function pidSymbol(eq, cx, cy) {
+  const S = '#9fd8ea';
+  switch (eq.type) {
+    case 'reactor': return `
+      <rect x="${cx - 45}" y="${cy - 65}" width="90" height="130" rx="30" fill="none" stroke="${S}" stroke-width="2"/>
+      <circle cx="${cx}" cy="${cy - 95}" r="14" fill="none" stroke="${S}" stroke-width="2"/>
+      <text x="${cx}" y="${cy - 90}" text-anchor="middle" font-size="12" fill="${S}">M</text>
+      <line x1="${cx}" y1="${cy - 81}" x2="${cx}" y2="${cy - 20}" stroke="${S}" stroke-width="2"/>
+      <line x1="${cx - 22}" y1="${cy - 10}" x2="${cx + 22}" y2="${cy - 10}" stroke="${S}" stroke-width="2"/>`;
+    case 'tank': return `
+      <path d="M ${cx - 50} ${cy - 55} A 50 22 0 0 1 ${cx + 50} ${cy - 55} L ${cx + 50} ${cy + 55} L ${cx - 50} ${cy + 55} Z" fill="none" stroke="${S}" stroke-width="2"/>
+      <line x1="${cx - 50}" y1="${cy + 20}" x2="${cx + 50}" y2="${cy + 20}" stroke="${S}" stroke-width="1" stroke-dasharray="5 4"/>`;
+    case 'pump': return `
+      <circle cx="${cx}" cy="${cy}" r="42" fill="none" stroke="${S}" stroke-width="2"/>
+      <path d="M ${cx - 20} ${cy - 20} L ${cx + 34} ${cy} L ${cx - 20} ${cy + 20} Z" fill="none" stroke="${S}" stroke-width="2"/>`;
+    case 'valve': return `
+      <path d="M ${cx - 40} ${cy - 22} L ${cx + 40} ${cy + 22} L ${cx + 40} ${cy - 22} L ${cx - 40} ${cy + 22} Z" fill="none" stroke="${S}" stroke-width="2"/>
+      <line x1="${cx}" y1="${cy}" x2="${cx}" y2="${cy - 42}" stroke="${S}" stroke-width="2"/>
+      <rect x="${cx - 16}" y="${cy - 56}" width="32" height="14" fill="none" stroke="${S}" stroke-width="2"/>`;
+    case 'hx': return `
+      <circle cx="${cx}" cy="${cy}" r="45" fill="none" stroke="${S}" stroke-width="2"/>
+      <path d="M ${cx - 45} ${cy} L ${cx - 20} ${cy} L ${cx - 8} ${cy - 18} L ${cx + 8} ${cy + 18} L ${cx + 20} ${cy} L ${cx + 45} ${cy}" fill="none" stroke="${S}" stroke-width="2"/>`;
+    case 'detector': return `
+      <circle cx="${cx}" cy="${cy}" r="34" fill="none" stroke="${S}" stroke-width="2"/>
+      <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="15" fill="${S}">GD</text>
+      <text x="${cx}" y="${cy + 16}" text-anchor="middle" font-size="11" fill="${S}">偵測</text>`;
+    default: return `<rect x="${cx - 55}" y="${cy - 40}" width="110" height="80" fill="none" stroke="${S}" stroke-width="2"/>`;
+  }
+}
+
+function openPid(eq, unitName) {
+  const W = 720, H = 430, cx = 300, cy = 215;
+  const insts = eq.instruments ?? [];
+  const bubbles = insts.map((tag, i) => {
+    const ang = -Math.PI / 3 + i * (Math.PI / 3.2);
+    const bx = cx + Math.cos(ang) * 165, by = cy + Math.sin(ang) * 130;
+    const [letters, num] = tag.split('-');
+    return `
+      <line x1="${cx}" y1="${cy}" x2="${bx}" y2="${by}" stroke="#5a7788" stroke-width="1" stroke-dasharray="4 4"/>
+      <circle cx="${bx}" cy="${by}" r="22" fill="#0c1319" stroke="#7ee2f5" stroke-width="1.6"/>
+      <line x1="${bx - 22}" y1="${by}" x2="${bx + 22}" y2="${by}" stroke="#7ee2f5" stroke-width="1"/>
+      <text x="${bx}" y="${by - 5}" text-anchor="middle" font-size="12" fill="#7ee2f5" font-weight="700">${letters}</text>
+      <text x="${bx}" y="${by + 14}" text-anchor="middle" font-size="10" fill="#7ee2f5">${num}</text>`;
+  }).join('');
+  pidTitle.textContent = `${eq.pid_ref}｜${eq.tag} ${eq.name}`;
+  pidSvg.innerHTML = `
+  <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <rect width="${W}" height="${H}" fill="#0a1017"/>
+    <rect x="8" y="8" width="${W - 16}" height="${H - 16}" fill="none" stroke="#24333f" stroke-width="1.5"/>
+    <line x1="70" y1="${cy}" x2="${cx - 60}" y2="${cy}" stroke="#9fd8ea" stroke-width="2.5"/>
+    <path d="M ${cx - 72} ${cy - 6} L ${cx - 60} ${cy} L ${cx - 72} ${cy + 6} Z" fill="#9fd8ea"/>
+    <text x="72" y="${cy - 10}" font-size="11" fill="#8ba0b3">進料 FROM ${eq.type === 'tank' ? '製程' : '上游'}</text>
+    <line x1="${cx + 60}" y1="${cy}" x2="${W - 80}" y2="${cy}" stroke="#9fd8ea" stroke-width="2.5"/>
+    <path d="M ${W - 92} ${cy - 6} L ${W - 80} ${cy} L ${W - 92} ${cy + 6} Z" fill="#9fd8ea"/>
+    <text x="${W - 200}" y="${cy - 10}" font-size="11" fill="#8ba0b3">出料 TO 下游</text>
+    ${pidSymbol(eq, cx, cy)}
+    <text x="${cx}" y="${cy + 100}" text-anchor="middle" font-size="15" font-weight="700" fill="#dbe5ee">${eq.tag}</text>
+    <text x="${cx}" y="${cy + 118}" text-anchor="middle" font-size="11" fill="#8ba0b3">${eq.name}</text>
+    ${bubbles}
+    <g font-size="10" fill="#8ba0b3">
+      <rect x="${W - 250}" y="${H - 96}" width="234" height="80" fill="none" stroke="#24333f"/>
+      <line x1="${W - 250}" y1="${H - 72}" x2="${W - 16}" y2="${H - 72}" stroke="#24333f"/>
+      <line x1="${W - 250}" y1="${H - 48}" x2="${W - 16}" y2="${H - 48}" stroke="#24333f"/>
+      <text x="${W - 242}" y="${H - 80}">EJ_3D 數位孿生平台｜${plantData.plant.name}</text>
+      <text x="${W - 242}" y="${H - 56}">圖號 ${eq.pid_ref}｜區域 ${unitName}</text>
+      <text x="${W - 242}" y="${H - 32}">REV A｜示意圖（由資產資料庫自動生成）</text>
+    </g>
+  </svg>`;
+  pidModal.classList.remove('hidden');
+}
+
 // ---------------------------------------------------------------- WebSocket
 const wsStatus = document.getElementById('ws-status');
 const gdChip = document.getElementById('gd-chip');
@@ -654,6 +1153,7 @@ function connectWS() {
     const msg = JSON.parse(ev.data);
     if (msg.type !== 'tick') return;
     setScenario(msg.scenario);
+    renderMatch(msg.match);
 
     // 儀錶值 → 資訊卡 + GD chip
     for (const [tag, d] of Object.entries(msg.tags)) {
@@ -729,9 +1229,22 @@ function animate() {
 
   // 情境特效
   if (fx.gas) fx.gas.update(dt, 42);
-  if (fx.fire) fx.fire.update(dt, 80);
-  if (fx.smoke) fx.smoke.update(dt, 26);
+  if (fx.fire) fx.fire.update(dt, fx.shock ? 130 : 80);
+  if (fx.smoke) fx.smoke.update(dt, fx.shock ? 40 : 26);
+  if (fx.shock) {
+    fx.shock.t = (fx.shock.t + dt / 1.8) % 1;
+    const r = 0.5 + fx.shock.t * fx.shock.rMax;
+    fx.shock.ring.scale.set(r, r, 1);
+    fx.shock.ring.material.opacity = 0.85 * (1 - fx.shock.t);
+  }
   if (fx.dangerMat) fx.dangerMat.opacity = 0.14 + 0.1 * Math.abs(Math.sin(t * 2.2));
+
+  // 工安 AI：人員移動 + 攝影機辨識判定
+  updateSafety(dt, t);
+
+  // 施工衝突標記脈動
+  for (const m of conflictMarkers) m.scale.setScalar(0.8 + 0.35 * Math.abs(Math.sin(t * 3)));
+
   for (const a of fx.arrows) {
     a.s = (a.s + (dt * 3) / a.total) % 1;
     const { p, dir } = a.posAt(a.s * a.total);

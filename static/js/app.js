@@ -86,6 +86,45 @@ async function loadSkyTexture(cfg) {
   return tex;
 }
 
+// 真實地坪：實景模式時把格線地面換成掃描級混凝土材質（ARM 一張餵 ao/rough/metal 三通道）
+let groundTex = null;
+function loadGroundTextures() {
+  if (groundTex) return groundTex;
+  const tl = new THREE.TextureLoader();
+  const load = (f, srgb) => {
+    const t = tl.load(`/scans/ground/${f}`);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(10, 6.5);
+    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  };
+  groundTex = {
+    map: load('concrete_floor_02_diff_2k.jpg', true),
+    normalMap: load('concrete_floor_02_nor_gl_2k.jpg'),
+    arm: load('concrete_floor_02_arm_2k.jpg'),
+  };
+  return groundTex;
+}
+
+function setGroundReal(on) {
+  const m = ground.material;
+  if (on) {
+    const t = loadGroundTextures();
+    m.map = t.map;
+    m.normalMap = t.normalMap;
+    m.roughnessMap = t.arm; // ARM 的 G 通道
+    m.metalnessMap = t.arm; // ARM 的 B 通道（aoMap 需要 uv1，Plane 沒有，略過）
+    m.color.setHex(0xffffff);
+    m.metalness = 1; // 讓 metalnessMap（B 通道≈0）主導
+  } else {
+    m.map = m.normalMap = m.roughnessMap = m.metalnessMap = null;
+    m.color.setHex(0x1c232b);
+    m.metalness = 0;
+  }
+  m.needsUpdate = true;
+  grid.visible = !on; // 真實地坪時收掉工程格線
+}
+
 async function setSky(on) {
   const cfg = plantData.environment;
   if (on && !skyTex) {
@@ -95,6 +134,7 @@ async function setSky(on) {
     pmrem.dispose();
   }
   skyOn = on;
+  setGroundReal(on);
   if (on) {
     scene.background = skyTex;
     scene.backgroundIntensity = cfg.background_intensity ?? 0.9;

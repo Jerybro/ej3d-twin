@@ -40,6 +40,13 @@ FILES = {
     # 實景背景：Poly Haven「Abandoned Tank Farm 03」全景（CC0）→ 天空盒 + 環境反射
     "env/abandoned_tank_farm_03.jpg":
         "https://dl.polyhaven.org/file/ph-assets/HDRIs/extra/Tonemapped%20JPG/abandoned_tank_farm_03.jpg",
+    # 真實地坪：Poly Haven「Concrete Floor 02」戶外混凝土（CC0）→ 實景模式地面
+    "ground/concrete_floor_02_diff_2k.jpg":
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/concrete_floor_02/concrete_floor_02_diff_2k.jpg",
+    "ground/concrete_floor_02_nor_gl_2k.jpg":
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/concrete_floor_02/concrete_floor_02_nor_gl_2k.jpg",
+    "ground/concrete_floor_02_arm_2k.jpg":
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/concrete_floor_02/concrete_floor_02_arm_2k.jpg",
 }
 
 # 真實施工場景道具（Poly Haven 照片掃描級 PBR，CC0）→ scans/ph/{slug}/

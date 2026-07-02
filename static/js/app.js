@@ -1919,6 +1919,20 @@ async function initCalc() {
   const r = calcInfo.results;
   document.getElementById('calc-metrics').textContent =
     `977 天品質日報驗證｜測試集 R² ${CALC_TARGETS.map((t) => `${t.label.split(' ')[0]} ${r[t.key].R2_hybrid}`).join('・')}`;
+
+  // 催化劑健康（三年 DCS 實績模型；模型檔缺席時安靜隱藏）
+  try {
+    const cat = await fetch('/api/surrogate/catalyst').then((x) => { if (!x.ok) throw 0; return x.json(); });
+    document.getElementById('calc-catalyst').innerHTML = `
+      <div class="info-section">催化劑活性追蹤（R611）</div>
+      <table class="info-table">
+        <tr><td>運轉時數</td><td>${Math.round(cat.hours_on_stream).toLocaleString()} hr</td></tr>
+        <tr><td>維持轉化率所需溫度</td><td><span class="calc-pred">${cat.required_Tin_C} °C</span>（實際 ${cat.actual_last_Tin_C} °C）</td></tr>
+        <tr><td>衰退速率</td><td>${cat.deact_rate_C_per_1000hr} °C / 1000 hr</td></tr>
+        <tr><td>預估距 EOR（${cat.eor_temp_C}°C）</td><td><span class="calc-pred">${cat.est_days_to_EOR != null ? '約 ' + cat.est_days_to_EOR + ' 天' : '—'}</span></td></tr>
+      </table>
+      <div class="panel-hint">三年 DCS 實績｜溫度預測 MAE ${cat.model.MAE_C}°C</div>`;
+  } catch { /* 無催化劑模型 → 區塊留空 */ }
   for (const s of CALC_SLIDERS) {
     document.getElementById(`cs-${s.key}`).addEventListener('input', (e) => {
       document.getElementById(`cv-${s.key}`).textContent = `${(+e.target.value).toFixed(2)} ${s.unit}`;

@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 MODEL_FILE = Path(__file__).resolve().parent.parent / "models" / "tatoray_surrogate.joblib"
+CATALYST_FILE = Path(__file__).resolve().parent.parent / "models" / "tatoray_catalyst.joblib"
 
 MW = {"BZ": 78.11, "TOL": 92.14, "EB": 106.17, "X": 106.17, "C9": 120.19, "C10": 134.22}
 
@@ -68,6 +69,53 @@ def _physics_row(feed: dict) -> dict:
         "TOL_C9_ratio": feed["feed_TOL"] / max(feed["feed_C9"], 1),
         "heavy": feed["feed_C10"] + feed["feed_C11p"],
         "nonARO": feed["feed_nonARO"],
+    }
+
+
+# ------------------------------------------- 催化劑活性追蹤（v6，三年 DCS）
+_cat = None
+
+
+def _load_cat():
+    global _cat
+    if _cat is None:
+        import joblib
+
+        _cat = joblib.load(CATALYST_FILE)
+    return _cat
+
+
+def catalyst_available() -> bool:
+    try:
+        _load_cat()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def catalyst_health(hours_override: float | None = None, eor_temp: float = 370.0) -> dict:
+    """催化劑健康：預測維持目標轉化率所需入口溫度＋剩餘壽命外推。
+
+    衰退速率取自三年實績線性層；EOR 預設 370°C（測試期實際頂到的操作上限）。
+    """
+    b = _load_cat()
+    d = dict(b["defaults"])
+    if hours_override is not None:
+        d["hours"] = hours_override
+    x_l1 = [[d[c] for c in b["l1_cols"]]]
+    x_all = [[d[c] for c in b["features"]]]
+    t_req = float(b["ridge"].predict(x_l1)[0]) + float(b["gbdt"].predict(x_all)[0])
+    rate = b["results"]["deact_C_per_1000hr"]  # °C / 1000hr
+    headroom = max(0.0, eor_temp - t_req)
+    days_left = (headroom / rate * 1000) / 24 if rate > 0 else None
+    return {
+        "hours_on_stream": d["hours"],
+        "required_Tin_C": round(t_req, 1),
+        "actual_last_Tin_C": b["actual_last_Tin"],
+        "deact_rate_C_per_1000hr": rate,
+        "eor_temp_C": eor_temp,
+        "est_days_to_EOR": round(days_left) if days_left is not None else None,
+        "model": {"MAE_C": b["results"]["MAE_C"], "test_range": b.get("test_range")},
     }
 
 

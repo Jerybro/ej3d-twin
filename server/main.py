@@ -282,6 +282,16 @@ def surrogate_predict(body: dict) -> dict:
     return surrogate.predict(body.get("feed"), body.get("lag"))
 
 
+@app.get("/api/surrogate/catalyst")
+def surrogate_catalyst(hours: float | None = None) -> dict:
+    """催化劑健康：所需溫度／衰退速率／剩餘壽命外推（三年 DCS 實績模型）。"""
+    from . import surrogate
+
+    if not surrogate.catalyst_available():
+        raise HTTPException(503, "催化劑模型未啟用")
+    return surrogate.catalyst_health(hours)
+
+
 @app.get("/api/export/usd")
 def export_usd() -> FileResponse:
     from . import usd_export

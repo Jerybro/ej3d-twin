@@ -1961,6 +1961,35 @@ async function runCalc() {
       <td><span class="calc-pred">${pred.toFixed(2)} wt%</span>
       <span class="${cls}">（${d >= 0 ? '+' : ''}${d.toFixed(2)} vs 實測 ${act.toFixed(2)}）</span></td></tr>`;
   }).join('');
+  runReactor(res.feed_used);
+}
+
+// 反應器平衡計算（解析化 Aspen）：守恆×2 + 平衡商×2 牛頓法
+async function runReactor(feedUsed) {
+  const box = document.getElementById('calc-reactor');
+  // S601 進料 wt% → 反應器模型物種鍵
+  const feed = {
+    BZ: feedUsed.feed_BZ, TOL: feedUsed.feed_TOL, EB: feedUsed.feed_EB,
+    XYL: (feedUsed.feed_pX ?? 0) + (feedUsed.feed_mX ?? 0) + (feedUsed.feed_oX ?? 0),
+    PB: feedUsed.feed_NPB, MEB: feedUsed.feed_MEB, TMB: feedUsed.feed_TMB,
+    Indane: feedUsed.feed_Indane, C10p: (feedUsed.feed_C10 ?? 0) + (feedUsed.feed_C11p ?? 0),
+    nonARO: feedUsed.feed_nonARO,
+  };
+  const r = await fetch('/api/reactor/solve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(feed),
+  }).then((x) => { if (!x.ok) throw 0; return x.json(); }).catch(() => null);
+  if (!r) { box.innerHTML = ''; return; }
+  const o = r.outlet_wt_pct;
+  box.innerHTML = `
+    <div class="info-section">R611 反應器平衡計算（解析式，無 Aspen）</div>
+    <table class="info-table">
+      <tr><td>甲苯轉化率</td><td><span class="calc-pred">${r.toluene_conversion_pct.toFixed(1)} %</span></td></tr>
+      <tr><td>出口 BZ／TOL</td><td>${o.BZ.toFixed(1)}／${o.TOL.toFixed(1)} wt%</td></tr>
+      <tr><td>出口 XYL／TMB</td><td>${o.XYL.toFixed(1)}／${o.TMB.toFixed(1)} wt%</td></tr>
+    </table>
+    <div class="panel-hint">守恆×2＋平衡商×2（K1 ${r.equations.K1}・K2 ${r.equations.K2}）牛頓法｜驗證：轉化率 MAE 0.54%</div>`;
 }
 
 calcBtn.addEventListener('click', () => {

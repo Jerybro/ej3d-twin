@@ -1,0 +1,37 @@
+{
+  "description": "Tatoray R611 約束平衡模型參數（1004 天實測識別，2020-08~2023-01 訓練段）",
+  "K1_disproportionation": 0.2255,
+  "K2_transalkylation": 2.6659,
+  "ring_gain_per_molTOLfeed": 0.0518,
+  "methyl_gain_per_molTOLfeed": 0.0394,
+  "side_delta_per_molTOLfeed": {
+    "EB": 0.01002,
+    "MEB": -0.04997,
+    "PB": -0.01069,
+    "Indane": -0.00529,
+    "C10p": -0.00972,
+    "nonARO": 0.00046
+  },
+  "MW": {
+    "BZ": 78.11,
+    "TOL": 92.14,
+    "EB": 106.17,
+    "XYL": 106.17,
+    "PB": 120.19,
+    "MEB": 120.19,
+    "TMB": 120.19,
+    "Indane": 118.18,
+    "C10p": 134.22,
+    "nonARO": 100.0
+  },
+  "validation": {
+    "test_range": "2023-01-17~2023-09-07",
+    "MAE_wt_pct": {
+      "BZ": 0.871,
+      "TOL": 0.413,
+      "XYL": 0.62,
+      "TMB": 0.181
+    },
+    "toluene_conversion_MAE_pct": 0.54
+  }
+}

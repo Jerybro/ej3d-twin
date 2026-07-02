@@ -292,6 +292,31 @@ def surrogate_catalyst(hours: float | None = None) -> dict:
     return surrogate.catalyst_health(hours)
 
 
+# ------------------------------------- 分析層：約束平衡反應器（解析化 Aspen）
+
+
+@app.get("/api/reactor/info")
+def reactor_info() -> dict:
+    from . import reactor_model
+
+    if not reactor_model.available():
+        raise HTTPException(503, "反應器模型未啟用（缺 models/reactor_params.json）")
+    return reactor_model.info()
+
+
+@app.post("/api/reactor/solve")
+def reactor_solve(feed: dict) -> dict:
+    """入料組成 A（wt%）→ 出口組成 B：守恆×2 + 平衡商×2 牛頓法求解。"""
+    from . import reactor_model
+
+    if not reactor_model.available():
+        raise HTTPException(503, "反應器模型未啟用")
+    try:
+        return reactor_model.solve(feed)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+
+
 @app.get("/api/export/usd")
 def export_usd() -> FileResponse:
     from . import usd_export

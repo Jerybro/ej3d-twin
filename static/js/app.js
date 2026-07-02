@@ -49,11 +49,88 @@ controls.maxDistance = 70;
 
 scene.add(new THREE.HemisphereLight(0xbdd2e2, 0x1a222b, 1.25));
 // 環境貼圖：金屬 PBR 材質（如掃描資產）沒有環境反射會渲染成全黑
+let roomEnvTex;
 {
   const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  roomEnvTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environment = roomEnvTex;
   scene.environmentIntensity = 0.45;
   pmrem.dispose();
+}
+
+// ------------------------------------------------- 實景背景（equirect 全景）
+// 真實廠區照片全景 → 天空盒 + PBR 環境反射。靜態貼圖一張，渲染負擔幾乎為零；
+// 8K 原圖先縮 4K 再上 GPU，顧內顯筆電的記憶體
+const DARK_BG = scene.background;
+const DARK_FOG = scene.fog;
+let skyOn = false;
+let skyTex = null;
+let skyEnvTex = null;
+
+async function loadSkyTexture(cfg) {
+  const img = await new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error(`載入失敗: ${cfg.file}`));
+    im.src = `/scans/${cfg.file}`;
+  });
+  const W = Math.min(img.width, 4096);
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = W / 2;
+  cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+async function setSky(on) {
+  const cfg = plantData.environment;
+  if (on && !skyTex) {
+    skyTex = await loadSkyTexture(cfg);
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    skyEnvTex = pmrem.fromEquirectangular(skyTex).texture;
+    pmrem.dispose();
+  }
+  skyOn = on;
+  if (on) {
+    scene.background = skyTex;
+    scene.backgroundIntensity = cfg.background_intensity ?? 0.9;
+    scene.backgroundRotation = new THREE.Euler(0, cfg.yaw ?? 0, 0);
+    scene.environment = skyEnvTex;
+    scene.environmentRotation = new THREE.Euler(0, cfg.yaw ?? 0, 0);
+    scene.fog = null; // 霧的深色會把地坪邊緣糊到照片上，實景模式關掉
+  } else {
+    scene.background = DARK_BG;
+    scene.environment = roomEnvTex;
+    scene.fog = DARK_FOG;
+  }
+  const btn = document.getElementById('sky-toggle');
+  if (btn) {
+    btn.classList.toggle('active', on);
+    btn.textContent = on ? '深色模式' : '實景背景';
+  }
+}
+
+const skyBtn = document.getElementById('sky-toggle');
+if (!plantData.environment) {
+  skyBtn.style.display = 'none';
+} else {
+  skyBtn.title = plantData.environment.label ?? '實景背景';
+  skyBtn.addEventListener('click', async () => {
+    if (skyBtn.disabled) return;
+    skyBtn.disabled = true;
+    try {
+      await setSky(!skyOn);
+    } catch (err) {
+      console.error('實景背景載入失敗:', err);
+      skyBtn.textContent = '實景載入失敗';
+    }
+    skyBtn.disabled = false;
+  });
+  // 預設開實景；示範資產還沒 fetch 時安靜退回深色模式
+  setSky(true).catch(() => { skyBtn.style.display = 'none'; });
 }
 const sun = new THREE.DirectionalLight(0xfff4e0, 1.6);
 sun.position.set(18, 26, 10);

@@ -158,6 +158,12 @@
       "label": "掃描資產示範｜Poly Haven CC0"
     }
   ],
+  "environment": {
+    "file": "env/abandoned_tank_farm_03.jpg",
+    "label": "實景背景｜Poly Haven Abandoned Tank Farm 03（CC0）",
+    "yaw": 2.1,
+    "background_intensity": 0.85
+  },
   "splat_scene": {
     "file": "nike.splat",
     "note": "公開 3DGS 重建樣本（antimatter15/splat demo 資料）。筆電內顯用小檔驗證；桌機（RTX）可改 train.splat（工業感場景，1.4M splats）",

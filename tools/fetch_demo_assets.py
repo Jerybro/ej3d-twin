@@ -37,6 +37,9 @@ FILES = {
         f"{PH_JPG}/modular_industrial_pipes_01_group02_arm_2k.jpg",
     "nike.splat": f"{HF}/nike.splat",
     "train.splat": f"{HF}/train.splat",
+    # 實景背景：Poly Haven「Abandoned Tank Farm 03」全景（CC0）→ 天空盒 + 環境反射
+    "env/abandoned_tank_farm_03.jpg":
+        "https://dl.polyhaven.org/file/ph-assets/HDRIs/extra/Tonemapped%20JPG/abandoned_tank_farm_03.jpg",
 }
 
 if __name__ == "__main__":

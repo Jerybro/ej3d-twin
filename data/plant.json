@@ -1,0 +1,213 @@
+{
+  "plant": {
+    "id": "EJ-DEMO-01",
+    "name": "特化品示範廠（領航示範場景）",
+    "units": [
+      {
+        "id": "U-100",
+        "name": "反應區",
+        "equipment": [
+          {
+            "tag": "R-101",
+            "name": "批次反應器",
+            "type": "reactor",
+            "pos": [-8, 0, -4],
+            "dims": { "r": 1.5, "h": 4 },
+            "pid_ref": "EJ-PID-100-01",
+            "design": {
+              "設計壓力": "6.0 barg",
+              "設計溫度": "150 °C",
+              "材質": "SUS316L",
+              "攪拌功率": "15 kW"
+            },
+            "instruments": ["TI-101", "PI-101"]
+          },
+          {
+            "tag": "V-101",
+            "name": "R-101 進料閥",
+            "type": "valve",
+            "pos": [-5.5, 0.8, -1],
+            "dims": { "s": 0.5 },
+            "pid_ref": "EJ-PID-100-02",
+            "design": {
+              "口徑": "3\"",
+              "型式": "氣動球閥",
+              "Fail 位置": "FC（Fail Close）"
+            },
+            "instruments": ["VS-101"]
+          },
+          {
+            "tag": "P-301",
+            "name": "進料泵",
+            "type": "pump",
+            "pos": [-4, 0, 2],
+            "dims": { "w": 1.0, "h": 0.8, "d": 0.7 },
+            "pid_ref": "EJ-PID-100-03",
+            "design": {
+              "型式": "磁力驅動離心泵",
+              "揚程": "35 m",
+              "額定流量": "15 m³/h"
+            },
+            "instruments": ["FI-301"]
+          },
+          {
+            "tag": "HX-401",
+            "name": "冷卻熱交換器",
+            "type": "hx",
+            "pos": [-10.5, 0, 2],
+            "dims": { "r": 0.5, "len": 3 },
+            "pid_ref": "EJ-PID-100-04",
+            "design": {
+              "型式": "殼管式",
+              "傳熱面積": "24 m²",
+              "設計壓力": "10 barg"
+            },
+            "instruments": ["TI-401"]
+          }
+        ]
+      },
+      {
+        "id": "U-200",
+        "name": "儲槽區",
+        "equipment": [
+          {
+            "tag": "T-201",
+            "name": "硫酸儲槽",
+            "type": "tank",
+            "pos": [6, 0, -5],
+            "dims": { "r": 2, "h": 5 },
+            "pid_ref": "EJ-PID-200-01",
+            "design": {
+              "容量": "60 m³",
+              "內容物": "電子級硫酸 H₂SO₄",
+              "材質": "SUS316L + PTFE 內襯"
+            },
+            "instruments": ["LI-201"]
+          },
+          {
+            "tag": "T-202",
+            "name": "溶劑儲槽",
+            "type": "tank",
+            "pos": [11, 0, -5],
+            "dims": { "r": 2, "h": 5 },
+            "pid_ref": "EJ-PID-200-02",
+            "design": {
+              "容量": "60 m³",
+              "內容物": "電子級 IPA",
+              "材質": "SUS304"
+            },
+            "instruments": ["LI-202"]
+          },
+          {
+            "tag": "V-102",
+            "name": "T-201 出口閥",
+            "type": "valve",
+            "pos": [6, 0.8, -1.2],
+            "dims": { "s": 0.5 },
+            "pid_ref": "EJ-PID-200-03",
+            "design": {
+              "口徑": "4\"",
+              "型式": "氣動蝶閥",
+              "Fail 位置": "FC（Fail Close）"
+            },
+            "instruments": ["VS-102"]
+          }
+        ]
+      },
+      {
+        "id": "U-900",
+        "name": "公用與安全設施",
+        "equipment": [
+          {
+            "tag": "GD-001",
+            "name": "廠區酸霧偵測器",
+            "type": "detector",
+            "pos": [3.5, 0, 0.5],
+            "dims": { "h": 2.4 },
+            "pid_ref": "EJ-PID-900-01",
+            "design": {
+              "型式": "電化學式氣體偵測器",
+              "量測範圍": "0–100 ppm",
+              "警報設定": "25 ppm"
+            },
+            "instruments": ["GD-001"]
+          },
+          {
+            "tag": "CR-001",
+            "name": "中央控制室",
+            "type": "building",
+            "pos": [4, 0, 12],
+            "dims": { "w": 6, "h": 3, "d": 4 },
+            "pid_ref": "EJ-LAYOUT-900",
+            "design": {
+              "機能": "DCS 操作站／戰情室",
+              "防爆等級": "非防爆區（正壓設計）"
+            },
+            "instruments": []
+          }
+        ]
+      }
+    ]
+  },
+  "pipes": [
+    { "r": 0.1, "pts": [[-4, 0.9, 1.6], [-5.5, 0.9, -1], [-7.2, 0.9, -3.2]] },
+    { "r": 0.1, "pts": [[-10.5, 0.9, 1.2], [-9.6, 0.9, -1.5], [-8.6, 1.4, -3.4]] },
+    { "r": 0.12, "pts": [[6, 0.9, -3], [6, 0.9, -1.2], [3, 0.9, 0.6], [-1.5, 0.9, 1.6], [-3.4, 0.9, 1.8]] },
+    { "r": 0.1, "pts": [[11, 0.9, -3], [11, 0.9, 0.5], [7.5, 0.9, 1.5], [3, 0.9, 1.8]] }
+  ],
+  "instruments": {
+    "TI-101": { "name": "R-101 反應溫度", "unit": "°C", "base": 82, "alarm_hi": 120, "equipment": "R-101" },
+    "PI-101": { "name": "R-101 壓力", "unit": "barg", "base": 3.2, "alarm_hi": 5.0, "equipment": "R-101" },
+    "VS-101": { "name": "V-101 閥位開度", "unit": "%", "base": 35, "alarm_hi": 90, "equipment": "V-101" },
+    "FI-301": { "name": "P-301 進料流量", "unit": "m³/h", "base": 12.5, "alarm_hi": 20, "equipment": "P-301" },
+    "TI-401": { "name": "HX-401 出口溫度", "unit": "°C", "base": 45, "alarm_hi": 70, "equipment": "HX-401" },
+    "LI-201": { "name": "T-201 液位", "unit": "%", "base": 64, "alarm_hi": 90, "alarm_lo": 20, "equipment": "T-201" },
+    "LI-202": { "name": "T-202 液位", "unit": "%", "base": 41, "alarm_hi": 90, "equipment": "T-202" },
+    "VS-102": { "name": "V-102 閥位開度", "unit": "%", "base": 100, "equipment": "V-102" },
+    "GD-001": { "name": "廠區酸霧偵測", "unit": "ppm", "base": 1.8, "alarm_hi": 25, "equipment": "GD-001" }
+  },
+  "scenarios": [
+    {
+      "id": "normal",
+      "name": "正常運轉",
+      "kind": "normal",
+      "desc": "全廠正常運轉，所有製程值於設計範圍內。"
+    },
+    {
+      "id": "sc-a",
+      "name": "情境A｜T-201 出口法蘭酸霧洩漏",
+      "kind": "gas_leak",
+      "desc": "東北風 3 m/s，硫酸霧自 V-102 法蘭外洩，GD-001 濃度爬升。",
+      "leak_point": [6, 1.2, -1.2],
+      "wind": [-0.7, 0, 0.7],
+      "wind_speed": 3.0,
+      "gas_color": "#e8e0c8",
+      "danger_zone": { "center": [2.5, 0, 2.3], "rx": 9, "rz": 4.5 },
+      "evac_path": [[8.5, 0, -2], [12, 0, 1], [11, 0, 7], [8, 0, 10], [0, 0, 13.5], [-2, 0, 14]],
+      "muster": [-2, 0, 14],
+      "effects": {
+        "GD-001": { "target": 85, "rate": 0.08 },
+        "LI-201": { "target": 58, "rate": 0.01 }
+      },
+      "alarm_equipment": ["V-102", "T-201", "GD-001"],
+      "message": "GD-001 酸霧濃度超標｜比對最接近預載情境：V-102 法蘭洩漏（東北風 3 m/s）｜請沿綠色路徑往西北側集合點疏散"
+    },
+    {
+      "id": "sc-b",
+      "name": "情境B｜V-101 閥門誤操作・起火",
+      "kind": "fire",
+      "desc": "V-101 誤開至全開，溶劑蒸氣接觸熱源起火，R-101 溫度壓力急升。",
+      "leak_point": [-5.5, 0.8, -1],
+      "danger_zone": { "center": [-5.5, 0, -1], "rx": 6, "rz": 6 },
+      "evac_path": [[-11, 0, 1], [-11, 0, 7], [-7, 0, 11], [-2, 0, 14]],
+      "muster": [-2, 0, 14],
+      "effects": {
+        "VS-101": { "target": 98, "rate": 0.2 },
+        "TI-101": { "target": 132, "rate": 0.06 },
+        "PI-101": { "target": 5.6, "rate": 0.05 }
+      },
+      "alarm_equipment": ["V-101", "R-101"],
+      "message": "VS-101 閥位異常 + TI-101 急升｜比對最接近預載情境：閥門誤操作・蒸氣接觸熱源起火｜請沿綠色路徑疏散並評估啟動 ESD"
+    }
+  ]
+}

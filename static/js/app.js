@@ -892,6 +892,7 @@ function selectEquipment(tag, flyTo = false) {
 const infoCard = document.getElementById('info-card');
 document.getElementById('info-close').addEventListener('click', () => {
   infoCard.classList.add('hidden');
+  clearInterval(sparkTimer);
   if (selectedTag) { eqMap[selectedTag].treeEl.classList.remove('active'); selectedTag = null; }
 });
 
@@ -903,9 +904,40 @@ function renderInfoCard(entry) {
   document.getElementById('info-design').innerHTML = Object.entries(eq.design)
     .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
   document.getElementById('info-instruments').innerHTML = eq.instruments.length
-    ? eq.instruments.map((t) => `<tr><td>${t}</td><td><span class="inst-val" id="inst-${t}">--</span></td></tr>`).join('')
+    ? eq.instruments.map((t) => `
+        <tr><td>${t}</td><td><span class="inst-val" id="inst-${t}">--</span></td></tr>
+        <tr class="spark-row"><td colspan="2"><svg class="spark" id="spark-${t}" viewBox="0 0 240 36" preserveAspectRatio="none"></svg></td></tr>`).join('')
     : '<tr><td colspan="2">（無儀錶點位）</td></tr>';
   infoCard.classList.remove('hidden');
+  refreshSparks(eq.instruments);
+}
+
+// 趨勢 sparkline：資訊卡開啟時每 2 秒拉時序歷史重畫
+let sparkTimer = null;
+async function refreshSparks(tags) {
+  clearInterval(sparkTimer);
+  const draw = async () => {
+    for (const tag of tags) {
+      const el = document.getElementById(`spark-${tag}`);
+      if (!el) return; // 資訊卡已換設備/關閉
+      const hist = await fetch(`/api/history/${tag}?n=300`).then((r) => r.json()).catch(() => []);
+      if (hist.length < 2) continue;
+      const vs = hist.map((p) => p[1]);
+      const min = Math.min(...vs), max = Math.max(...vs);
+      const spanV = max - min || 1;
+      const pts = vs.map((v, i) => `${(i / (vs.length - 1)) * 240},${33 - ((v - min) / spanV) * 30}`).join(' ');
+      const inst = instrumentDefs[tag];
+      const hiY = inst?.alarm_hi != null && inst.alarm_hi >= min && inst.alarm_hi <= max
+        ? 33 - ((inst.alarm_hi - min) / spanV) * 30 : null;
+      el.innerHTML = `
+        ${hiY !== null ? `<line x1="0" y1="${hiY}" x2="240" y2="${hiY}" stroke="#ff4d4f" stroke-width="0.8" stroke-dasharray="4 3"/>` : ''}
+        <polyline points="${pts}" fill="none" stroke="#46c2e0" stroke-width="1.5"/>
+        <text x="2" y="9" font-size="8" fill="#8ba0b3">${max.toFixed(1)}</text>
+        <text x="2" y="34" font-size="8" fill="#8ba0b3">${min.toFixed(1)}</text>`;
+    }
+  };
+  await draw();
+  sparkTimer = setInterval(draw, 2000);
 }
 
 // 點擊 3D 物件選取（區分拖曳與點擊）
@@ -1849,6 +1881,27 @@ function openPid(eq, unitName) {
   pidModal.classList.remove('hidden');
 }
 
+// ---------------------------------------------------- 數據圖層（熱力圖）
+// 數據孿生的視覺核心：設備依儀錶偏離度上色（藍=基準 → 紅=逼近警報值）
+const instrumentDefs = plantData.instruments;
+const tagDeviation = {};
+const eqHeat = {};
+let heatOn = false;
+const HEAT_COLOR = new THREE.Color();
+
+function heatColor(dev) {
+  // HSL 藍(0.62)→青→綠→黃→紅(0)，偏離越大越熱
+  return HEAT_COLOR.setHSL(0.62 * (1 - dev), 0.85, 0.5);
+}
+
+const heatBtn = document.getElementById('heat-toggle');
+const heatLegend = document.getElementById('heat-legend');
+heatBtn?.addEventListener('click', () => {
+  heatOn = !heatOn;
+  heatBtn.classList.toggle('active', heatOn);
+  heatLegend.classList.toggle('hidden', !heatOn);
+});
+
 // ---------------------------------------------------------------- WebSocket
 const wsStatus = document.getElementById('ws-status');
 const gdChip = document.getElementById('gd-chip');
@@ -1869,6 +1922,28 @@ function connectWS() {
     if (msg.type !== 'tick') return;
     setScenario(msg.scenario);
     renderMatch(msg.match);
+
+    // 數據源狀態（sim / OPC UA / Modbus）
+    if (msg.source) {
+      const names = { sim: '模擬數據', opcua: 'OPC UA', modbus: 'Modbus' };
+      const nm = names[msg.source.kind] ?? msg.source.kind;
+      wsStatus.textContent = msg.source.connected ? `● ${nm}` : `○ ${nm} 斷線`;
+      wsStatus.className = 'chip ' + (msg.source.connected ? 'ok' : 'down');
+      wsStatus.title = msg.source.detail ?? '';
+    }
+
+    // 熱力圖：每設備取所綁儀錶的最大正規化偏離度
+    for (const [tag, d] of Object.entries(msg.tags)) {
+      const inst = instrumentDefs[tag];
+      if (!inst) continue;
+      const span = inst.alarm_hi != null ? Math.abs(inst.alarm_hi - inst.base) : Math.max(Math.abs(inst.base) * 0.25, 1);
+      tagDeviation[tag] = Math.min(1, Math.abs(d.v - inst.base) / span);
+    }
+    for (const [eqTag, entry] of Object.entries(eqMap)) {
+      let dev = 0;
+      for (const t of entry.def.instruments) dev = Math.max(dev, tagDeviation[t] ?? 0);
+      eqHeat[eqTag] = dev;
+    }
 
     // 儀錶值 → 資訊卡 + GD chip
     for (const [tag, d] of Object.entries(msg.tags)) {
@@ -1922,11 +1997,12 @@ function animate() {
   }
   controls.update();
 
-  // 設備警報脈動 / 選取高亮
+  // 設備警報脈動 / 選取高亮 / 數據熱力圖
   const pulse = 0.35 + 0.45 * Math.abs(Math.sin(t * 4));
   for (const [tag, entry] of Object.entries(eqMap)) {
     const alarming = alarmEquipment.has(tag) && currentScenario !== 'normal';
     const selected = tag === selectedTag;
+    const heat = heatOn && entry.def.instruments.length ? (eqHeat[tag] ?? 0) : null;
     entry.group.traverse((o) => {
       if (!o.isMesh) return;
       if (alarming) {
@@ -1935,6 +2011,9 @@ function animate() {
       } else if (selected) {
         o.material.emissive.copy(ACCENT);
         o.material.emissiveIntensity = 0.45;
+      } else if (heat !== null) {
+        o.material.emissive.copy(heatColor(heat));
+        o.material.emissiveIntensity = 0.3 + heat * 0.5;
       } else {
         o.material.emissive.setHex(o.userData.baseEmissive);
         o.material.emissiveIntensity = o.userData.baseIntensity;

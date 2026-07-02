@@ -25,6 +25,9 @@
       <span class="brand-sub">領航示範 MVP｜穎杰科技</span>
     </div>
     <div class="topbar-right">
+      <button class="chip chip-btn" id="heat-toggle" title="數據圖層：設備依儀錶偏離度上色（藍=基準、紅=逼近警報值），即時反映製程狀態">
+        數據圖層
+      </button>
       <button class="chip chip-btn" id="detail-toggle" title="模型細節：精細（真實化工廠建模）／低耗能（簡易幾何，弱機保底）；效能降到低檔時自動退回低耗能">
         精細模型
       </button>
@@ -96,6 +99,12 @@
       <div id="pid-svg"></div>
       <div class="pid-note">示意圖面（自 plant.json 生成）｜實際專案掛接 P&amp;ID／ISO 配管圖／電氣系統圖／設備配置圖</div>
     </div>
+  </div>
+
+  <div id="heat-legend" class="hidden">
+    <span class="hl-label">製程偏離度</span>
+    <span class="hl-bar"></span>
+    <span class="hl-ticks"><i>基準</i><i>警報值</i></span>
   </div>
 
   <footer id="scenario-bar">

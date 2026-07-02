@@ -20,6 +20,8 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
+from .sources import History, SimSource, load_source
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_FILE = BASE_DIR / "data" / "plant.json"
 STATIC_DIR = BASE_DIR / "static"
@@ -30,7 +32,12 @@ PLANT = json.loads(DATA_FILE.read_text(encoding="utf-8"))
 INSTRUMENTS: dict = PLANT["instruments"]
 SCENARIOS: dict = {s["id"]: s for s in PLANT["scenarios"]}
 
-# ---------------------------------------------------------------- 模擬器狀態
+# ------------------------------------------------------------ 數據層
+# 即時值一律來自 DataSource（sim / opcua / modbus，見 data/datasource.json）；
+# SimSource 同時兼任情境注入引擎（只在主來源=sim 時可用）
+SOURCE, SIM_ENGINE = load_source(INSTRUMENTS, SCENARIOS)
+HISTORY = History(maxlen=900)  # 15 分鐘 @1s；正式部署換 InfluxDB/PI 只動 History
+
 SIM = {
     "scenario": "normal",
     "values": {tag: inst["base"] for tag, inst in INSTRUMENTS.items()},
@@ -48,23 +55,13 @@ CONFIRM_MARGIN = 0.10
 CONFIRM_STREAK = 3
 
 
-def _sim_tick() -> None:
-    """一階趨近 + 雜訊的假數據模擬。之後換 OPC UA 讀值時只要改這裡。"""
-    driver = SIM["inject"] if SIM["inject"] else SIM["scenario"]
-    scenario = SCENARIOS[driver]
-    effects = scenario.get("effects", {})
-    for tag, inst in INSTRUMENTS.items():
-        base = inst["base"]
-        target, rate = base, 0.15
-        if tag in effects:
-            target = effects[tag]["target"]
-            rate = effects[tag].get("rate", 0.1)
-        v = SIM["values"][tag]
-        noise = random.gauss(0, max(abs(base) * 0.004, 0.05))
-        v += (target - v) * rate + noise
-        if inst["unit"] == "%":
-            v = max(0.0, min(105.0, v))
-        SIM["values"][tag] = v
+async def _tick() -> None:
+    """每秒一拍：從數據源讀值 → 更新即時狀態 → 寫入時序歷史。"""
+    SIM_ENGINE.driver = SIM["inject"] if SIM["inject"] else SIM["scenario"]
+    values = await SOURCE.read()
+    if values:  # 廠端來源斷線時 read() 回空 dict → 保持前值，UI 顯示斷線
+        SIM["values"].update(values)
+        HISTORY.append(values)
 
 
 def _match_scenarios() -> list[dict]:
@@ -157,20 +154,23 @@ def _snapshot() -> dict:
         "alarms": alarms,
         "alarm_equipment": sorted(alarm_eq) if active else sorted(alarm_eq),
         "match": match,
+        "source": SOURCE.status,
     }
 
 
-async def _sim_loop() -> None:
+async def _tick_loop() -> None:
     while True:
-        _sim_tick()
+        await _tick()
         await asyncio.sleep(1.0)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(_sim_loop())
+    await SOURCE.start()
+    task = asyncio.create_task(_tick_loop())
     yield
     task.cancel()
+    await SOURCE.stop()
 
 
 app = FastAPI(title="EJ_3D 數位孿生平台 MVP", lifespan=lifespan)
@@ -201,22 +201,30 @@ def set_scenario(sid: str) -> dict:
     return {"ok": True, "scenario": sid}
 
 
+def _require_sim() -> None:
+    """異常注入只對內建模擬器有意義；接真實 DCS 時禁用（不能對現場數據造假）。"""
+    if SOURCE is not SIM_ENGINE:
+        raise HTTPException(409, "數據源為廠端即時數據，異常注入僅在模擬器模式可用")
+
+
 @app.post("/api/inject/random")
 def inject_random() -> dict:
     """盲測：隨機挑一個風險情境注入感測訊號，由比對引擎自己找出來。"""
+    _require_sim()
     sid = random.choice([s for s in SCENARIOS if s != "normal"])
     return _do_inject(sid)
 
 
 @app.post("/api/inject/stop")
 def inject_stop() -> dict:
+    _require_sim()
     SIM["inject"] = None
     SIM["confirmed"] = False
     SIM["streak"] = {"sid": None, "n": 0}
     SIM["scenario"] = "normal"
     # 感測值歸位，避免殘值影響下一輪比對
-    for tag, inst in INSTRUMENTS.items():
-        SIM["values"][tag] = inst["base"]
+    SIM_ENGINE.reset_values()
+    SIM["values"].update(SIM_ENGINE.values)
     return {"ok": True}
 
 
@@ -224,6 +232,7 @@ def inject_stop() -> dict:
 def inject(sid: str) -> dict:
     if sid not in SCENARIOS or sid == "normal":
         raise HTTPException(404, f"unknown scenario: {sid}")
+    _require_sim()
     return _do_inject(sid)
 
 
@@ -233,9 +242,22 @@ def _do_inject(sid: str) -> dict:
     SIM["streak"] = {"sid": None, "n": 0}
     SIM["scenario"] = "normal"
     # 感測值回到基準附近，讓偏移從頭發展（演示比對過程）
-    for tag, inst in INSTRUMENTS.items():
-        SIM["values"][tag] = inst["base"]
+    SIM_ENGINE.reset_values()
+    SIM["values"].update(SIM_ENGINE.values)
     return {"ok": True, "injected": True}
+
+
+@app.get("/api/history/{tag}")
+def get_history(tag: str, n: int = 300) -> list:
+    """時序歷史（ring buffer；正式部署換 InfluxDB/PI 查詢）。"""
+    if tag not in INSTRUMENTS:
+        raise HTTPException(404, f"unknown tag: {tag}")
+    return HISTORY.get(tag, n)
+
+
+@app.get("/api/datasource")
+def get_datasource() -> dict:
+    return SOURCE.status
 
 
 @app.get("/api/export/usd")

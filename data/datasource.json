@@ -1,0 +1,31 @@
+{
+  "_說明": "數據源設定。kind 改成 opcua 或 modbus 並填入對應段落即可接真實廠端；連不上會自動顯示斷線（不會拿假數據冒充）。",
+  "kind": "sim",
+  "opcua": {
+    "endpoint": "",
+    "_endpoint範例": "opc.tcp://192.168.1.10:4840",
+    "nodes": {
+      "TI-101": "ns=2;s=Reactor.TI101.PV",
+      "PI-101": "ns=2;s=Reactor.PI101.PV",
+      "VS-101": "ns=2;s=Valve.VS101.POS",
+      "FI-301": "ns=2;s=Pump.FI301.PV",
+      "TI-401": "ns=2;s=HX.TI401.PV",
+      "LI-201": "ns=2;s=Tank.LI201.PV",
+      "LI-202": "ns=2;s=Tank.LI202.PV",
+      "VS-102": "ns=2;s=Valve.VS102.POS",
+      "GD-001": "ns=2;s=Area.GD001.PPM",
+      "SD-001": "ns=2;s=CR.SD001.PV"
+    }
+  },
+  "modbus": {
+    "host": "",
+    "_host範例": "192.168.1.20",
+    "port": 502,
+    "unit": 1,
+    "registers": {
+      "TI-101": { "address": 0, "scale": 0.1, "offset": 0, "kind": "holding" },
+      "PI-101": { "address": 1, "scale": 0.01, "offset": 0, "kind": "holding" },
+      "GD-001": { "address": 2, "scale": 0.1, "offset": 0, "kind": "input" }
+    }
+  }
+}

@@ -2,6 +2,29 @@
 
 穎杰科技「領航示範案・產品3（全廠 3D 數位孿生平台）」的 localhost Web MVP。
 
+## 平台定位（對標達梭 3DEXPERIENCE 的差異化）
+
+達梭（CATIA/SIMULIA）強在離散製造的剛體與結構力學；本平台切**流程製造業**
+（石化／特化）的弱區：流體、熱傳、反應動力學與連續時序數據。核心戰略是
+**「數據與物理驅動」取代「幾何驅動」——先成就數據孿生，再映射視覺孿生**。
+
+**階段一（本 repo，資料科學主導的輕量化平台）**：
+- 資料層：`DataSource` 抽象（`server/sources.py`）——**OPC UA 為主（asyncua）、
+  Modbus TCP 為輔（pymodbus）**、內建模擬器開發用；`data/datasource.json` 切換，
+  斷線自動重連、來源狀態即時顯示於 UI（接真數據時異常注入自動禁用，不對現場數據造假）
+- 時序層：每 tag ring buffer（15 分鐘@1s）＋ `/api/history/{tag}`；正式部署換
+  InfluxDB／TimescaleDB／PI 只動 `History` 類別
+- 分析層：DCS 特徵向量情境比對引擎（已上線）；下一步掛熱力學代理模型
+  （surrogate／PINN，ONNX Runtime 推論）
+- 表現層：WebGL（Three.js）＋**數據圖層熱力圖**（設備依儀錶偏離度上色，
+  藍=基準→紅=警報值）＋資訊卡即時趨勢 sparkline——不算真實流體渲染，
+  用色彩梯度映射呈現製程狀態
+- 虛實綁定：`plant.json` 儀錶 tag ↔ 設備 ↔ 3D 節點 ↔ USD `ej:instruments`
+  metadata 一路貫通（P&ID 位號即字典對照表）
+
+**階段二（Omniverse 生態）**：接 Nucleus、NVIDIA Modulus 承接階段一代理模型
+做 GPU 級 CFD／熱力學即時模擬、Isaac Sim 合成工安影像——同一份 USD，無痛升級。
+
 對應簡報需求（產品3 宣稱逐項落地）：
 - **M1** 3D 廠區場景漫遊（程式生成的特化廠示範場景，之後可換掃描實景）
 - **M2** 設備熱點：點擊設備 → 資訊卡（位號、設計資料、即時儀錶）＋ **P&ID 示意圖面**（自資產資料庫生成，實案掛接 P&ID／ISO 配管／電氣系統圖）

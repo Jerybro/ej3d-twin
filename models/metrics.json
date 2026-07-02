@@ -1,0 +1,30 @@
+{
+  "out_BZ": {
+    "MAE_physics": 2.55,
+    "MAE_hybrid": 0.732,
+    "MAE_naive_lag1": 0.726,
+    "R2_hybrid": 0.856,
+    "target_std": 3.125
+  },
+  "out_TOL": {
+    "MAE_physics": 2.95,
+    "MAE_hybrid": 0.787,
+    "MAE_naive_lag1": 0.814,
+    "R2_hybrid": 0.876,
+    "target_std": 3.777
+  },
+  "out_X": {
+    "MAE_physics": 1.246,
+    "MAE_hybrid": 0.299,
+    "MAE_naive_lag1": 0.272,
+    "R2_hybrid": 0.814,
+    "target_std": 1.419
+  },
+  "out_C9": {
+    "MAE_physics": 0.077,
+    "MAE_hybrid": 0.021,
+    "MAE_naive_lag1": 0.017,
+    "R2_hybrid": 0.786,
+    "target_std": 0.146
+  }
+}

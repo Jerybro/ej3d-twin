@@ -260,6 +260,28 @@ def get_datasource() -> dict:
     return SOURCE.status
 
 
+# --------------------------------------------------- 分析層：製程代理模型
+
+
+@app.get("/api/surrogate/info")
+def surrogate_info() -> dict:
+    from . import surrogate
+
+    if not surrogate.available():
+        raise HTTPException(503, "代理模型未啟用（缺 models/*.joblib 或 scikit-learn）")
+    return surrogate.info()
+
+
+@app.post("/api/surrogate/predict")
+def surrogate_predict(body: dict) -> dict:
+    """What-if：body = {"feed": {feed_TOL: .., ...覆寫}, "lag": {out_BZ: ..（選填）}}"""
+    from . import surrogate
+
+    if not surrogate.available():
+        raise HTTPException(503, "代理模型未啟用")
+    return surrogate.predict(body.get("feed"), body.get("lag"))
+
+
 @app.get("/api/export/usd")
 def export_usd() -> FileResponse:
     from . import usd_export

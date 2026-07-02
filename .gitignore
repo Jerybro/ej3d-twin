@@ -3,6 +3,13 @@ __pycache__/
 *.pyc
 .venv/
 
+# NDA 防呆：客戶原始數據絕不進版控（models/ 只放訓練產物權重）
+提供資料*/
+dataset/
+*.xls
+*.xlsx
+quality_daily*.csv
+
 # 產出物（可由程式重新生成）
 exports/*.usda
 

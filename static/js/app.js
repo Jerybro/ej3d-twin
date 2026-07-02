@@ -1881,6 +1881,82 @@ function openPid(eq, unitName) {
   pidModal.classList.remove('hidden');
 }
 
+// -------------------------------------------- 製程計算（灰箱代理模型 What-if）
+const calcBtn = document.getElementById('calc-toggle');
+const calcPanel = document.getElementById('calc-panel');
+const CALC_SLIDERS = [
+  { key: 'feed_TOL', label: '進料 TOL', min: 60, max: 92, step: 0.1, unit: 'wt%' },
+  { key: 'feed_TMB', label: '進料 TMB', min: 0, max: 25, step: 0.1, unit: 'wt%' },
+  { key: 'feed_MEB', label: '進料 MEB', min: 0, max: 12, step: 0.1, unit: 'wt%' },
+  { key: 'feed_C9', label: '進料 C9 總量', min: 0, max: 31, step: 0.1, unit: 'wt%' },
+  { key: 'feed_C10', label: '進料 C10', min: 0, max: 6, step: 0.05, unit: 'wt%' },
+  { key: 'feed_nonARO', label: '進料 non-ARO', min: 0, max: 1.5, step: 0.01, unit: 'wt%' },
+];
+const CALC_TARGETS = [
+  { key: 'out_BZ', label: 'BZ 苯' },
+  { key: 'out_TOL', label: 'TOL 甲苯' },
+  { key: 'out_X', label: 'X 二甲苯' },
+  { key: 'out_C9', label: 'C9 芳烴' },
+];
+let calcInfo = null;
+let calcTimer = null;
+
+async function initCalc() {
+  try {
+    calcInfo = await fetch('/api/surrogate/info').then((r) => { if (!r.ok) throw 0; return r.json(); });
+  } catch {
+    calcBtn.style.display = 'none'; // 模型未啟用（缺 joblib/sklearn）
+    return;
+  }
+  const holder = document.getElementById('calc-sliders');
+  holder.innerHTML = CALC_SLIDERS.map((s) => {
+    const v = calcInfo.defaults.feed[s.key] ?? s.min;
+    return `<div class="calc-slider">
+      <label><span>${s.label}</span><b id="cv-${s.key}">${(+v).toFixed(2)} ${s.unit}</b></label>
+      <input type="range" id="cs-${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${v}">
+    </div>`;
+  }).join('');
+  const r = calcInfo.results;
+  document.getElementById('calc-metrics').textContent =
+    `977 天品質日報驗證｜測試集 R² ${CALC_TARGETS.map((t) => `${t.label.split(' ')[0]} ${r[t.key].R2_hybrid}`).join('・')}`;
+  for (const s of CALC_SLIDERS) {
+    document.getElementById(`cs-${s.key}`).addEventListener('input', (e) => {
+      document.getElementById(`cv-${s.key}`).textContent = `${(+e.target.value).toFixed(2)} ${s.unit}`;
+      clearTimeout(calcTimer);
+      calcTimer = setTimeout(runCalc, 250);
+    });
+  }
+  await runCalc();
+}
+
+async function runCalc() {
+  const feed = {};
+  for (const s of CALC_SLIDERS) feed[s.key] = +document.getElementById(`cs-${s.key}`).value;
+  const res = await fetch('/api/surrogate/predict', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ feed }),
+  }).then((r) => r.json()).catch(() => null);
+  if (!res) return;
+  document.getElementById('calc-results').innerHTML = CALC_TARGETS.map((t) => {
+    const pred = res.prediction[t.key];
+    const act = res.baseline_actual[t.key];
+    const d = pred - act;
+    const cls = d >= 0 ? 'calc-diff-up' : 'calc-diff-dn';
+    return `<tr><td>${t.label}</td>
+      <td><span class="calc-pred">${pred.toFixed(2)} wt%</span>
+      <span class="${cls}">（${d >= 0 ? '+' : ''}${d.toFixed(2)} vs 實測 ${act.toFixed(2)}）</span></td></tr>`;
+  }).join('');
+}
+
+calcBtn.addEventListener('click', () => {
+  const show = calcPanel.classList.contains('hidden');
+  calcPanel.classList.toggle('hidden', !show);
+  calcBtn.classList.toggle('active', show);
+  if (show) infoCard.classList.add('hidden'); // 與資訊卡同側，互斥
+});
+initCalc();
+
 // ---------------------------------------------------- 數據圖層（熱力圖）
 // 數據孿生的視覺核心：設備依儀錶偏離度上色（藍=基準 → 紅=逼近警報值）
 const instrumentDefs = plantData.instruments;

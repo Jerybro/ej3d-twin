@@ -25,6 +25,9 @@
       <span class="brand-sub">領航示範 MVP｜穎杰科技</span>
     </div>
     <div class="topbar-right">
+      <button class="chip chip-btn" id="calc-toggle" title="製程計算：灰箱代理模型 What-if——調整進料組成即時計算出口組成（Tatoray 轉烷化，977 天品質日報驗證）">
+        製程計算
+      </button>
       <button class="chip chip-btn" id="heat-toggle" title="數據圖層：設備依儀錶偏離度上色（藍=基準、紅=逼近警報值），即時反映製程狀態">
         數據圖層
       </button>
@@ -100,6 +103,15 @@
       <div class="pid-note">示意圖面（自 plant.json 生成）｜實際專案掛接 P&amp;ID／ISO 配管圖／電氣系統圖／設備配置圖</div>
     </div>
   </div>
+
+  <aside id="calc-panel" class="hidden">
+    <div class="panel-title">製程計算｜Tatoray 灰箱代理模型</div>
+    <div class="calc-sub">S601 進料組成 → S604 出口組成（What-if）</div>
+    <div id="calc-sliders"></div>
+    <div class="info-section">計算結果 vs 最近實測</div>
+    <table class="info-table" id="calc-results"></table>
+    <div class="panel-hint" id="calc-metrics">—</div>
+  </aside>
 
   <div id="heat-legend" class="hidden">
     <span class="hl-label">製程偏離度</span>

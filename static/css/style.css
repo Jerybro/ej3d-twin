@@ -203,6 +203,25 @@ html, body {
 #sky-toggle.active { background: rgba(70, 194, 224, 0.3); border-color: var(--accent); }
 #detail-toggle.active { background: rgba(70, 194, 224, 0.3); border-color: var(--accent); }
 #heat-toggle.active { background: rgba(70, 194, 224, 0.3); border-color: var(--accent); }
+#calc-toggle.active { background: rgba(70, 194, 224, 0.3); border-color: var(--accent); }
+
+/* ------------------------------------------------------ 製程計算面板 */
+#calc-panel {
+  position: absolute; top: 64px; right: 12px; width: 320px;
+  max-height: calc(100% - 150px); overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: 10px; padding: 14px; z-index: 26;
+  backdrop-filter: blur(6px);
+}
+.calc-sub { font-size: 11px; color: var(--text-dim); margin-bottom: 10px; }
+.calc-slider { margin-bottom: 9px; }
+.calc-slider label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 2px; }
+.calc-slider label b { color: var(--accent); font-weight: 700; }
+.calc-slider input[type="range"] { width: 100%; accent-color: var(--accent); height: 4px; }
+#calc-results td { padding: 5px 2px; }
+.calc-pred { font-weight: 700; color: var(--accent); }
+.calc-diff-up { color: #ff9a4d; font-size: 11px; }
+.calc-diff-dn { color: #7ec8f5; font-size: 11px; }
 
 /* ------------------------------------------------------ 數據圖層圖例 */
 #heat-legend {

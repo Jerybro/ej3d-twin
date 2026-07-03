@@ -26,6 +26,7 @@ SCENE_DEFAULTS = {
     "scenarios": [{"id": "normal", "name": "正常運轉", "kind": "normal", "desc": ""}],
     "scan_models": [],
     "props": [],
+    "underlays": [],  # 圖紙底圖（P&ID 地毯）：{image,x,z,w,h}
 }
 
 

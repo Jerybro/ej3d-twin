@@ -252,6 +252,10 @@ for (const unit of plantData.plant.units) {
     GROUND_D = Math.max(GROUND_D, Math.abs(eq.pos[2]) * 2 + 20);
   }
 }
+for (const u of plantData.underlays ?? []) {  // 圖紙底圖比設備群更寬
+  GROUND_W = Math.max(GROUND_W, (Math.abs(u.x) + u.w / 2) * 2 + 16);
+  GROUND_D = Math.max(GROUND_D, (Math.abs(u.z) + u.h / 2) * 2 + 16);
+}
 GROUND_W = Math.ceil(GROUND_W / 10) * 10;
 GROUND_D = Math.ceil(GROUND_D / 10) * 10;
 if (GROUND_W > 70 || GROUND_D > 45) {  // 大場景：視距/霧/遠平面一起放大
@@ -274,6 +278,25 @@ plantGroup.add(ground);
 const grid = new THREE.GridHelper(Math.max(GROUND_W, GROUND_D), Math.max(GROUND_W, GROUND_D) / 2, 0x2a3844, 0x1f2a33);
 grid.position.y = 0.02;
 plantGroup.add(grid);
+
+// 圖紙底圖（P&ID 地毯）：設備站在圖面自己的位置上，可直接對圖
+const texLoader = new THREE.TextureLoader();
+for (const u of plantData.underlays ?? []) {
+  const tex = texLoader.load(u.image);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8; // 斜視角下位號文字才不糊
+  const sheet = new THREE.Mesh(
+    new THREE.PlaneGeometry(u.w, u.h),
+    new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, opacity: 0.9,
+      color: 0xb9c4cd, // 壓暗紙白，貼合深色主題
+      depthWrite: false,
+    })
+  );
+  sheet.rotation.x = -Math.PI / 2;
+  sheet.position.set(u.x, 0.04, u.z); // 在網格之上、設備之下
+  plantGroup.add(sheet);
+}
 
 // 場景敷設（精細模式限定）：防溢堤、管線法蘭與管架、照明桿
 function buildDressing() {

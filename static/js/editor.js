@@ -47,12 +47,45 @@ let grid = new THREE.GridHelper(80, 40, 0x2a3844, 0x1f2a33);
 grid.position.y = 0.02;
 scene.add(grid);
 
+// 圖紙底圖（P&ID 地毯）：載入場景時重建
+const underlayMeshes = [];
+const texLoader = new THREE.TextureLoader();
+function rebuildUnderlays(list) {
+  for (const m of underlayMeshes) {
+    scene.remove(m);
+    m.geometry.dispose();
+    m.material.map?.dispose();
+    m.material.dispose();
+  }
+  underlayMeshes.length = 0;
+  for (const u of list ?? []) {
+    const tex = texLoader.load(u.image);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    const sheet = new THREE.Mesh(
+      new THREE.PlaneGeometry(u.w, u.h),
+      new THREE.MeshBasicMaterial({
+        map: tex, transparent: true, opacity: 0.9,
+        color: 0xb9c4cd, depthWrite: false,
+      })
+    );
+    sheet.rotation.x = -Math.PI / 2;
+    sheet.position.set(u.x, 0.04, u.z);
+    underlayMeshes.push(sheet);
+    scene.add(sheet);
+  }
+}
+
 // 地坪自適應：場景範圍超出預設 80×60 時放大（P&ID 整廠合併場景會很大）
-function fitGround(equipList) {
+function fitGround(equipList, underlays) {
   let w = 80, d = 60;
   for (const eq of equipList) {
     w = Math.max(w, Math.abs(eq.pos[0]) * 2 + 20);
     d = Math.max(d, Math.abs(eq.pos[2]) * 2 + 20);
+  }
+  for (const u of underlays ?? []) {
+    w = Math.max(w, (Math.abs(u.x) + u.w / 2) * 2 + 16);
+    d = Math.max(d, (Math.abs(u.z) + u.h / 2) * 2 + 16);
   }
   w = Math.ceil(w / 20) * 20; d = Math.ceil(d / 20) * 20;
   if (ground.geometry.parameters.width === w && ground.geometry.parameters.height === d) return;
@@ -213,7 +246,8 @@ function loadSceneData(data, id) {
   sceneId = id;
   for (const eq of allEquipment()) buildEquipment(eq);
   sceneData.pipes.forEach((pipe, i) => buildPipe(pipe, i));
-  fitGround([...allEquipment()]);
+  rebuildUnderlays(sceneData.underlays);
+  fitGround([...allEquipment()], sceneData.underlays);
   updateTopbar();
   selectNone();
 }

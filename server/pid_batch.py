@@ -26,6 +26,37 @@ STATUS_PATH = BASE_DIR / "data" / "pid_batch_status.json"
 MERGED_ID = "pid-ta32-full"
 MERGED_NAME = "TA32 整廠｜P&ID 批次解析"
 
+# ------------------------------------------------- 製程流向排序（進料→產品）
+# 錨定設備 → 製程階段。圖紙群聚依「圖上優先級最高的錨定設備」的階段排序，
+# 同階段依圖號。錨定表是 TA32（Tatoray）製程知識：進料泵→合併進料換熱→
+# 加熱爐→反應器→冷凝分離→循環壓縮→汽提→苯塔→甲苯塔→重芳烴塔。
+STAGES = ["總覽", "進料", "加熱", "反應", "分離", "汽提", "分餾", "公用/其他"]
+ANCHOR_STAGE = {
+    "P632": 1,           # 進料泵
+    "E651": 2, "F601": 2, "F602": 2,   # 合併進料換熱＋加熱爐
+    "R611": 3,           # Tatoray 反應器
+    "E652": 4, "V613": 4, "B631": 4,   # 出口冷凝＋分離槽＋循環氣壓縮
+    "C614": 5,           # 汽提塔
+    "C617": 6, "C618": 6, "C620": 6,   # 苯塔/甲苯塔/重芳烴塔
+}
+# 同圖多錨定時取「設備類型優先級」最高者（塔/反應器/爐 > 槽/壓縮機 > 換熱/泵）
+ANCHOR_PRIO = {"C": 0, "R": 1, "F": 2, "B": 3, "V": 4, "S": 5, "E": 6, "P": 7, "T": 8}
+
+
+def _sheet_stage(stem: str, tags: list[str]) -> int:
+    """圖 → 製程階段。PFD 總覽排最前；無錨定圖排公用/其他。"""
+    if not stem.upper().startswith("C12"):  # PFD（ARO-1 600）當總覽
+        return 0
+    hits = []
+    for tag in tags:
+        for anchor, stage in ANCHOR_STAGE.items():
+            if tag.startswith(anchor):
+                hits.append((ANCHOR_PRIO.get(tag[0], 9), stage))
+    if not hits:
+        return len(STAGES) - 1
+    hits.sort()
+    return hits[0][1]
+
 _lock = threading.Lock()
 _running = False
 
@@ -49,7 +80,12 @@ def read_status() -> dict:
 
 
 def merge_results(results: dict[str, dict]) -> dict:
-    """{圖檔 stem: parse_pid 結果} → 整廠合併場景。"""
+    """{圖檔 stem: parse_pid 結果} → 整廠合併場景。
+
+    佈局＝「圖紙地毯」：每張圖的 P&ID 渲染圖鋪在群聚底下，設備以像素
+    保真映射站在圖面自己的位置上（可直接對圖清草稿）；群聚依製程流向
+    排序（總覽→進料→加熱→反應→分離→汽提→分餾→公用）。
+    """
     # tag → 各圖的候選 (stem, equipment_entry, conf, 掛載儀錶數)
     candidates: dict[str, list] = {}
     for stem, res in results.items():
@@ -81,36 +117,40 @@ def merge_results(results: dict[str, dict]) -> dict:
             if inst.get("equipment"):
                 inst_of_eq[inst["equipment"]].append(itag)
 
-    # 分圖群聚：每張圖的勝出設備保留圖內相對位置，縮到群聚格內
-    sheets = sorted({s for s in winner_stem.values()})
-    clusters: dict[str, dict] = {}  # stem → {tag: [x,0,z]}
-    spans: dict[str, tuple] = {}
-    for stem in sheets:
-        tags = [t for t, s in winner_stem.items() if s == stem]
-        n = len(tags)
-        side = max(1, math.ceil(math.sqrt(n)))
-        span_x, span_z = 10 + 7 * side, 7 + 5 * side
-        pts = {t: list(winner_eq[t]["pos"]) for t in tags}
-        xs = [p[0] for p in pts.values()]
-        zs = [p[2] for p in pts.values()]
-        x0, x1 = min(xs), max(xs)
-        z0, z1 = min(zs), max(zs)
-        s = min(span_x / max(x1 - x0, 1), span_z / max(z1 - z0, 1), 1.0)
-        pos = {
-            t: [(p[0] - (x0 + x1) / 2) * s, 0, (p[2] - (z0 + z1) / 2) * s]
-            for t, p in pts.items()
-        }
-        clusters[stem] = _push_apart(pos, min_gap=3.5)
-        spans[stem] = (span_x, span_z)
+    # 圖紙地毯群聚：整張圖按頁面比例縮成 tile，設備像素座標仿射映射
+    TILE_W = 44.0  # 整廠模式單張圖紙寬（比單圖 56 略小，30 張才排得開）
+    sheet_tags: dict[str, list] = {}
+    for tag, stem in winner_stem.items():
+        sheet_tags.setdefault(stem, []).append(tag)
+    sheets = sorted(sheet_tags)
 
-    # 群聚排格：固定欄數 shelf 佈局（依圖號排序，行高取該行最大縱深）
-    cols = max(1, math.ceil(math.sqrt(len(sheets) * 1.6)))
-    gap = 10.0
+    clusters: dict[str, dict] = {}   # stem → {tag: [x,0,z]}（tile 內局部座標）
+    spans: dict[str, tuple] = {}     # stem → (tile_w, tile_h)
+    tiles: dict[str, str] = {}       # stem → lo-res 底圖 URL
+    for stem in sheets:
+        geom = results[stem]["geom"]
+        pw, ph = geom["page_w"], geom["page_h"]
+        tile_h = TILE_W * ph / pw
+        pos = {}
+        for tag in sheet_tags[stem]:
+            px, py = geom["px"][tag]
+            pos[tag] = [round((px / pw - 0.5) * TILE_W, 2), 0,
+                        round((py / ph - 0.5) * tile_h, 2)]
+        clusters[stem] = _push_apart(pos, min_gap=2.2)
+        spans[stem] = (TILE_W, round(tile_h, 2))
+        tiles[stem] = geom["tile_lo"]
+
+    # 製程流向排序：階段 → 圖號
+    order = sorted(sheets, key=lambda s: (_sheet_stage(s, sheet_tags[s]), s))
+
+    # shelf 佈局（tile 等寬，行高取該行最大縱深）
+    cols = max(1, math.ceil(math.sqrt(len(order) * 1.6)))
+    gap = 6.0
     origins: dict[str, tuple] = {}
     row_h = 0.0
     cur_x, cur_z = 0.0, 0.0
     total_w = 0.0
-    for i, stem in enumerate(sheets):
+    for i, stem in enumerate(order):
         sw, sh = spans[stem]
         if i and i % cols == 0:
             cur_z += row_h + gap
@@ -123,22 +163,28 @@ def merge_results(results: dict[str, dict]) -> dict:
     off_x, off_z = -total_w / 2, -total_h / 2  # 全場置中
 
     units = []
-    for stem in sheets:
-        ox, oz = origins[stem]
+    underlays = []
+    for stem in order:
+        ox, oz = origins[stem][0] + off_x, origins[stem][1] + off_z
+        stage = STAGES[_sheet_stage(stem, sheet_tags[stem])]
         equipment = []
         for tag in sorted(clusters[stem]):
             eq = dict(winner_eq[tag])
             x, _, z = clusters[stem][tag]
-            eq["pos"] = [round(x + ox + off_x, 2), 0, round(z + oz + off_z, 2)]
+            eq["pos"] = [round(x + ox, 2), 0, round(z + oz, 2)]
             eq["instruments"] = inst_of_eq.get(tag, [])
             eq["pid_ref"] = stem
             equipment.append(eq)
-        units.append({"id": stem.upper(), "name": f"圖 {stem.upper()}", "equipment": equipment})
+        units.append({"id": stem.upper(),
+                      "name": f"{stage}｜{stem.upper()}", "equipment": equipment})
+        underlays.append({"image": tiles[stem], "x": round(ox, 2), "z": round(oz, 2),
+                          "w": spans[stem][0], "h": spans[stem][1]})
 
     return {
         "plant": {"id": "TA32-FULL", "name": MERGED_NAME, "units": units},
         "pipes": [],
         "instruments": instruments,
+        "underlays": underlays,
     }
 
 

@@ -16,6 +16,10 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 PID_DIR = BASE_DIR / "uploads" / "pid"
+TILE_DIR = PID_DIR / "_tiles"  # 圖紙底圖（3D 場景地毯用，runtime 產物不進版控）
+
+# 單圖場景的圖紙底圖寬度（場景單位 m）；高度按圖面比例
+TILE_W = 56.0
 
 # ---------------------------------------------------------------- 位號規則
 # 儀錶位號（先判，避免被設備規則吃掉）
@@ -297,6 +301,36 @@ def _layout(equips: dict, width: float, height: float, span_x=56.0, span_z=36.0,
     return _push_apart(pos, min_gap)
 
 
+def _slugify(stem: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")
+
+
+def _save_tiles(img, stem: str) -> str:
+    """OCR 渲染圖轉存圖紙底圖（hi：單圖場景讀位號用；lo：整廠 30 張省 GPU）。
+    回傳 hi 檔 URL 路徑。"""
+    TILE_DIR.mkdir(parents=True, exist_ok=True)
+    slug = _slugify(stem)
+    for suffix, width in (("", 2900), ("_lo", 1300)):
+        w = min(width, img.width)
+        h = round(img.height * w / img.width)
+        img.resize((w, h)).convert("RGB").save(
+            TILE_DIR / f"{slug}{suffix}.jpg", quality=80)
+    return f"/uploads/pid/_tiles/{slug}.jpg"
+
+
+def _pixel_true_layout(equips: dict, width: float, height: float,
+                       tile_w: float = TILE_W, min_gap: float = 2.2):
+    """圖面像素座標 → 場景座標，**與圖紙底圖對齊**（整頁仿射映射，
+    非設備範圍正規化）。微幅推開只防模型完全交疊，保住對圖性。"""
+    tile_h = tile_w * height / width
+    pos = {
+        tag: [round((cx / width - 0.5) * tile_w, 2), 0,
+              round((cy / height - 0.5) * tile_h, 2)]
+        for tag, (cx, cy, conf) in equips.items()
+    }
+    return _push_apart(pos, min_gap), tile_h
+
+
 def parse_pid(filename: str) -> dict:
     """主入口：P&ID 檔名 → 場景草稿 dict ＋解析統計。"""
     pdf_path = PID_DIR / Path(filename).name
@@ -307,7 +341,8 @@ def parse_pid(filename: str) -> dict:
     hits, used = _merge_fragments(raw)
     hits += _rescue_orphans(img, raw, used)
     equips, insts = _classify(hits)
-    pos = _layout(equips, img.width, img.height)
+    tile_url = _save_tiles(img, Path(filename).stem)
+    pos, tile_h = _pixel_true_layout(equips, img.width, img.height)
 
     # 儀錶掛最近設備
     inst_of_eq: dict[str, list] = {t: [] for t in equips}
@@ -347,6 +382,9 @@ def parse_pid(filename: str) -> dict:
         },
         "pipes": [],
         "instruments": instruments,
+        # 圖紙底圖：設備即站在圖面自己的位置上（像素保真佈局），直接對圖
+        "underlays": [{"image": tile_url, "x": 0, "z": 0,
+                       "w": TILE_W, "h": round(tile_h, 2)}],
     }
     return {
         "scene": scene,
@@ -355,5 +393,11 @@ def parse_pid(filename: str) -> dict:
             "equipment": len(equipment),
             "instruments": len(instruments),
             "items": items,
+        },
+        # 整廠合併需要的原始幾何（像素座標與頁面尺寸）
+        "geom": {
+            "page_w": img.width, "page_h": img.height,
+            "px": {tag: [round(c[0], 1), round(c[1], 1)] for tag, c in equips.items()},
+            "tile_lo": tile_url.replace(".jpg", "_lo.jpg"),
         },
     }

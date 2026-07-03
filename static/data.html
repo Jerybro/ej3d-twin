@@ -4,227 +4,285 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>資料前處理｜EJ Process Intelligence</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500&display=swap" rel="stylesheet" />
   <style>
+    /* Tukey 實測設計 token（demo.chimes.ai 2026-07-03）：
+       主藍 #046AFB｜頁底/卡頭 #F6F7FA｜邊框 #DBDDE0｜主字 #061027｜次字 #555
+       Inter 15px｜卡片 5px 圓角細框無陰影｜按鈕 4px 圓角 outline */
     :root {
-      --bg: #f4f6f8; --panel: #ffffff; --panel2: #f0f3f6;
-      --bdr: #dde4ea; --accent: #3b82d6; --accent-soft: #74a8e8;
-      --text: #1c2733; --dim: #6b7c8c; --warn: #d97706; --danger: #dc2626; --ok: #16a34a;
-      --shadow: 0 1px 3px rgba(16,32,48,0.08);
+      --blue: #046AFB; --bg: #F6F7FA; --white: #ffffff;
+      --bdr: #DBDDE0; --text: #061027; --text2: #555555;
+      --danger: #d03050; --ok: #18a058;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; background: var(--bg); color: var(--text);
-      font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", sans-serif; font-size: 14px; }
-    button { font-family: inherit; }
+      font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", sans-serif; font-size: 15px; }
+    button { font-family: inherit; font-size: 15px; }
+    svg.ic { width: 18px; height: 18px; stroke: currentColor; fill: none;
+      stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+    svg.ic.sm { width: 15px; height: 15px; }
 
-    /* ---------- 頂導航 ---------- */
+    /* ---------- 頂導航（白底 50px） ---------- */
     #topnav {
-      display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 48px;
-      background: var(--panel); border-bottom: 1px solid var(--bdr);
+      display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 50px;
+      background: var(--white); border-bottom: 1px solid var(--bdr);
     }
-    .brand-home {
+    .nav-back {
       display: inline-flex; align-items: center; justify-content: center;
-      width: 26px; height: 26px; border-radius: 6px;
-      background: #e8f0fa; border: 1px solid var(--bdr);
-      color: var(--accent); font-size: 11px; font-weight: 700; text-decoration: none;
+      width: 34px; height: 34px; border-radius: 4px; color: var(--text);
+      text-decoration: none;
     }
-    #ds-name { font-weight: 600; font-size: 14px; max-width: 220px;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nav-back:hover { background: var(--bg); }
+    #ds-name {
+      font-size: 15px; color: var(--text); max-width: 220px; padding: 6px 12px;
+      border: 1px solid var(--bdr); border-radius: 4px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .nav-sep { width: 1px; height: 22px; background: var(--bdr); margin: 0 6px; }
     .nav-tab {
-      padding: 6px 10px; border: none; background: none; cursor: pointer;
-      font-size: 13.5px; color: var(--dim); border-radius: 6px;
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 7px 10px; border: none; background: none; cursor: pointer;
+      font-size: 15px; color: var(--text); border-radius: 4px;
     }
-    .nav-tab:hover { background: var(--panel2); }
-    .nav-tab.active { color: var(--accent); font-weight: 600; }
+    .nav-tab:hover { background: var(--bg); }
+    .nav-tab.active { color: var(--blue); }
     .spacer { flex: 1; }
+    #btn-more {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 7px 10px; border: none; background: none; cursor: pointer;
+      font-size: 15px; color: var(--text); border-radius: 4px;
+    }
+    #btn-more:hover { background: var(--bg); }
 
     /* ---------- 次導航 ---------- */
-    #subnav {
-      display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    #subnav { display: flex; align-items: center; gap: 14px; padding: 12px 16px; }
+    #count-chip { font-size: 15px; color: var(--text); }
+    select.ctl {
+      padding: 7px 12px; border-radius: 4px; border: 1px solid var(--bdr);
+      background: var(--white); color: var(--text2); font-size: 15px;
+      font-family: inherit; cursor: pointer; max-width: 300px;
     }
-    #count-chip { font-size: 13px; color: var(--text); font-weight: 500; }
-    select.ctl, .ctl-btn {
-      padding: 6px 12px; border-radius: 7px; border: 1px solid var(--bdr);
-      background: var(--panel); color: var(--text); font-size: 13px; cursor: pointer;
+    .ctl-btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 7px 20px; border-radius: 4px; border: 1px solid var(--bdr);
+      background: var(--white); color: var(--text); font-size: 15px; cursor: pointer;
     }
-    .ctl-btn:hover, select.ctl:hover { border-color: var(--accent-soft); }
-    .ctl-btn.primary { color: var(--accent); font-weight: 500; }
+    .ctl-btn:hover { border-color: var(--blue); color: var(--blue); }
+    #perpage-wrap { display: none; align-items: center; gap: 8px; font-size: 15px; color: var(--text2); }
+    #perpage-wrap select { max-width: none; }
 
     /* ---------- 上傳頁 ---------- */
-    #upload-view { max-width: 660px; margin: 60px auto; padding: 0 20px; }
+    #upload-view { max-width: 680px; margin: 56px auto; padding: 0 20px; }
     .drop {
-      border: 2px dashed var(--bdr); border-radius: 14px; padding: 44px;
-      text-align: center; color: var(--dim); font-size: 14px; cursor: pointer;
-      background: var(--panel); display: block;
+      border: 1px dashed var(--bdr); border-radius: 5px; padding: 48px;
+      text-align: center; color: var(--text2); font-size: 15px; cursor: pointer;
+      background: var(--white); display: block;
     }
-    .drop:hover, .drop.over { border-color: var(--accent); color: var(--text); }
+    .drop:hover, .drop.over { border-color: var(--blue); color: var(--blue); }
     .drop input { display: none; }
     .format-card {
-      margin-top: 18px; background: var(--panel); border: 1px solid var(--bdr);
-      border-radius: 12px; padding: 18px 20px; box-shadow: var(--shadow);
+      margin-top: 20px; background: var(--white); border: 1px solid var(--bdr);
+      border-radius: 5px; padding: 20px 24px;
     }
-    .format-card h3 { font-size: 13px; color: var(--accent); margin-bottom: 10px; letter-spacing: 0.5px; }
-    .format-card ul { margin: 0 0 12px 18px; color: var(--dim); font-size: 13px; line-height: 1.9; }
-    .format-card table { border-collapse: collapse; font-size: 12px; }
-    .format-card td, .format-card th { border: 1px solid var(--bdr); padding: 4px 10px; }
-    .format-card th { background: var(--panel2); font-weight: 600; }
-    #upload-err { color: var(--danger); font-size: 13px; margin-top: 12px; line-height: 1.7; display: none; }
+    .format-card h3 { font-size: 15px; font-weight: 500; color: var(--text); margin-bottom: 12px; }
+    .format-card ul { margin: 0 0 14px 18px; color: var(--text2); font-size: 14px; line-height: 2; }
+    .format-card table { border-collapse: collapse; font-size: 13px; color: var(--text2); }
+    .format-card td, .format-card th { border: 1px solid var(--bdr); padding: 6px 12px; }
+    .format-card th { background: var(--bg); font-weight: 500; }
+    #upload-err { color: var(--danger); font-size: 14px; margin-top: 12px; line-height: 1.7; display: none; }
 
     /* ---------- 卡片牆 ---------- */
-    #main-area { padding: 0 16px 20px; }
-    #card-wall { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    #main-area { padding: 0 16px 24px; }
+    #card-wall { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
     @media (max-width: 1100px) { #card-wall { grid-template-columns: repeat(2, 1fr); } }
     .card {
-      background: var(--panel); border: 1px solid var(--bdr); border-radius: 10px;
-      box-shadow: var(--shadow); overflow: visible;
+      background: var(--white); border: 1px solid var(--bdr); border-radius: 5px;
+      overflow: hidden; display: flex; flex-direction: column;
     }
     .card-head {
-      display: flex; align-items: center; padding: 10px 12px 0;
+      background: var(--bg); border-bottom: 1px solid var(--bdr);
+      padding: 12px 14px; position: relative;
     }
-    .card-title { font-size: 13px; font-weight: 600; flex: 1;
+    .card-head .row1 { display: flex; align-items: center; }
+    .card-title { font-size: 15px; color: var(--text2); flex: 1;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .card-icons { display: flex; gap: 2px; }
     .cicon {
-      width: 24px; height: 24px; border: none; background: none; cursor: pointer;
-      color: var(--dim); border-radius: 5px; font-size: 13px;
+      width: 28px; height: 28px; border: none; background: none; cursor: pointer;
+      color: var(--text2); border-radius: 4px;
       display: inline-flex; align-items: center; justify-content: center;
     }
-    .cicon:hover { background: var(--panel2); color: var(--text); }
-    .card-type { padding: 2px 12px 6px; font-size: 11.5px; color: var(--dim); }
-    .card-body { position: relative; height: 190px; }
+    .cicon:hover { background: var(--white); color: var(--blue); }
+    .card-type {
+      display: flex; align-items: center; gap: 6px;
+      margin-top: 6px; font-size: 14px; color: var(--text2);
+    }
+    .card-body { position: relative; height: 300px; background: var(--white); padding: 10px 0; }
     .card-body canvas { width: 100%; height: 100%; display: block; }
 
     /* 卡片 popover */
     .popover {
-      position: absolute; top: 30px; right: 6px; z-index: 40; width: 260px;
-      background: var(--panel); border: 1px solid var(--bdr); border-radius: 10px;
-      box-shadow: 0 8px 28px rgba(16,32,48,0.18); padding: 12px;
+      position: absolute; top: 40px; right: 8px; z-index: 40; width: 268px;
+      background: var(--white); border: 1px solid var(--bdr); border-radius: 5px;
+      box-shadow: 0 6px 24px rgba(6, 16, 39, 0.12); padding: 14px; text-align: left;
     }
-    .pop-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+    .pop-tabs { display: flex; border-bottom: 1px solid var(--bdr); margin-bottom: 10px; }
     .pop-tab {
-      flex: 1; padding: 5px 0; border: none; background: var(--panel2);
-      border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--dim);
+      padding: 6px 10px 8px; border: none; background: none; cursor: pointer;
+      font-size: 14px; color: var(--text2); border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
     }
-    .pop-tab.active { background: #e8f0fa; color: var(--accent); font-weight: 600; }
-    .popover label { font-size: 11.5px; color: var(--dim); display: block; margin: 7px 0 3px; }
+    .pop-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+    .popover label { font-size: 13px; color: var(--text2); display: block; margin: 8px 0 4px; }
     .popover input, .popover select {
-      width: 100%; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--bdr);
-      font-size: 12.5px; font-family: inherit;
+      width: 100%; padding: 6px 10px; border-radius: 4px; border: 1px solid var(--bdr);
+      font-size: 14px; font-family: inherit; color: var(--text);
     }
-    .pop-actions { display: flex; gap: 6px; margin-top: 10px; }
+    .pop-actions { display: flex; gap: 8px; margin-top: 14px; }
     .pop-actions button {
-      flex: 1; padding: 6px 0; border-radius: 7px; cursor: pointer; font-size: 12.5px;
-      border: 1px solid var(--bdr); background: var(--panel);
+      flex: 1; padding: 7px 0; border-radius: 4px; cursor: pointer; font-size: 14px;
+      border: 1px solid var(--bdr); background: var(--white); color: var(--text);
     }
-    .pop-actions .save { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
+    .pop-actions .save { background: var(--blue); border-color: var(--blue); color: #fff; }
 
-    /* ---------- 資料集表格 ---------- */
-    #table-wrap { background: var(--panel); border: 1px solid var(--bdr);
-      border-radius: 10px; overflow: auto; box-shadow: var(--shadow); }
-    #ds-table { border-collapse: collapse; font-size: 12.5px; width: max-content; min-width: 100%; }
+    /* ---------- 資料集表格（Tukey：全幅白底、橫直分隔線、多行欄頭） ---------- */
+    #dataset-view { background: var(--white); margin: 0 -16px; border-top: 1px solid var(--bdr); }
+    #table-wrap { overflow: auto; max-height: calc(100vh - 120px); }
+    #ds-table { border-collapse: collapse; font-size: 15px; width: max-content; min-width: 100%; }
     #ds-table th {
-      text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--bdr);
-      background: var(--panel2); position: sticky; top: 0; min-width: 110px;
+      text-align: left; padding: 10px 12px; min-width: 128px; vertical-align: top;
+      background: var(--white); position: sticky; top: 0; z-index: 5;
+      border-bottom: 1px solid var(--bdr); border-right: 1px solid var(--bdr);
     }
-    #ds-table th .tname { font-weight: 600; font-size: 12.5px; }
-    #ds-table th .ttype { font-weight: 400; font-size: 10.5px; color: var(--dim); margin-top: 2px; }
-    #ds-table td { padding: 7px 14px; border-bottom: 1px solid #edf1f5; white-space: nowrap; }
-    #ds-table tr:hover td { background: #f7fafc; }
+    #ds-table th .tname {
+      display: flex; align-items: center; gap: 4px;
+      font-weight: 500; font-size: 14px; color: var(--text);
+    }
+    #ds-table th .tname .thops {
+      margin-left: auto; width: 22px; height: 22px; border: none; background: none;
+      cursor: pointer; color: var(--text2); border-radius: 4px;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    #ds-table th .tname .thops:hover { background: var(--bg); color: var(--blue); }
+    #ds-table th .tgroup { font-weight: 400; font-size: 13px; color: var(--text2); margin-top: 6px; }
+    #ds-table th .ttype {
+      display: flex; align-items: center; gap: 5px;
+      font-weight: 400; font-size: 13px; color: var(--text2); margin-top: 6px;
+    }
+    #ds-table td {
+      padding: 14px 12px; color: var(--text2); white-space: nowrap;
+      border-bottom: 1px solid var(--bdr); border-right: 1px solid var(--bdr);
+    }
+    #ds-table th:last-child, #ds-table td:last-child { border-right: none; }
 
     /* 分頁 */
-    .pager { display: flex; align-items: center; gap: 6px; padding: 12px 0; justify-content: center; }
+    .pager { display: flex; align-items: center; gap: 6px; padding: 14px 0; justify-content: center; }
     .pager button {
-      padding: 5px 11px; border-radius: 6px; border: 1px solid var(--bdr);
-      background: var(--panel); cursor: pointer; font-size: 12.5px;
+      padding: 6px 12px; border-radius: 4px; border: 1px solid var(--bdr);
+      background: var(--white); color: var(--text); cursor: pointer; font-size: 14px;
     }
+    .pager button:hover { border-color: var(--blue); color: var(--blue); }
     .pager button:disabled { opacity: 0.4; pointer-events: none; }
-    .pager .pinfo { font-size: 12.5px; color: var(--dim); margin: 0 8px; }
+    .pager .pinfo { font-size: 14px; color: var(--text2); margin: 0 8px; }
 
     /* ---------- 右側 drawer ---------- */
     #drawer {
-      position: fixed; top: 0; right: -380px; width: 380px; height: 100vh; z-index: 50;
-      background: var(--panel); border-left: 1px solid var(--bdr);
-      box-shadow: -4px 0 24px rgba(16,32,48,0.10); transition: right 0.25s;
+      position: fixed; top: 0; right: -400px; width: 400px; height: 100vh; z-index: 50;
+      background: var(--white); border-left: 1px solid var(--bdr);
+      box-shadow: -6px 0 24px rgba(6, 16, 39, 0.08); transition: right 0.22s;
       display: flex; flex-direction: column;
     }
     #drawer.open { right: 0; }
-    .drawer-tabs { display: flex; border-bottom: 1px solid var(--bdr); }
+    .drawer-tabs { display: flex; border-bottom: 1px solid var(--bdr); padding: 0 8px; }
     .dtab {
-      flex: 1; padding: 13px 0; text-align: center; border: none; background: none;
-      cursor: pointer; font-size: 13px; color: var(--dim); border-bottom: 2px solid transparent;
+      padding: 14px 12px; text-align: center; border: none; background: none;
+      cursor: pointer; font-size: 15px; color: var(--text2);
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
     }
-    .dtab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
-    .dbody { flex: 1; overflow-y: auto; padding: 14px; display: none; }
+    .dtab.active { color: var(--blue); border-bottom-color: var(--blue); }
+    .dbody { flex: 1; overflow-y: auto; padding: 16px; display: none; }
     .dbody.show { display: block; }
     .hist-node {
-      border: 1px solid var(--bdr); border-radius: 9px; padding: 10px 12px;
-      margin-bottom: 8px; font-size: 12.5px; background: var(--panel);
+      border: 1px solid var(--bdr); border-radius: 5px; padding: 12px 14px;
+      margin-bottom: 10px; font-size: 14px; background: var(--white);
     }
-    .hist-node.origin { background: var(--panel2); }
-    .hist-node .n-title { font-weight: 600; }
-    .hist-node .n-meta { color: var(--dim); font-size: 11.5px; margin-top: 3px; line-height: 1.6; }
+    .hist-node.origin { background: var(--bg); }
+    .hist-node .n-title { font-weight: 500; color: var(--text); }
+    .hist-node .n-meta { color: var(--text2); font-size: 13px; margin-top: 4px; line-height: 1.7; }
     .hist-node .n-row { display: flex; align-items: center; gap: 8px; }
     .hist-node.off { opacity: 0.45; }
-    .hist-node input[type="checkbox"] { accent-color: var(--accent); }
-    .hist-node .del { margin-left: auto; color: var(--danger); cursor: pointer; font-size: 11.5px; }
-    .col-row { display: flex; align-items: center; gap: 8px; padding: 5px 4px;
-      font-size: 12.5px; border-radius: 6px; }
-    .col-row:hover { background: var(--panel2); }
-    .col-row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .col-row.hid .nm { text-decoration: line-through; color: var(--dim); }
-    .col-row .act { color: var(--accent); cursor: pointer; font-size: 11.5px; }
+    .hist-node input[type="checkbox"] { accent-color: var(--blue); }
+    .hist-node .del { margin-left: auto; color: var(--danger); cursor: pointer; font-size: 13px; }
+    .col-row { display: flex; align-items: center; gap: 8px; padding: 7px 6px;
+      font-size: 14px; border-radius: 4px; }
+    .col-row:hover { background: var(--bg); }
+    .col-row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; color: var(--text); }
+    .col-row.hid .nm { text-decoration: line-through; color: var(--text2); }
+    .col-row .act { color: var(--blue); cursor: pointer; font-size: 13px; }
     input.search {
-      width: 100%; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--bdr);
-      font-size: 12.5px; margin-bottom: 8px; font-family: inherit;
+      width: 100%; padding: 7px 12px; border-radius: 4px; border: 1px solid var(--bdr);
+      font-size: 14px; margin-bottom: 10px; font-family: inherit; color: var(--text);
     }
-    .mini { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--bdr);
-      font-size: 12.5px; margin-bottom: 7px; font-family: inherit; }
-    .dbtn { width: 100%; padding: 7px 0; border-radius: 7px; cursor: pointer; font-size: 12.5px;
-      border: 1px solid var(--bdr); background: var(--panel); margin-bottom: 6px; }
-    .dbtn:hover { border-color: var(--accent-soft); }
-    .props-result { font-size: 12.5px; background: var(--panel2); border: 1px solid var(--bdr);
-      border-radius: 8px; padding: 10px; margin-top: 8px; line-height: 1.8; }
-    .props-result .bad { color: var(--danger); font-weight: 700; }
-    .props-result .good { color: var(--ok); font-weight: 700; }
-    .hint { font-size: 11.5px; color: var(--dim); line-height: 1.7; }
+    .mini { width: 100%; padding: 7px 10px; border-radius: 4px; border: 1px solid var(--bdr);
+      font-size: 14px; margin-bottom: 8px; font-family: inherit; color: var(--text);
+      background: var(--white); }
+    .dbtn { width: 100%; padding: 8px 0; border-radius: 4px; cursor: pointer; font-size: 14px;
+      border: 1px solid var(--bdr); background: var(--white); color: var(--text); margin-bottom: 8px; }
+    .dbtn:hover { border-color: var(--blue); color: var(--blue); }
+    .props-result { font-size: 14px; background: var(--bg); border: 1px solid var(--bdr);
+      border-radius: 5px; padding: 12px; margin-top: 8px; line-height: 1.9; color: var(--text2); }
+    .props-result .bad { color: var(--danger); font-weight: 600; }
+    .props-result .good { color: var(--ok); font-weight: 600; }
+    .hint { font-size: 13px; color: var(--text2); line-height: 1.8; }
 
     /* 更多選單 */
     #more-menu {
-      position: absolute; top: 42px; right: 16px; z-index: 45; width: 250px;
-      background: var(--panel); border: 1px solid var(--bdr); border-radius: 10px;
-      box-shadow: 0 8px 28px rgba(16,32,48,0.16); padding: 8px; display: none;
+      position: absolute; top: 46px; right: 12px; z-index: 45; width: 256px;
+      background: var(--white); border: 1px solid var(--bdr); border-radius: 5px;
+      box-shadow: 0 6px 24px rgba(6, 16, 39, 0.12); padding: 8px; display: none;
     }
     #more-menu.open { display: block; }
-    #more-menu .mh { font-size: 11px; color: var(--dim); padding: 6px 10px 3px; letter-spacing: 0.5px; }
+    #more-menu .mh { font-size: 12px; color: var(--text2); padding: 8px 10px 4px; }
     #more-menu button {
-      display: block; width: 100%; text-align: left; padding: 8px 10px;
-      border: none; background: none; cursor: pointer; font-size: 13px; border-radius: 6px;
+      display: block; width: 100%; text-align: left; padding: 9px 10px;
+      border: none; background: none; cursor: pointer; font-size: 14px;
+      border-radius: 4px; color: var(--text);
     }
-    #more-menu button:hover { background: var(--panel2); }
+    #more-menu button:hover { background: var(--bg); }
     #more-menu hr { border: none; border-top: 1px solid var(--bdr); margin: 6px 0; }
 
     /* 放大 modal */
     #zoom-modal {
-      position: fixed; inset: 0; z-index: 60; background: rgba(16,32,48,0.45);
+      position: fixed; inset: 0; z-index: 60; background: rgba(6, 16, 39, 0.4);
       display: none; align-items: center; justify-content: center;
     }
     #zoom-modal.open { display: flex; }
-    .zoom-box { width: min(860px, 92vw); background: var(--panel); border-radius: 14px;
-      padding: 20px; box-shadow: 0 16px 60px rgba(0,0,0,0.3); }
-    .zoom-box h3 { font-size: 15px; margin-bottom: 12px; }
-    .zoom-box canvas { width: 100%; height: 420px; display: block; }
-    .zoom-close { float: right; border: none; background: none; font-size: 18px;
-      cursor: pointer; color: var(--dim); }
+    .zoom-box { width: min(880px, 92vw); background: var(--white); border-radius: 5px;
+      border: 1px solid var(--bdr); padding: 24px; }
+    .zoom-box h3 { font-size: 15px; font-weight: 500; color: var(--text); margin-bottom: 14px; }
+    .zoom-box canvas { width: 100%; height: 440px; display: block; }
+    .zoom-close { float: right; border: none; background: none; font-size: 20px;
+      cursor: pointer; color: var(--text2); line-height: 1; }
   </style>
 </head>
 <body>
   <header id="topnav">
-    <a class="brand-home" href="/" title="回平台首頁">EJ</a>
+    <a class="nav-back" href="/" title="回平台首頁">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+    </a>
     <span id="ds-name">資料前處理</span>
-    <button class="nav-tab" data-view="dataset">資料集</button>
-    <button class="nav-tab active" data-view="explore">探索分析</button>
+    <span class="nav-sep"></span>
+    <button class="nav-tab" data-view="dataset">
+      <svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 10h18"/><path d="M3 15h18"/><path d="M9 4v16"/></svg>
+      資料集</button>
+    <button class="nav-tab active" data-view="explore">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/></svg>
+      探索分析</button>
     <span class="spacer"></span>
-    <button class="ctl-btn" id="btn-more">更多</button>
+    <button id="btn-more">更多
+      <svg class="ic sm" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
   </header>
 
   <div id="more-menu">
@@ -248,7 +306,14 @@
       <option value="">選擇預測目標進行二維分析</option>
     </select>
     <span class="spacer"></span>
-    <button class="ctl-btn primary" id="btn-drawer">資料預處理</button>
+    <span id="perpage-wrap">每頁顯示
+      <select class="ctl" id="perpage-select">
+        <option>15</option><option>30</option><option>50</option>
+      </select> 筆
+    </span>
+    <button class="ctl-btn" id="btn-drawer">
+      <svg class="ic sm" viewBox="0 0 24 24"><path d="M22 4H2l8 9.2V19l4 2v-7.8z"/></svg>
+      資料預處理</button>
   </nav>
 
   <div id="upload-view">

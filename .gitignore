@@ -25,3 +25,8 @@ scans/*
 .vscode/
 .DS_Store
 Thumbs.db
+
+# P&ID 解析場景（客戶圖面衍生物，含位號）
+data/scenes/pid-*.json
+# 本機開發工具設定
+.claude/

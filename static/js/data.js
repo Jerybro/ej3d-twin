@@ -6,7 +6,22 @@ let target = '';         // 二維分析目標欄
 let wallPage = 1;
 let tablePage = 1;
 const PER_WALL = 9;
-const PER_TABLE = 15;
+let perTable = 15;
+
+// SVG stroke icons（Lucide 風，stroke=currentColor）
+const IC = (d, extra = '') => `<svg class="ic sm" viewBox="0 0 24 24">${extra}${d.map((p) => `<path d="${p}"/>`).join('')}</svg>`;
+const ICONS = {
+  funnel: IC(['M22 4H2l8 9.2V19l4 2v-7.8z']),
+  zoom: IC(['M15 3h6v6', 'M9 21H3v-6', 'M21 3l-7 7', 'M3 21l7-7']),
+  eyeoff: IC(['M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94', 'M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19', 'M14.12 14.12a3 3 0 1 1-4.24-4.24', 'M1 1l22 22']),
+  calendar: IC(['M16 2v4', 'M8 2v4', 'M3 10h18'], '<rect x="3" y="4" width="18" height="18" rx="2"/>'),
+  hash: IC(['M4 9h16', 'M4 15h16', 'M10 3L8 21', 'M16 3l-2 18']),
+  text: IC(['M4 7V5h16v2', 'M12 5v14', 'M9 19h6']),
+  key: IC(['M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m3 3L21 8m-3-3l3 3']),
+  dots: IC(['M12 5.5v.01', 'M12 12v.01', 'M12 18.5v.01']),
+};
+const kindIcon = (kind) => kind === 'time' ? ICONS.calendar : kind === 'numeric' ? ICONS.hash : ICONS.text;
+const kindName = { time: '時間型態', numeric: '數值型態', string: '字串型態' };
 const $ = (id) => document.getElementById(id);
 const api = (path, opts) => fetch(`/api/data/${sid}${path}`, opts).then((r) => {
   if (!r.ok) return r.json().then((e) => { throw new Error(e.detail ?? r.status); });
@@ -36,13 +51,25 @@ async function upload(file) {
     $('upload-err').style.display = 'block';
     return;
   }
-  sid = body.sid;
-  $('ds-name').textContent = body.filename ?? '資料集';
+  history.replaceState(null, '', `?sid=${body.sid}`);
+  enterSession(body.sid, body.filename);
+}
+
+async function enterSession(newSid, filename) {
+  sid = newSid;
   $('upload-view').style.display = 'none';
   $('main-area').style.display = '';
   $('subnav').style.display = '';
   await refreshState();
+  $('ds-name').textContent = filename ?? state.filename ?? '資料集';
   refreshPropsFluids();
+}
+
+// ?sid= 會話還原（重新整理不遺失工作階段）
+const urlSid = new URLSearchParams(location.search).get('sid');
+if (urlSid) {
+  sid = urlSid;
+  api('/state').then(() => enterSession(urlSid)).catch(() => { sid = null; });
 }
 
 // ------------------------------------------------------------ 狀態
@@ -65,9 +92,19 @@ async function refreshState() {
 document.querySelectorAll('.nav-tab').forEach((t) => t.addEventListener('click', () => {
   document.querySelectorAll('.nav-tab').forEach((x) => x.classList.remove('active'));
   t.classList.add('active');
-  $('explore-view').style.display = t.dataset.view === 'explore' ? '' : 'none';
-  $('dataset-view').style.display = t.dataset.view === 'dataset' ? '' : 'none';
+  const isExplore = t.dataset.view === 'explore';
+  $('explore-view').style.display = isExplore ? '' : 'none';
+  $('dataset-view').style.display = isExplore ? 'none' : '';
+  // 次導航依頁切換：探索分析＝二維目標下拉；資料集＝每頁顯示
+  $('target-select').style.display = isExplore ? '' : 'none';
+  $('perpage-wrap').style.display = isExplore ? 'none' : 'flex';
 }));
+
+$('perpage-select').addEventListener('change', async (e) => {
+  perTable = +e.target.value;
+  tablePage = 1;
+  await renderTable();
+});
 
 $('target-select').addEventListener('change', async (e) => {
   target = e.target.value;
@@ -129,14 +166,16 @@ async function renderWall() {
   wall.innerHTML = res.cards.map((c, i) => `
     <div class="card" data-col="${c.col}">
       <div class="card-head">
-        <span class="card-title" title="${c.col}">${c.col}</span>
-        <span class="card-icons">
-          <button class="cicon" data-act="ops" title="資料操作（排除/萃取/聚合）">▽</button>
-          <button class="cicon" data-act="zoom" title="放大">⤢</button>
-          <button class="cicon" data-act="hide" title="隱藏欄位">◌</button>
-        </span>
+        <div class="row1">
+          <span class="card-title" title="${c.col}">${c.col}</span>
+          <span class="card-icons">
+            <button class="cicon" data-act="ops" title="資料操作（排除/萃取/聚合）">${ICONS.funnel}</button>
+            <button class="cicon" data-act="zoom" title="放大">${ICONS.zoom}</button>
+            <button class="cicon" data-act="hide" title="隱藏欄位">${ICONS.eyeoff}</button>
+          </span>
+        </div>
+        <div class="card-type">${kindIcon(c.kind)} ${kindName[c.kind] ?? c.kind}${res.target && c.col !== res.target ? `　vs ${res.target}` : ''}</div>
       </div>
-      <div class="card-type">${c.kind === 'time' ? '時間型態' : c.kind === 'numeric' ? '數值型態' : '字串型態'}${res.target && c.col !== res.target ? `｜vs ${res.target}` : ''}</div>
       <div class="card-body"><canvas id="cv-${i}"></canvas></div>
     </div>`).join('');
   res.cards.forEach((c, i) => drawCard($(`cv-${i}`), c));
@@ -146,7 +185,7 @@ async function renderWall() {
     const act = btn.dataset.act;
     if (act === 'hide') toggleHide(col);
     else if (act === 'zoom') openZoom(col);
-    else if (act === 'ops') openPopover(btn.closest('.card'), col);
+    else if (act === 'ops') openPopover(btn.closest('.card-head'), col);
   }));
   renderPager($('wall-pager'), wallPage, Math.ceil(res.total_cols / PER_WALL), async (p) => {
     wallPage = p;
@@ -165,7 +204,10 @@ function renderPager(el, page, pages, go) {
   el.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => go(+b.dataset.p)));
 }
 
-// 卡片繪圖（直方圖/柱狀/散佈）
+// 卡片繪圖（直方圖/柱狀/散佈）— Tukey 藍白：主藍 #046AFB、細軸線、欄名置底
+const C_BLUE = '#046AFB';
+const C_AXIS = '#061027';
+const C_LABEL = '#555555';
 function drawCard(canvas, card, big = false) {
   const dpr = devicePixelRatio;
   const w = canvas.clientWidth || canvas.parentElement.clientWidth;
@@ -175,36 +217,56 @@ function drawCard(canvas, card, big = false) {
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  const M = { l: big ? 56 : 42, r: 12, t: 10, b: big ? 30 : 24 };
-  const font = big ? '11px Inter' : '9.5px Inter';
-  ctx.font = font;
+  const M = { l: big ? 64 : 52, r: 18, t: 12, b: big ? 46 : 38 };
+  ctx.font = big ? '12px Inter' : '11px Inter';
+
+  // 軸線（左＋下，Tukey 同款細黑軸）
+  const axes = () => {
+    ctx.strokeStyle = C_AXIS;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(M.l - 6, M.t);
+    ctx.lineTo(M.l - 6, h - M.b + 6);
+    ctx.lineTo(w - M.r, h - M.b + 6);
+    ctx.stroke();
+  };
+  // 欄名置底置中（Tukey 卡片 x 軸標籤）
+  const xlabel = (txt) => {
+    ctx.fillStyle = C_LABEL;
+    ctx.fillText(txt, (w - ctx.measureText(txt).width) / 2, h - 6);
+  };
 
   if (card.mode === 'hist') {
+    axes();
     const maxC = Math.max(...card.counts, 1);
     const bw = (w - M.l - M.r) / card.counts.length;
-    ctx.fillStyle = '#74a8e8';
+    ctx.fillStyle = C_BLUE;
     card.counts.forEach((cnt, i) => {
       const bh = (cnt / maxC) * (h - M.t - M.b);
-      ctx.fillRect(M.l + i * bw + 0.5, h - M.b - bh, Math.max(bw - 1, 1), bh);
+      ctx.fillRect(M.l + i * bw + 0.5, h - M.b - bh, Math.max(bw - 1.5, 1), bh);
     });
-    ctx.fillStyle = '#6b7c8c';
-    const fmt = (v) => card.x_is_time ? new Date(v).toLocaleDateString('en', { month: 'short', day: 'numeric' }) : String(v);
-    ctx.fillText(fmt(card.edges[0]), M.l, h - 8);
+    ctx.fillStyle = C_LABEL;
+    // x_is_time：後端 edges 為 epoch 秒
+    const fmt = (v) => card.x_is_time ? new Date(v * 1000).toLocaleDateString('en', { month: 'short', day: 'numeric' }) : String(v);
+    ctx.fillText(fmt(card.edges[0]), M.l, h - M.b + 20);
     const last = fmt(card.edges.at(-1));
-    ctx.fillText(last, w - M.r - ctx.measureText(last).width, h - 8);
-    // Y 軸最大值
-    ctx.fillText(String(maxC), 6, M.t + 8);
+    ctx.fillText(last, w - M.r - ctx.measureText(last).width, h - M.b + 20);
+    ctx.fillText(String(maxC), 8, M.t + 9);
+    xlabel(card.col);
   } else if (card.mode === 'bar') {
+    axes();
     const maxC = Math.max(...card.counts, 1);
     const bw = (w - M.l - M.r) / card.labels.length;
     card.labels.forEach((lb, i) => {
       const bh = (card.counts[i] / maxC) * (h - M.t - M.b);
-      ctx.fillStyle = '#e0a54a';
+      ctx.fillStyle = C_BLUE;
       ctx.fillRect(M.l + i * bw + 1, h - M.b - bh, bw - 2, bh);
-      ctx.fillStyle = '#6b7c8c';
-      ctx.fillText(lb.slice(0, 7), M.l + i * bw + 2, h - 8);
+      ctx.fillStyle = C_LABEL;
+      ctx.fillText(lb.slice(0, 7), M.l + i * bw + 2, h - M.b + 20);
     });
+    xlabel(card.col);
   } else if (card.mode === 'scatter') {
+    axes();
     const xs = card.x, ys = card.y;
     if (!xs.length) return;
     const xnum = xs.map((v) => typeof v === 'number' ? v : 0);
@@ -212,21 +274,22 @@ function drawCard(canvas, card, big = false) {
     const ylo = Math.min(...ys), yhi = Math.max(...ys);
     const px = (v) => M.l + ((v - xlo) / ((xhi - xlo) || 1)) * (w - M.l - M.r);
     const py = (v) => h - M.b - ((v - ylo) / ((yhi - ylo) || 1)) * (h - M.t - M.b);
-    ctx.fillStyle = 'rgba(59,130,214,0.55)';
+    ctx.fillStyle = 'rgba(4, 106, 251, 0.5)';
     xnum.forEach((xv, i) => {
       ctx.beginPath();
       ctx.arc(px(xv), py(ys[i]), big ? 2.5 : 1.8, 0, Math.PI * 2);
       ctx.fill();
     });
-    ctx.fillStyle = '#6b7c8c';
-    const fmtX = (v) => card.x_is_time ? new Date(v).toLocaleDateString('en', { month: 'short', day: 'numeric' }) : String(Math.round(v * 100) / 100);
-    ctx.fillText(fmtX(xlo), M.l, h - 8);
+    ctx.fillStyle = C_LABEL;
+    const fmtX = (v) => card.x_is_time ? new Date(v * 1000).toLocaleDateString('en', { month: 'short', day: 'numeric' }) : String(Math.round(v * 100) / 100);
+    ctx.fillText(fmtX(xlo), M.l, h - M.b + 20);
     const lastX = fmtX(xhi);
-    ctx.fillText(lastX, w - M.r - ctx.measureText(lastX).width, h - 8);
-    ctx.fillText(String(Math.round(yhi * 10) / 10), 4, M.t + 8);
-    ctx.fillText(String(Math.round(ylo * 10) / 10), 4, h - M.b);
+    ctx.fillText(lastX, w - M.r - ctx.measureText(lastX).width, h - M.b + 20);
+    ctx.fillText(String(Math.round(yhi * 10) / 10), 8, M.t + 9);
+    ctx.fillText(String(Math.round(ylo * 10) / 10), 8, h - M.b);
+    xlabel(card.col);
   } else {
-    ctx.fillStyle = '#6b7c8c';
+    ctx.fillStyle = C_LABEL;
     ctx.fillText('（無資料）', M.l, h / 2);
   }
 }
@@ -236,7 +299,7 @@ function closePopovers() {
   document.querySelectorAll('.popover').forEach((p) => p.remove());
 }
 
-function openPopover(cardEl, col) {
+function openPopover(anchorEl, col) {
   closePopovers();
   const colInfo = state.columns.find((c) => c.name === col);
   const numeric = colInfo && (colInfo.dtype.startsWith('float') || colInfo.dtype.startsWith('int'));
@@ -245,18 +308,20 @@ function openPopover(cardEl, col) {
   pop.className = 'popover';
   pop.innerHTML = `
     <div class="pop-tabs">
-      ${numeric ? `<button class="pop-tab active" data-t="exclude">排除</button>
-      <button class="pop-tab" data-t="extract">萃取</button>` : ''}
-      ${isTime ? '<button class="pop-tab active" data-t="aggregate">聚合</button>'
-        : '<button class="pop-tab" data-t="aggregate">聚合</button>'}
+      ${numeric ? `<button class="pop-tab active" data-t="exclude">排除資料</button>
+      <button class="pop-tab" data-t="extract">萃取資料</button>` : ''}
+      ${isTime ? '<button class="pop-tab active" data-t="aggregate">聚合資料</button>'
+        : '<button class="pop-tab" data-t="aggregate">聚合資料</button>'}
     </div>
     <div id="pop-form"></div>
     <div class="pop-actions">
       <button class="cancel">取消</button>
       <button class="save">加入歷程</button>
     </div>`;
-  cardEl.querySelector('.card-head').style.position = 'relative';
-  cardEl.querySelector('.card-head').appendChild(pop);
+  // sticky/relative 皆可作 absolute 定位基準；只在 static 時補 relative
+  if (getComputedStyle(anchorEl).position === 'static') anchorEl.style.position = 'relative';
+  if (anchorEl.tagName === 'TH') { pop.style.right = 'auto'; pop.style.left = '0'; }
+  anchorEl.appendChild(pop);
 
   let mode = numeric ? 'exclude' : 'aggregate';
   const form = pop.querySelector('#pop-form');
@@ -340,20 +405,36 @@ async function openZoom(col) {
 $('zoom-close').addEventListener('click', () => $('zoom-modal').classList.remove('open'));
 $('zoom-modal').addEventListener('click', (e) => { if (e.target === $('zoom-modal')) $('zoom-modal').classList.remove('open'); });
 
-// ------------------------------------------------------------ 資料集表格
+// ------------------------------------------------------------ 資料集表格（Tukey 多行欄頭）
 async function renderTable() {
-  const res = await api(`/rows?page=${tablePage}&per_page=${PER_TABLE}`);
+  const res = await api(`/rows?page=${tablePage}&per_page=${perTable}`);
   const table = $('ds-table');
-  const kindName = { time: '時間型態', numeric: '數值型態', string: '字串型態' };
-  table.innerHTML = `<tr>${res.columns.map((c) => `
-    <th><div class="tname">${c.name}</div><div class="ttype">${c.name === '__id__' ? 'id' : kindName[c.kind]}</div></th>`).join('')}</tr>`
+  table.innerHTML = `<tr>${res.columns.map((c) => {
+    const isId = c.name === '__id__';
+    const typeLine = isId
+      ? `${ICONS.key} id`
+      : `${kindIcon(c.kind)} ${kindName[c.kind] ?? c.kind}`;
+    return `
+    <th class="rel" data-col="${c.name}">
+      <div class="tname">${c.name}
+        ${isId ? '' : `<button class="thops" title="資料操作（排除/萃取/聚合）">${ICONS.dots}</button>`}
+      </div>
+      <div class="tgroup">一般欄位</div>
+      <div class="ttype">${typeLine}</div>
+    </th>`;
+  }).join('')}</tr>`
     + res.rows.map((r) => `<tr>${res.columns.map((c) => {
       let v = r[c.name];
       if (v == null) v = '';
       if (c.kind === 'time' && v) v = String(v).replace('T', ' ').slice(0, 19);
       return `<td>${v}</td>`;
     }).join('')}</tr>`).join('');
-  renderPager($('table-pager'), tablePage, Math.ceil(res.n_view / PER_TABLE), async (p) => {
+  table.querySelectorAll('.thops').forEach((btn) => btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const th = btn.closest('th');
+    openPopover(th, th.dataset.col);
+  }));
+  renderPager($('table-pager'), tablePage, Math.ceil(res.n_view / perTable), async (p) => {
     tablePage = p;
     await renderTable();
   });

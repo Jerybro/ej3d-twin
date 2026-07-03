@@ -55,7 +55,7 @@ document.querySelectorAll('.ric[data-ic]').forEach((el) => {
 
 // ---------------------------------------------------------------- 三維基礎
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0e141b);
+scene.background = new THREE.Color(0xe6ebf1);  // E3D 淺色視圖
 
 const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 300);
 camera.position.set(16, 14, 18);
@@ -88,7 +88,7 @@ function setNavMode(k) {
   document.getElementById('st-nav').textContent = NAV_MODES[k].label;
 }
 
-scene.add(new THREE.HemisphereLight(0xbdd2e2, 0x1a222b, 1.4));
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8d99a6, 1.25));
 const sun = new THREE.DirectionalLight(0xfff4e0, 1.4);
 sun.position.set(18, 26, 10);
 sun.castShadow = true;
@@ -96,12 +96,12 @@ scene.add(sun);
 
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(80, 60),
-  new THREE.MeshStandardMaterial({ color: 0x1c232b, roughness: 1 })
+  new THREE.MeshStandardMaterial({ color: 0xd9dfe6, roughness: 1 })
 );
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
-let grid = new THREE.GridHelper(80, 40, 0x2a3844, 0x1f2a33);
+let grid = new THREE.GridHelper(80, 40, 0xaeb9c6, 0xc8d1da);
 grid.position.y = 0.02;
 scene.add(grid);
 
@@ -164,7 +164,7 @@ function fitGround(equipList, underlays) {
   ground.geometry = new THREE.PlaneGeometry(w, d);
   scene.remove(grid);
   grid.geometry.dispose();
-  grid = new THREE.GridHelper(Math.max(w, d), Math.max(w, d) / 2, 0x2a3844, 0x1f2a33);
+  grid = new THREE.GridHelper(Math.max(w, d), Math.max(w, d) / 2, 0xaeb9c6, 0xc8d1da);
   grid.position.y = 0.02;
   grid.visible = showGrid;
   scene.add(grid);
@@ -244,7 +244,7 @@ function buildEquipment(def) {
   group.rotation.y = def.rot_y ?? 0;
 
   const el = document.createElement('div');
-  el.style.cssText = 'padding:2px 8px;border-radius:10px;background:rgba(12,20,28,.82);border:1px solid #2a3f5a;color:#46c2e0;font-size:11px;font-weight:700;white-space:nowrap;';
+  el.style.cssText = 'padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.92);border:1px solid #c6d0da;color:#046AFB;font-size:11px;font-weight:700;white-space:nowrap;';
   el.textContent = def.tag;
   const label = new CSS2DObject(el);
   label.position.set(0, labelHeight(def), 0);

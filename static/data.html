@@ -10,11 +10,10 @@
        主藍 #046AFB｜頁底/卡頭 #F6F7FA｜邊框 #DBDDE0｜主字 #061027｜次字 #555
        Inter 15px｜卡片 5px 圓角細框無陰影｜按鈕 4px 圓角 outline */
     :root {
-      /* 全平台統一：建模（E3D 工作區）深色美術風 */
-      --blue: #46c2e0; --bg: #0e141b; --white: #131b24;
-      --bdr: #223140; --text: #dbe5ee; --text2: #8ba0b3;
-      --danger: #ff6b81; --ok: #35d49a;
-      --green: #35d49a; --green-deep: #0d3a2c;   /* 資料/AI 識別色（圖表同系） */
+      --blue: #046AFB; --bg: #F6F7FA; --white: #ffffff;
+      --bdr: #DBDDE0; --text: #061027; --text2: #555555;
+      --danger: #d03050; --ok: #18a058;
+      --green: #059669; --green-deep: #052E22;   /* 資料/AI 識別色（圖表同系） */
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; background: var(--bg); color: var(--text);
@@ -53,7 +52,7 @@
       font-size: 15px; color: var(--text); border-radius: 4px;
     }
     .nav-tab:hover { background: var(--bg); }
-    .nav-tab.active { color: var(--blue); background: rgba(70, 194, 224, 0.08); }
+    .nav-tab.active { color: var(--blue); background: rgba(4, 106, 251, 0.07); }
     .spacer { flex: 1; }
     #btn-more {
       display: inline-flex; align-items: center; gap: 7px;
@@ -86,7 +85,7 @@
     .uicon:hover { border-color: var(--blue); color: var(--blue); }
     .uicon:disabled { opacity: 0.35; pointer-events: none; }
     button:focus-visible, select:focus-visible, input:focus-visible {
-      outline: 2px solid rgba(70, 194, 224, 0.35); outline-offset: 1px;
+      outline: 2px solid rgba(4, 106, 251, 0.35); outline-offset: 1px;
     }
 
     /* ---------- 上傳頁 ---------- */
@@ -118,7 +117,7 @@
       overflow: hidden; display: flex; flex-direction: column;
       transition: border-color 0.15s, box-shadow 0.15s;
     }
-    .card:hover { border-color: #C9CFD6; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); }
+    .card:hover { border-color: #C9CFD6; box-shadow: 0 4px 16px rgba(6, 16, 39, 0.06); }
     .card-head {
       background: var(--bg); border-bottom: 1px solid var(--bdr);
       padding: 12px 14px; position: relative;
@@ -144,7 +143,7 @@
     .popover {
       position: absolute; top: 40px; right: 8px; z-index: 40; width: 268px;
       background: var(--white); border: 1px solid var(--bdr); border-radius: 6px;
-      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); padding: 14px; text-align: left;
+      box-shadow: 0 6px 24px rgba(6, 16, 39, 0.12); padding: 14px; text-align: left;
     }
     .pop-tabs { display: flex; border-bottom: 1px solid var(--bdr); margin-bottom: 10px; }
     .pop-tab {
@@ -209,7 +208,7 @@
     #drawer {
       position: fixed; top: 0; right: -400px; width: 400px; height: 100vh; z-index: 50;
       background: var(--white); border-left: 1px solid var(--bdr);
-      box-shadow: -6px 0 24px rgba(0, 0, 0, 0.4); transition: right 0.22s;
+      box-shadow: -6px 0 24px rgba(6, 16, 39, 0.08); transition: right 0.22s;
       display: flex; flex-direction: column;
     }
     #drawer.open { right: 0; }
@@ -316,7 +315,7 @@
     .wi-dn { color: var(--danger); font-weight: 600; }
 
     /* 建模精靈 */
-    .wiz-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(2, 6, 10, 0.66);
+    .wiz-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(6, 16, 39, 0.4);
       display: none; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 48px 0; }
     .wiz-overlay.open { display: flex; }
     .wiz-box { width: min(680px, 92vw); background: var(--white); border-radius: 8px;
@@ -325,7 +324,7 @@
     .wiz-box label { display: block; font-size: 14px; color: var(--text); margin: 12px 0 6px; }
     .wiz-mode { border: 1px solid var(--bdr); border-radius: 6px; padding: 14px 16px;
       margin-bottom: 10px; cursor: pointer; }
-    .wiz-mode.on { border-color: var(--blue); background: rgba(70, 194, 224, 0.06); }
+    .wiz-mode.on { border-color: var(--blue); background: rgba(4, 106, 251, 0.05); }
     .wiz-mode b { font-size: 15px; font-weight: 500; color: var(--text); }
     .wiz-mode p { font-size: 13px; color: var(--text2); margin-top: 4px; line-height: 1.6; }
     #wiz-features, .feat-grid { max-height: 180px; overflow-y: auto; border: 1px solid var(--bdr);
@@ -349,7 +348,7 @@
     .brush-panel {
       position: fixed; z-index: 70; width: 248px;
       background: var(--white); border: 1px solid var(--bdr); border-radius: 6px;
-      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); padding: 12px;
+      box-shadow: 0 6px 24px rgba(6, 16, 39, 0.14); padding: 12px;
     }
     .brush-panel .bp-range { font-size: 13.5px; color: var(--text); line-height: 1.7;
       margin-bottom: 10px; word-break: break-all; }
@@ -365,7 +364,7 @@
     #more-drawer {
       position: fixed; top: 0; right: -320px; width: 320px; height: 100vh; z-index: 55;
       background: var(--white); border-left: 1px solid var(--bdr);
-      box-shadow: -6px 0 24px rgba(0, 0, 0, 0.4); transition: right 0.22s;
+      box-shadow: -6px 0 24px rgba(6, 16, 39, 0.08); transition: right 0.22s;
       display: flex; flex-direction: column;
     }
     #more-drawer.open { right: 0; }
@@ -390,7 +389,7 @@
     #theme-menu {
       position: absolute; top: 46px; right: 76px; z-index: 45; width: 208px;
       background: var(--white); border: 1px solid var(--bdr); border-radius: 6px;
-      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); padding: 8px; display: none;
+      box-shadow: 0 6px 24px rgba(6, 16, 39, 0.12); padding: 8px; display: none;
     }
     #theme-menu.open { display: block; }
     #theme-menu .mh { font-size: 12px; color: var(--text2); padding: 6px 10px 4px; }
@@ -400,12 +399,12 @@
       font-size: 14px; border-radius: 4px; color: var(--text);
     }
     #theme-menu button:hover { background: var(--bg); }
-    #theme-menu button.on { background: rgba(70, 194, 224, 0.08); }
+    #theme-menu button.on { background: rgba(4, 106, 251, 0.07); }
     #theme-menu .sw { width: 34px; height: 12px; border-radius: 6px; flex-shrink: 0; }
 
     /* 放大 modal */
     #zoom-modal {
-      position: fixed; inset: 0; z-index: 60; background: rgba(2, 6, 10, 0.66);
+      position: fixed; inset: 0; z-index: 60; background: rgba(6, 16, 39, 0.4);
       display: none; align-items: center; justify-content: center;
     }
     #zoom-modal.open { display: flex; }
@@ -448,7 +447,7 @@
 
   <div id="theme-menu">
     <div class="mh">圖表主題色（深淺＝資料密度）</div>
-    <button data-theme="green"><span class="sw" style="background:linear-gradient(90deg,#B7D4C4,#123c2e)"></span>綠（預設）</button>
+    <button data-theme="green"><span class="sw" style="background:linear-gradient(90deg,#B7D4C4,#042E22)"></span>綠（預設）</button>
     <button data-theme="blue"><span class="sw" style="background:linear-gradient(90deg,#BACEE9,#052254)"></span>藍</button>
     <button data-theme="purple"><span class="sw" style="background:linear-gradient(90deg,#D3C7E3,#331254)"></span>紫</button>
     <button data-theme="amber"><span class="sw" style="background:linear-gradient(90deg,#E9D8B7,#663604)"></span>琥珀</button>

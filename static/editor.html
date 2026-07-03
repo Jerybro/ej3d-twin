@@ -15,9 +15,10 @@
   </script>
   <style>
     :root {
-      --bg: #0e141b; --panel: #131b24; --panel2: #17212c; --panel3: #1b2733;
-      --bdr: #223140; --accent: #46c2e0; --accent-deep: #1f6ea8;
-      --text: #dbe5ee; --dim: #8ba0b3; --warn: #ffaa3c; --danger: #ff4d4f;
+      /* 全平台統一：資料工作台 Tukey 藍白（真 AVEVA E3D 亦為淺色介面） */
+      --bg: #F6F7FA; --panel: #ffffff; --panel2: #F1F3F6; --panel3: #E9EDF2;
+      --bdr: #DBDDE0; --accent: #046AFB; --accent-deep: #E3EDFE;
+      --text: #061027; --dim: #5C6773; --warn: #D97706; --danger: #d03050;
       --ribbon-h: 118px; --status-h: 26px; --vtabs-h: 24px; --tree-w: 236px; --prop-w: 250px;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -52,7 +53,7 @@
     .brand-home {
       display: inline-flex; align-items: center; justify-content: center;
       width: 22px; height: 22px; border-radius: 5px; margin-right: 8px;
-      background: rgba(70, 194, 224, 0.15); border: 1px solid var(--bdr);
+      background: rgba(4, 106, 251, 0.08); border: 1px solid var(--bdr);
       color: var(--accent); font-size: 10px; font-weight: 700; text-decoration: none;
     }
     .rtab { padding: 5px 14px; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 12.5px;
@@ -77,8 +78,8 @@
     .ric.sm svg { width: 13px; height: 13px; }
     .qbtn .ric { line-height: 0; display: inline-block; }
     .rbtn:hover { background: var(--panel3); border-color: var(--bdr); }
-    .rbtn.active { background: var(--accent-deep); border-color: var(--accent); }
-    .rbtn.warn.active { background: rgba(255, 170, 60, 0.22); border-color: var(--warn); }
+    .rbtn.active { background: var(--accent-deep); border-color: var(--accent); color: var(--accent); }
+    .rbtn.warn.active { background: rgba(217, 119, 6, 0.12); border-color: var(--warn); }
     .rbtn:disabled { opacity: 0.35; pointer-events: none; }
     .rsel { background: var(--panel2); border: 1px solid var(--bdr); color: var(--text);
       border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: 12px; max-width: 128px; }
@@ -106,7 +107,7 @@
     .mt-eq { display: flex; align-items: center; gap: 6px; padding: 3px 6px 3px 20px;
       border-radius: 5px; cursor: pointer; font-size: 12px; }
     .mt-eq:hover { background: var(--panel3); }
-    .mt-eq.selected { background: var(--accent-deep); }
+    .mt-eq.selected { background: var(--accent-deep); outline: 1px solid rgba(4,106,251,.35); }
     .mt-eq.hidden-eq { opacity: 0.4; }
     .mt-ico { width: 14px; text-align: center; color: var(--accent); font-size: 10px; flex-shrink: 0; }
     .mt-tag { font-weight: 600; white-space: nowrap; }
@@ -143,7 +144,7 @@
     /* CE 麵包屑（E3D 頂部路徑列） */
     #ce-breadcrumb { position: absolute; top: 0; left: 0; right: 0; height: 24px; z-index: 22;
       display: flex; align-items: center; gap: 4px; padding: 0 10px;
-      background: rgba(19, 27, 36, 0.92); border-bottom: 1px solid var(--bdr);
+      background: rgba(255, 255, 255, 0.94); border-bottom: 1px solid var(--bdr);
       font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; }
     #ce-breadcrumb .bc-seg { cursor: pointer; padding: 1px 4px; border-radius: 4px; }
     #ce-breadcrumb .bc-seg:hover { color: var(--accent); background: var(--panel3); }
@@ -155,13 +156,13 @@
       z-index: 24; cursor: grab; user-select: none; }
     #power-compass svg { width: 100%; height: 100%; }
     #power-compass .pc-hot { cursor: pointer; }
-    #power-compass .pc-hot:hover circle { fill: rgba(70, 194, 224, 0.35); }
+    #power-compass .pc-hot:hover circle { fill: rgba(4, 106, 251, 0.22); }
     #power-compass .pc-hot text { fill: var(--text); font-size: 13px; font-weight: 700; }
 
     /* 模型樹 DB 型別字（WORL/SITE/ZONE/EQUI/PIPE） */
     .mt-dbtype { font-family: Consolas, monospace; font-size: 10px; color: var(--dim);
       letter-spacing: 0.5px; margin-right: 3px; flex-shrink: 0; }
-    .mt-eq.selected .mt-dbtype { color: rgba(255,255,255,.75); }
+    .mt-eq.selected .mt-dbtype { color: var(--accent); }
 
     /* 底部視圖分頁列 */
     #vtabs { grid-area: vtabs; display: flex; align-items: stretch; gap: 2px; padding: 0 8px;
@@ -176,15 +177,15 @@
     #mode-hint {
       position: absolute; bottom: 12px; left: 12px;
       z-index: 25; padding: 6px 14px; border-radius: 8px; font-size: 12.5px;
-      background: rgba(19, 27, 36, 0.94); border: 1px solid var(--bdr); color: var(--dim);
+      background: rgba(255, 255, 255, 0.95); border: 1px solid var(--bdr); color: var(--dim);
       max-width: 46%; text-align: left;
     }
     #mode-hint b { color: var(--accent); font-weight: 600; }
     #measure-tip { position: absolute; z-index: 26; padding: 3px 9px; border-radius: 10px;
-      background: rgba(255, 170, 60, 0.92); color: #1a1204; font-size: 12px; font-weight: 700;
+      background: rgba(217, 119, 6, 0.92); color: #fff; font-size: 12px; font-weight: 700;
       pointer-events: none; display: none; }
     .pane-reopen { position: absolute; top: 8px; z-index: 24; padding: 5px 9px; border-radius: 7px;
-      cursor: pointer; background: rgba(19, 27, 36, 0.92); border: 1px solid var(--bdr);
+      cursor: pointer; background: rgba(255, 255, 255, 0.94); border: 1px solid var(--bdr);
       color: var(--dim); font-family: inherit; font-size: 11.5px; display: none; }
     .pane-reopen:hover { color: var(--accent); border-color: var(--accent); }
     #tree-reopen { left: 8px; }
@@ -195,7 +196,7 @@
     /* 右鍵情境選單 */
     #ctx-menu { position: fixed; z-index: 80; display: none; min-width: 150px;
       background: var(--panel); border: 1px solid var(--bdr); border-radius: 8px; padding: 4px;
-      box-shadow: 0 8px 28px rgba(0,0,0,.5); }
+      box-shadow: 0 8px 24px rgba(6,16,39,.14); }
     #ctx-menu button { display: block; width: 100%; text-align: left; padding: 7px 12px;
       background: none; border: none; color: var(--text); font-family: inherit; font-size: 12.5px;
       border-radius: 5px; cursor: pointer; }
@@ -206,16 +207,16 @@
     .ctx-sub > button::after { content: '›'; float: right; color: var(--dim); }
     .ctx-sub-menu { position: absolute; left: 100%; top: -4px; display: none; min-width: 110px;
       background: var(--panel); border: 1px solid var(--bdr); border-radius: 8px; padding: 4px;
-      box-shadow: 0 8px 28px rgba(0,0,0,.5); }
+      box-shadow: 0 8px 24px rgba(6,16,39,.14); }
     .ctx-sub:hover > .ctx-sub-menu { display: block; }
 
     /* 量測持久標註 */
     .m-note { padding: 2px 9px; border-radius: 10px; background: rgba(255, 170, 60, 0.92);
-      color: #1a1204; font-size: 12px; font-weight: 700; white-space: nowrap; pointer-events: none; }
+      color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; pointer-events: none; }
 
     /* 剖切盒面手柄（CSS2D） */
-    .clip-handle { width: 14px; height: 14px; border-radius: 3px; background: rgba(70,194,224,.85);
-      border: 1px solid #0e141b; cursor: grab; pointer-events: auto; }
+    .clip-handle { width: 14px; height: 14px; border-radius: 3px; background: rgba(4,106,251,.8);
+      border: 1px solid #fff; cursor: grab; pointer-events: auto; }
     .clip-handle:hover { background: var(--warn); }
 
     /* PowerWheel 放射狀選單（E3D 3D 視圖右鍵） */
@@ -223,10 +224,10 @@
     #power-wheel.show { display: block; }
     .pw-tile {
       position: absolute; width: 64px; height: 64px; margin: -32px; left: 50%; top: 50%;
-      border-radius: 50%; background: rgba(19, 27, 36, 0.96); border: 1px solid var(--bdr);
+      border-radius: 50%; background: rgba(255, 255, 255, 0.97); border: 1px solid var(--bdr);
       color: var(--text); font-size: 11px; font-family: inherit; cursor: pointer;
       display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); transition: transform .1s, border-color .1s;
+      box-shadow: 0 6px 16px rgba(6,16,39,.16); transition: transform .1s, border-color .1s;
       line-height: 1.15; text-align: center; padding: 4px;
     }
     .pw-tile:hover { border-color: var(--accent); background: var(--panel3); transform: scale(1.08); }
@@ -240,7 +241,7 @@
 
     /* Clash 底部面板 */
     #clash-dock { position: absolute; left: 0; right: 0; bottom: 0; height: 170px; z-index: 26;
-      background: rgba(19, 27, 36, 0.96); border-top: 1px solid var(--bdr); display: none;
+      background: rgba(255, 255, 255, 0.97); border-top: 1px solid var(--bdr); display: none;
       flex-direction: column; }
     #clash-dock.show { display: flex; }
     #clash-dock .pane-head { flex-shrink: 0; }
@@ -250,9 +251,9 @@
     .clash-row:hover { background: var(--panel3); }
     .clash-row.selected { background: var(--accent-deep); }
     .clash-badge { font-size: 10.5px; font-weight: 700; text-align: center; border-radius: 8px; padding: 1px 6px; }
-    .clash-badge.overlap { background: rgba(255,77,79,.25); color: #ff8a8c; }
-    .clash-badge.touch { background: rgba(255,170,60,.22); color: var(--warn); }
-    .clash-badge.pipe { background: rgba(70,194,224,.18); color: var(--accent); }
+    .clash-badge.overlap { background: rgba(208,48,80,.10); color: #c0284e; }
+    .clash-badge.touch { background: rgba(217,119,6,.12); color: var(--warn); }
+    .clash-badge.pipe { background: rgba(4,106,251,.08); color: var(--accent); }
 
     /* ================= 狀態列 ================= */
     #statusbar { grid-area: status; display: flex; align-items: center; gap: 18px; padding: 0 12px;
@@ -461,16 +462,16 @@
       </div>
       <div id="power-compass" title="方位羅盤：點 N/S/E/W 切視向、U 俯視、D 仰視；可拖曳移位">
         <svg viewBox="0 0 96 96">
-          <circle cx="48" cy="48" r="45" fill="rgba(19,27,36,.85)" stroke="#223140" stroke-width="1.5"/>
-          <circle cx="48" cy="48" r="30" fill="none" stroke="#223140" stroke-width="1"/>
+          <circle cx="48" cy="48" r="45" fill="rgba(255,255,255,.92)" stroke="#DBDDE0" stroke-width="1.5"/>
+          <circle cx="48" cy="48" r="30" fill="none" stroke="#DBDDE0" stroke-width="1"/>
           <g id="pc-rose">
-            <g class="pc-hot" data-vp="n"><circle cx="48" cy="12" r="10" fill="rgba(70,194,224,.12)"/><text x="48" y="17" text-anchor="middle">N</text></g>
-            <g class="pc-hot" data-vp="s"><circle cx="48" cy="84" r="10" fill="rgba(70,194,224,.12)"/><text x="48" y="89" text-anchor="middle">S</text></g>
-            <g class="pc-hot" data-vp="e"><circle cx="84" cy="48" r="10" fill="rgba(70,194,224,.12)"/><text x="84" y="53" text-anchor="middle">E</text></g>
-            <g class="pc-hot" data-vp="w"><circle cx="12" cy="48" r="10" fill="rgba(70,194,224,.12)"/><text x="12" y="53" text-anchor="middle">W</text></g>
+            <g class="pc-hot" data-vp="n"><circle cx="48" cy="12" r="10" fill="rgba(4,106,251,.07)"/><text x="48" y="17" text-anchor="middle">N</text></g>
+            <g class="pc-hot" data-vp="s"><circle cx="48" cy="84" r="10" fill="rgba(4,106,251,.07)"/><text x="48" y="89" text-anchor="middle">S</text></g>
+            <g class="pc-hot" data-vp="e"><circle cx="84" cy="48" r="10" fill="rgba(4,106,251,.07)"/><text x="84" y="53" text-anchor="middle">E</text></g>
+            <g class="pc-hot" data-vp="w"><circle cx="12" cy="48" r="10" fill="rgba(4,106,251,.07)"/><text x="12" y="53" text-anchor="middle">W</text></g>
           </g>
-          <g class="pc-hot" data-vp="top"><circle cx="48" cy="38" r="8" fill="rgba(70,194,224,.12)"/><text x="48" y="42" text-anchor="middle" font-size="10">U</text></g>
-          <g class="pc-hot" data-vp="bottom"><circle cx="48" cy="58" r="8" fill="rgba(70,194,224,.12)"/><text x="48" y="62" text-anchor="middle" font-size="10">D</text></g>
+          <g class="pc-hot" data-vp="top"><circle cx="48" cy="38" r="8" fill="rgba(4,106,251,.07)"/><text x="48" y="42" text-anchor="middle" font-size="10">U</text></g>
+          <g class="pc-hot" data-vp="bottom"><circle cx="48" cy="58" r="8" fill="rgba(4,106,251,.07)"/><text x="48" y="62" text-anchor="middle" font-size="10">D</text></g>
         </svg>
       </div>
     </main>

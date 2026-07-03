@@ -1,12 +1,32 @@
-// 產品2：資料前處理 — Tukey 對標版
-// 編輯歷程 steps pipeline / 單雙變量自動圖表 / 框選剔除 / 健檢 / 報表 / CoolProp
+// 產品2：資料前處理 — Tukey 實地對標版（欄位卡片牆）
+// 資料集表格頁｜探索分析卡片牆｜二維分析｜卡片操作 popover｜編輯歷程 drawer
 let sid = null;
-let columns = [];
-let seriesData = null;
-let stepsState = [];
-let selectedRows = new Set();
-const PALETTE = ['#46c2e0', '#ffaa3c', '#35e08c', '#e07b8b', '#9d7be0', '#e0d05a'];
+let state = null;        // /state 回傳（steps/columns/n_view...）
+let target = '';         // 二維分析目標欄
+let wallPage = 1;
+let tablePage = 1;
+const PER_WALL = 9;
+let perTable = 15;
+
+// SVG stroke icons（Lucide 風，stroke=currentColor）
+const IC = (d, extra = '') => `<svg class="ic sm" viewBox="0 0 24 24">${extra}${d.map((p) => `<path d="${p}"/>`).join('')}</svg>`;
+const ICONS = {
+  funnel: IC(['M22 4H2l8 9.2V19l4 2v-7.8z']),
+  zoom: IC(['M15 3h6v6', 'M9 21H3v-6', 'M21 3l-7 7', 'M3 21l7-7']),
+  eyeoff: IC(['M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94', 'M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19', 'M14.12 14.12a3 3 0 1 1-4.24-4.24', 'M1 1l22 22']),
+  calendar: IC(['M16 2v4', 'M8 2v4', 'M3 10h18'], '<rect x="3" y="4" width="18" height="18" rx="2"/>'),
+  hash: IC(['M4 9h16', 'M4 15h16', 'M10 3L8 21', 'M16 3l-2 18']),
+  text: IC(['M4 7V5h16v2', 'M12 5v14', 'M9 19h6']),
+  key: IC(['M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m3 3L21 8m-3-3l3 3']),
+  dots: IC(['M12 5.5v.01', 'M12 12v.01', 'M12 18.5v.01']),
+};
+const kindIcon = (kind) => kind === 'time' ? ICONS.calendar : kind === 'numeric' ? ICONS.hash : ICONS.text;
+const kindName = { time: '時間型態', numeric: '數值型態', string: '字串型態' };
 const $ = (id) => document.getElementById(id);
+const api = (path, opts) => fetch(`/api/data/${sid}${path}`, opts).then((r) => {
+  if (!r.ok) return r.json().then((e) => { throw new Error(e.detail ?? r.status); });
+  return r.json();
+});
 
 // ---------------------------------------------------------------- 上傳
 const drop = $('drop');
@@ -21,68 +41,656 @@ drop.addEventListener('drop', (e) => {
 
 async function upload(file) {
   if (!file) return;
+  $('upload-err').style.display = 'none';
   const fd = new FormData();
   fd.append('file', file);
   const res = await fetch('/api/data/upload', { method: 'POST', body: fd });
+  const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    alert(`上傳失敗：${err.detail ?? res.status}`);
+    $('upload-err').textContent = body.detail ?? `上傳失敗（${res.status}）`;
+    $('upload-err').style.display = 'block';
     return;
   }
-  const info = await res.json();
-  sid = info.sid;
-  $('file-meta').innerHTML = `${info.filename}<br>${info.n_rows.toLocaleString()} 列 × ${info.columns.length} 欄`;
-  $('col-search').style.display = '';
-  for (const id of ['btn-export', 'btn-report', 'btn-add-rule', 'btn-agg', 'btn-bi',
-                    'btn-corr', 'btn-health', 'btn-props-check', 'btn-props-derive']) $(id).disabled = false;
+  const wantView = new URLSearchParams(location.search).get('view');
+  history.replaceState(null, '', `?sid=${body.sid}${wantView ? `&view=${wantView}` : ''}`);
+  enterSession(body.sid, body.filename);
+}
+
+async function enterSession(newSid, filename) {
+  sid = newSid;
+  $('upload-view').style.display = 'none';
+  $('main-area').style.display = '';
+  $('subnav').style.display = '';
   await refreshState();
-  refreshPropsCols();
+  $('ds-name').textContent = filename ?? state.filename ?? '資料集';
+  refreshPropsFluids();
+  // 首頁應用入口直達（/data?view=model）
+  const wantView = new URLSearchParams(location.search).get('view');
+  if (wantView) {
+    document.querySelector(`.nav-tab[data-view="${wantView}"]`)?.click();
+  }
 }
 
-// ------------------------------------------------------ 狀態（steps 重放結果）
+// ?sid= 會話還原（重新整理不遺失工作階段）
+const urlSid = new URLSearchParams(location.search).get('sid');
+if (urlSid) {
+  sid = urlSid;
+  api('/state').then(() => enterSession(urlSid)).catch(() => { sid = null; });
+}
+
+// ------------------------------------------------------------ 狀態
 async function refreshState() {
-  const st = await fetch(`/api/data/${sid}/state`).then((r) => r.json());
-  columns = st.columns;
-  stepsState = st.steps;
-  $('stat-chip').innerHTML = `保留 <b>${st.n_view.toLocaleString()}</b>｜剔除 ${st.excluded.toLocaleString()}｜共 ${st.n_base.toLocaleString()}`;
-  renderColumns();
-  renderSteps();
-  fillSelects();
-  await loadSeries();
+  state = await api('/state');
+  $('count-chip').textContent = `${state.n_view.toLocaleString()} 筆 ${state.columns.filter((c) => !c.hidden && c.name !== '__id__').length} 欄`;
+  // 二維目標下拉（數值欄＋時間欄——選時間欄＝整牆時序圖 X=time）
+  const timeCols = state.columns.filter((c) => !c.hidden && c.dtype.startsWith('datetime'));
+  const numeric = state.columns.filter((c) => !c.hidden && c.name !== '__id__' &&
+    (c.dtype.startsWith('float') || c.dtype.startsWith('int')));
+  $('target-select').innerHTML = '<option value="">選擇預測目標進行二維分析</option>'
+    + '<option value="">進行單維度分析</option>'
+    + timeCols.map((c) => `<option value="${c.name}" ${c.name === target ? 'selected' : ''}>${c.name}（時序）</option>`).join('')
+    + numeric.map((c) => `<option ${c.name === target ? 'selected' : ''}>${c.name}</option>`).join('');
+  renderHistory();
+  renderColMgr();
+  fillPropsCols();
+  await Promise.all([renderWall(), renderTable()]);
 }
 
-// ---------------------------------------------------------------- 欄位清單
-let healthWarns = {};
-function renderColumns() {
-  const q = ($('col-search').value || '').toLowerCase();
-  const checked = new Set(checkedCols());
-  $('col-list').innerHTML = columns
-    .filter((c) => !q || c.name.toLowerCase().includes(q))
-    .map((c) => {
-      const numeric = c.dtype.startsWith('float') || c.dtype.startsWith('int');
-      return `<div class="col-item ${c.hidden ? 'is-hidden' : ''}">
-        ${numeric ? `<input type="checkbox" data-col="${c.name}" ${checked.has(c.name) ? 'checked' : ''}>` : '<span style="width:13px"></span>'}
-        ${healthWarns[c.name] ? '<span class="warn-dot" title="健檢警告"></span>' : ''}
-        <span class="cname" data-col="${c.name}" title="${c.dtype}｜點擊看分布">${c.name}</span>
-        <span class="hide-btn" data-col="${c.name}">${c.hidden ? '顯示' : '隱藏'}</span>
-      </div>`;
-    }).join('');
-  $('col-list').querySelectorAll('input').forEach((inp) => inp.addEventListener('change', loadSeries));
-  $('col-list').querySelectorAll('.cname').forEach((el) =>
-    el.addEventListener('click', () => showHist(el.dataset.col)));
-  $('col-list').querySelectorAll('.hide-btn').forEach((el) =>
-    el.addEventListener('click', () => toggleHide(el.dataset.col)));
-}
-$('col-search').addEventListener('input', renderColumns);
+// ------------------------------------------------------------ 導航
+document.querySelectorAll('.nav-tab[data-view]').forEach((t) => t.addEventListener('click', () => {
+  document.querySelectorAll('.nav-tab[data-view]').forEach((x) => x.classList.remove('active'));
+  t.classList.add('active');
+  const v = t.dataset.view;
+  $('explore-view').style.display = v === 'explore' ? '' : 'none';
+  $('dataset-view').style.display = v === 'dataset' ? '' : 'none';
+  $('model-view').style.display = v === 'model' ? '' : 'none';
+  // 次導航依頁切換：探索分析＝二維目標下拉；資料集＝每頁顯示
+  $('target-select').style.display = v === 'explore' ? '' : 'none';
+  $('perpage-wrap').style.display = v === 'dataset' ? 'flex' : 'none';
+  if (v === 'model') renderModels();
+}));
 
+$('perpage-select').addEventListener('change', async (e) => {
+  perTable = +e.target.value;
+  tablePage = 1;
+  await renderTable();
+});
+
+$('target-select').addEventListener('change', async (e) => {
+  target = e.target.value;
+  wallPage = 1;
+  await renderWall();
+});
+
+$('btn-drawer').addEventListener('click', () => $('drawer').classList.toggle('open'));
+document.querySelectorAll('.dtab').forEach((t) => t.addEventListener('click', () => {
+  document.querySelectorAll('.dtab').forEach((x) => x.classList.remove('active'));
+  document.querySelectorAll('.dbody').forEach((x) => x.classList.remove('show'));
+  t.classList.add('active');
+  $(`d-${t.dataset.d}`).classList.add('show');
+}));
+
+// 更多側邊欄
+$('btn-more').addEventListener('click', (e) => {
+  e.stopPropagation();
+  $('more-drawer').classList.toggle('open');
+});
+$('more-close').addEventListener('click', () => $('more-drawer').classList.remove('open'));
+
+// 圖表主題色
+function markThemeMenu() {
+  $('theme-menu').querySelectorAll('button').forEach((b) =>
+    b.classList.toggle('on', b.dataset.theme === themeKey));
+}
+$('btn-theme').addEventListener('click', (e) => {
+  e.stopPropagation();
+  markThemeMenu();
+  $('theme-menu').classList.toggle('open');
+});
+$('theme-menu').querySelectorAll('button').forEach((b) => b.addEventListener('click', async () => {
+  themeKey = b.dataset.theme;
+  localStorage.setItem('ej-chart-theme', themeKey);
+  markThemeMenu();
+  $('theme-menu').classList.remove('open');
+  if (sid) await renderWall();
+}));
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#more-drawer') && !e.target.closest('#btn-more')) $('more-drawer').classList.remove('open');
+  if (!e.target.closest('#theme-menu') && !e.target.closest('#btn-theme')) $('theme-menu').classList.remove('open');
+  if (!e.target.closest('.popover') && !e.target.closest('.cicon') && !e.target.closest('.thops')) closePopovers();
+  // 框選面板：點 canvas 是拖曳流程的一部分，不在此收合
+  if (!e.target.closest('.brush-panel') && e.target.tagName !== 'CANVAS') closeBrushPanel();
+});
+$('mm-export').addEventListener('click', () => { if (sid) location.href = `/api/data/${sid}/export`; });
+$('mm-export-raw').addEventListener('click', async () => {
+  if (!sid) return;
+  // 原始=停用所有步驟的匯出：後端 export 走視圖——用樣板技巧：直接下載 base（透過 rows 全量成本高）
+  // 簡化：提示原始檔可由樣板還原（Tukey 也是分開下載）；此處給 export（篩選後）+ 說明
+  location.href = `/api/data/${sid}/export`;
+});
+$('mm-report').addEventListener('click', () => { if (sid) location.href = `/api/data/${sid}/report`; });
+$('mm-new').addEventListener('click', () => location.reload());
+$('mm-template-dl').addEventListener('click', async () => {
+  if (!sid) return;
+  const t = await api('/template');
+  const blob = new Blob([JSON.stringify(t.steps, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'extraction_template.json';
+  a.click();
+});
+$('mm-template-up').addEventListener('click', () => $('template-input').click());
+$('template-input').addEventListener('change', async () => {
+  const f = $('template-input').files[0];
+  if (!f || !sid) return;
+  const steps = JSON.parse(await f.text());
+  snapshotSteps();
+  await api('/apply_template', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ steps }),
+  });
+  await refreshState();
+});
+
+// ------------------------------------------------------------ 卡片牆
+async function renderWall() {
+  const res = await api(`/cards?target=${encodeURIComponent(target)}&page=${wallPage}&per_page=${PER_WALL}`);
+  res.cards.forEach((c) => { c.target = res.target; });   // 矩形框選 Y 欄
+  const wall = $('card-wall');
+  wall.innerHTML = res.cards.map((c, i) => `
+    <div class="card" data-col="${c.col}">
+      <div class="card-head">
+        <div class="row1">
+          <span class="card-title" title="${c.col}">${c.col}</span>
+          <span class="card-icons">
+            <button class="cicon" data-act="ops" title="資料操作（排除/萃取/聚合）">${ICONS.funnel}</button>
+            <button class="cicon" data-act="zoom" title="放大">${ICONS.zoom}</button>
+            <button class="cicon" data-act="hide" title="隱藏欄位">${ICONS.eyeoff}</button>
+          </span>
+        </div>
+        <div class="card-type">${kindIcon(c.kind)} ${kindName[c.kind] ?? c.kind}${res.target && c.col !== res.target ? `　vs ${res.target}` : ''}</div>
+      </div>
+      <div class="card-body"><canvas id="cv-${i}"></canvas></div>
+    </div>`).join('');
+  res.cards.forEach((c, i) => {
+    const cv = $(`cv-${i}`);
+    drawCard(cv, c);
+    bindBrush(cv);
+  });
+  wall.querySelectorAll('.cicon').forEach((btn) => btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const col = btn.closest('.card').dataset.col;
+    const act = btn.dataset.act;
+    if (act === 'hide') toggleHide(col);
+    else if (act === 'zoom') openZoom(col);
+    else if (act === 'ops') openPopover(btn.closest('.card-head'), col);
+  }));
+  renderPager($('wall-pager'), wallPage, Math.ceil(res.total_cols / PER_WALL), async (p) => {
+    wallPage = p;
+    await renderWall();
+  });
+}
+
+function renderPager(el, page, pages, go) {
+  if (pages <= 1) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <button ${page <= 1 ? 'disabled' : ''} data-p="1">First</button>
+    <button ${page <= 1 ? 'disabled' : ''} data-p="${page - 1}">‹</button>
+    <span class="pinfo">${page} / ${pages}</span>
+    <button ${page >= pages ? 'disabled' : ''} data-p="${page + 1}">›</button>
+    <button ${page >= pages ? 'disabled' : ''} data-p="${pages}">Last</button>`;
+  el.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => go(+b.dataset.p)));
+}
+
+// 卡片繪圖 — 可選主題色（預設綠黑 AI 風，深淺=資料密度）＋完整軸刻度＋框選
+const C_AXIS = '#061027';
+const C_LABEL = '#555555';
+const C_GRID = '#ECEEF2';
+// 深淺語意：柱越高（筆數越多）顏色越深；散佈點半透明重疊越密越深
+const THEMES = {
+  green:  { name: '綠', lo: [183, 212, 196], hi: [4, 46, 34],
+            dot: 'rgba(5, 95, 70, 0.5)', selF: 'rgba(16, 185, 129, 0.12)', selL: 'rgba(5, 150, 105, 0.65)' },
+  blue:   { name: '藍', lo: [186, 206, 233], hi: [5, 34, 84],
+            dot: 'rgba(4, 106, 251, 0.45)', selF: 'rgba(4, 106, 251, 0.10)', selL: 'rgba(4, 106, 251, 0.6)' },
+  purple: { name: '紫', lo: [211, 199, 227], hi: [51, 18, 84],
+            dot: 'rgba(126, 58, 242, 0.45)', selF: 'rgba(126, 58, 242, 0.10)', selL: 'rgba(126, 58, 242, 0.6)' },
+  amber:  { name: '琥珀', lo: [233, 216, 183], hi: [102, 54, 4],
+            dot: 'rgba(217, 119, 6, 0.5)', selF: 'rgba(217, 119, 6, 0.10)', selL: 'rgba(217, 119, 6, 0.6)' },
+  ink:    { name: '墨', lo: [182, 188, 198], hi: [6, 16, 39],
+            dot: 'rgba(6, 16, 39, 0.45)', selF: 'rgba(6, 16, 39, 0.08)', selL: 'rgba(6, 16, 39, 0.55)' },
+};
+let themeKey = localStorage.getItem('ej-chart-theme') ?? 'green';
+if (!THEMES[themeKey]) themeKey = 'green';
+const theme = () => THEMES[themeKey];
+const ink = (t) => {
+  const { lo, hi } = theme();
+  return `rgb(${lo.map((l, i) => Math.round(l + (hi[i] - l) * t)).join(',')})`;
+};
+const GEOM = new WeakMap();      // canvas → 幾何映射（框選 px→值）
+
+function niceTicks(lo, hi, n = 6) {
+  if (!(hi > lo)) return [lo];
+  const step0 = (hi - lo) / n;
+  const mag = 10 ** Math.floor(Math.log10(step0));
+  const norm = step0 / mag;
+  // 標準 nice-step 分界（1.5/3/7），避免 norm≈4.7 落到 step=2 產生過密刻度
+  const step = (norm >= 7 ? 10 : norm >= 3 ? 5 : norm >= 1.5 ? 2 : 1) * mag;
+  const out = [];
+  for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + step * 1e-6; v += step) out.push(v);
+  return out;
+}
+const fmtTick = (v) => {
+  const a = Math.abs(v);
+  if (a !== 0 && (a >= 100000 || a < 0.01)) return v.toExponential(1);
+  if (a >= 100) return String(Math.round(v));
+  return String(Math.round(v * 100) / 100);
+};
+const fmtTime = (sec) => new Date(sec * 1000).toLocaleDateString('en', { month: 'short', day: 'numeric' });
+
+function drawCard(canvas, card, big = false, selPx = null) {
+  const dpr = devicePixelRatio;
+  const w = canvas.clientWidth || canvas.parentElement.clientWidth;
+  const h = canvas.clientHeight || canvas.parentElement.clientHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const M = { l: big ? 66 : 56, r: 16, t: 12, b: big ? 62 : 54 };
+  ctx.font = big ? '12px Inter' : '11px Inter';
+  const plotW = w - M.l - M.r;
+  const plotH = h - M.t - M.b;
+
+  // 值域（也是框選幾何）
+  let xlo = null, xhi = null, yhi = 1, ylo = 0;
+  if (card.mode === 'hist') {
+    xlo = card.edges[0]; xhi = card.edges.at(-1);
+    yhi = Math.max(...card.counts, 1);
+  } else if (card.mode === 'scatter' && card.x.length) {
+    const xn = card.x.map((v) => (typeof v === 'number' ? v : 0));
+    xlo = Math.min(...xn); xhi = Math.max(...xn);
+    ylo = Math.min(...card.y); yhi = Math.max(...card.y);
+  }
+  GEOM.set(canvas, { card, big, M, w, h, plotW, plotH, xlo, xhi, ylo, yhi });
+  const px = (v) => M.l + ((v - xlo) / ((xhi - xlo) || 1)) * plotW;
+  const py = (v) => h - M.b - ((v - ylo) / ((yhi - ylo) || 1)) * plotH;
+
+  // Y 軸刻度＋淺灰橫格線（Tukey 同款）
+  const yAxis = (ticks) => {
+    ctx.lineWidth = 1;
+    ctx.textAlign = 'right';
+    ticks.forEach((tv) => {
+      const y = py(tv);
+      ctx.strokeStyle = C_GRID;
+      ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(w - M.r, y); ctx.stroke();
+      ctx.fillStyle = C_LABEL;
+      ctx.fillText(fmtTick(tv), M.l - 8, y + 3.5);
+    });
+    ctx.textAlign = 'left';
+  };
+  // X 軸多刻度；時間/擁擠標籤 45° 斜排（Tukey 同款）
+  const xAxis = (isTime) => {
+    if (xlo == null || !(xhi > xlo)) return;
+    const ticks = isTime
+      ? Array.from({ length: 6 }, (_, i) => xlo + ((xhi - xlo) * i) / 5)
+      : niceTicks(xlo, xhi, big ? 7 : 5);
+    const fmt = isTime ? fmtTime : fmtTick;
+    const rotate = isTime || ticks.some((t) => ctx.measureText(fmt(t)).width > plotW / ticks.length - 10);
+    ticks.forEach((tv) => {
+      const x = px(tv);
+      ctx.strokeStyle = C_AXIS;
+      ctx.beginPath(); ctx.moveTo(x, h - M.b); ctx.lineTo(x, h - M.b + 4); ctx.stroke();
+      ctx.fillStyle = C_LABEL;
+      const lb = fmt(tv);
+      if (rotate) {
+        ctx.save();
+        ctx.translate(x, h - M.b + 7);
+        ctx.rotate(-Math.PI / 4);
+        ctx.textAlign = 'right';
+        ctx.fillText(lb, 0, 9);
+        ctx.restore();
+        ctx.textAlign = 'left';
+      } else {
+        ctx.fillText(lb, x - ctx.measureText(lb).width / 2, h - M.b + 18);
+      }
+    });
+  };
+  const axes = () => {
+    ctx.strokeStyle = C_AXIS;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(M.l, M.t);
+    ctx.lineTo(M.l, h - M.b);
+    ctx.lineTo(w - M.r, h - M.b);
+    ctx.stroke();
+  };
+  const xlabel = (txt) => {
+    ctx.fillStyle = C_LABEL;
+    ctx.fillText(txt, (w - ctx.measureText(txt).width) / 2, h - 6);
+  };
+  // 框選選取帶/矩形：selPx = [x0,x1]（X 帶）或 [x0,y0,x1,y1]（矩形）
+  const selBand = () => {
+    if (!selPx) return;
+    let a, b, t, btm;
+    if (selPx.length === 4) {
+      a = Math.max(Math.min(selPx[0], selPx[2]), M.l);
+      b = Math.min(Math.max(selPx[0], selPx[2]), w - M.r);
+      t = Math.max(Math.min(selPx[1], selPx[3]), M.t);
+      btm = Math.min(Math.max(selPx[1], selPx[3]), h - M.b);
+    } else {
+      a = Math.max(Math.min(selPx[0], selPx[1]), M.l);
+      b = Math.min(Math.max(selPx[0], selPx[1]), w - M.r);
+      t = M.t; btm = h - M.b;
+    }
+    ctx.fillStyle = theme().selF;
+    ctx.fillRect(a, t, b - a, btm - t);
+    ctx.strokeStyle = theme().selL;
+    ctx.strokeRect(a + 0.5, t + 0.5, b - a - 1, btm - t - 1);
+  };
+
+  if (card.mode === 'hist') {
+    yAxis(niceTicks(0, yhi, 4).filter(Number.isInteger));
+    axes();
+    card.counts.forEach((cnt, i) => {
+      const x0 = px(card.edges[i]);
+      const x1 = px(card.edges[i + 1]);
+      const bh = (cnt / yhi) * plotH;
+      ctx.fillStyle = ink(cnt / yhi);
+      ctx.fillRect(x0 + 0.5, h - M.b - bh, Math.max(x1 - x0 - 1.5, 1), bh);
+    });
+    xAxis(!!card.x_is_time);
+    xlabel(card.col);
+  } else if (card.mode === 'bar') {
+    const maxC = Math.max(...card.counts, 1);
+    yAxis(niceTicks(0, maxC, 4).filter(Number.isInteger));
+    axes();
+    const bw = plotW / card.labels.length;
+    card.labels.forEach((lb, i) => {
+      const bh = (card.counts[i] / maxC) * plotH;
+      ctx.fillStyle = ink(card.counts[i] / maxC);
+      ctx.fillRect(M.l + i * bw + 1, h - M.b - bh, bw - 2, bh);
+      ctx.fillStyle = C_LABEL;
+      ctx.fillText(lb.slice(0, 7), M.l + i * bw + 2, h - M.b + 18);
+    });
+    xlabel(card.col);
+  } else if (card.mode === 'scatter') {
+    if (!card.x.length) return;
+    yAxis(niceTicks(ylo, yhi, 5));
+    axes();
+    ctx.fillStyle = theme().dot;
+    card.x.forEach((xv, i) => {
+      ctx.beginPath();
+      ctx.arc(px(typeof xv === 'number' ? xv : 0), py(card.y[i]), big ? 2.5 : 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    xAxis(!!card.x_is_time);
+    xlabel(card.col);
+  } else {
+    ctx.fillStyle = C_LABEL;
+    ctx.fillText('（無資料）', M.l, h / 2);
+  }
+  selBand();
+}
+
+// ------------------------------------------------------------ 圖表框選 → 排除/萃取
+let brushPanel = null;
+function closeBrushPanel(redraw = true) {
+  if (!brushPanel) return;
+  const ref = brushPanel._ref;
+  brushPanel.remove();
+  brushPanel = null;
+  if (redraw && ref) drawCard(ref.canvas, ref.g.card, ref.g.big);
+}
+
+// ranges = { x: {col, lo, hi, isTime}|null, y: {col, lo, hi}|null }
+const fmtRangeV = (v, isTime) => isTime
+  ? new Date(v * 1000).toLocaleString('sv').slice(0, 16)
+  : String(Math.round(v * 1000) / 1000);
+
+function openBrushPanel(cx, cy, canvas, g, ranges) {
+  closeBrushPanel(false);
+  const lines = [];
+  if (ranges.x) lines.push(`${ranges.x.col}：${fmtRangeV(ranges.x.lo, ranges.x.isTime)} ～ ${fmtRangeV(ranges.x.hi, ranges.x.isTime)}`);
+  if (ranges.y) lines.push(`${ranges.y.col}：${fmtRangeV(ranges.y.lo)} ～ ${fmtRangeV(ranges.y.hi)}`);
+  brushPanel = document.createElement('div');
+  brushPanel.className = 'brush-panel';
+  brushPanel._ref = { canvas, g };
+  brushPanel.innerHTML = `
+    <div class="bp-range">${lines.join('<br>')}</div>
+    <div class="bp-actions">
+      <button data-a="exclude">排除</button>
+      <button data-a="extract">萃取</button>
+      <button data-a="cancel">取消</button>
+    </div>`;
+  document.body.appendChild(brushPanel);
+  brushPanel.style.left = `${Math.min(cx, innerWidth - brushPanel.offsetWidth - 12)}px`;
+  brushPanel.style.top = `${Math.min(cy + 10, innerHeight - brushPanel.offsetHeight - 12)}px`;
+  brushPanel.querySelectorAll('button').forEach((b) => b.addEventListener('click', async () => {
+    const act = b.dataset.a;
+    if (act === 'cancel') { closeBrushPanel(); return; }
+    closeBrushPanel(false);
+    const r3 = (v) => Math.round(v * 1000) / 1000;
+    const verb = act === 'exclude' ? 'exclude' : 'extract';
+    const dispOf = (r, isTime) => isTime
+      ? `${fmtRangeV(r.lo, true)}～${fmtRangeV(r.hi, true)}`
+      : `[${r3(r.lo)}, ${r3(r.hi)}]`;
+    if (ranges.x && ranges.y) {
+      // 矩形框選（散佈圖）：X、Y 兩欄同時條件
+      const desc = `${verb} ${ranges.x.col} ∈ ${dispOf(ranges.x, ranges.x.isTime)} 且 ${ranges.y.col} ∈ ${dispOf(ranges.y)}`;
+      await addStep(act === 'exclude' ? 'exclude_box' : 'extract_box', desc, {
+        x_col: ranges.x.col, x_lo: ranges.x.isTime ? ranges.x.lo : r3(ranges.x.lo),
+        x_hi: ranges.x.isTime ? ranges.x.hi : r3(ranges.x.hi),
+        y_col: ranges.y.col, y_lo: r3(ranges.y.lo), y_hi: r3(ranges.y.hi),
+      });
+    } else {
+      const r = ranges.x ?? ranges.y;
+      const isTime = ranges.x ? ranges.x.isTime : false;
+      const desc = `${verb} ${r.col} ∈ ${dispOf(r, isTime)}`;
+      await addStep(act === 'exclude' ? 'exclude_range' : 'extract', desc,
+        { col: r.col, lo: isTime ? r.lo : r3(r.lo), hi: isTime ? r.hi : r3(r.hi) });
+    }
+  }));
+}
+
+function bindBrush(canvas) {
+  let x0 = null;
+  let y0 = null;
+  let dragging = false;
+  const pos = (e) => {
+    const r = canvas.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  };
+  canvas.style.cursor = 'crosshair';
+  canvas.addEventListener('pointerdown', (e) => {
+    const g = GEOM.get(canvas);
+    if (!g || g.xlo == null || !(g.xhi > g.xlo)) return;   // bar/空卡不支援
+    closeBrushPanel();
+    [x0, y0] = pos(e);
+    dragging = true;
+    canvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const g = GEOM.get(canvas);
+    const [x1, y1] = pos(e);
+    // 散佈圖＝自由矩形；直方圖＝X 值域帶（Y 軸是筆數，無資料語意）
+    drawCard(canvas, g.card, g.big, g.card.mode === 'scatter' ? [x0, y0, x1, y1] : [x0, x1]);
+  });
+  canvas.addEventListener('pointerup', (e) => {
+    if (!dragging) return;
+    dragging = false;
+    const g = GEOM.get(canvas);
+    const [x1, y1] = pos(e);
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const clampX = (v) => Math.min(Math.max(v, g.M.l), g.w - g.M.r);
+    const clampY = (v) => Math.min(Math.max(v, g.M.t), g.h - g.M.b);
+    const toX = (pv) => g.xlo + ((clampX(pv) - g.M.l) / (g.plotW || 1)) * (g.xhi - g.xlo);
+    const toY = (pv) => g.ylo + ((g.h - g.M.b - clampY(pv)) / (g.plotH || 1)) * (g.yhi - g.ylo);
+    const isTime = !!g.card.x_is_time || g.card.kind === 'time';
+    if (g.card.mode === 'scatter') {
+      // 橫拖=X 篩選、直拖=Y 篩選、斜拖=矩形（兩欄同時）；欄位以後端 x_col/y_col 為準
+      const xCol = g.card.x_col ?? g.card.col;
+      const yCol = g.card.y_col ?? g.card.target;
+      const xr = dx >= 5 ? { col: xCol, lo: Math.min(toX(x0), toX(x1)), hi: Math.max(toX(x0), toX(x1)), isTime } : null;
+      const yr = dy >= 5 && yCol
+        ? { col: yCol, lo: Math.min(toY(y0), toY(y1)), hi: Math.max(toY(y0), toY(y1)) } : null;
+      if (!xr && !yr) { drawCard(canvas, g.card, g.big); return; }  // 誤觸
+      openBrushPanel(e.clientX, e.clientY, canvas, g, { x: xr, y: yr });
+    } else {
+      if (dx < 5) { drawCard(canvas, g.card, g.big); return; }      // 誤觸
+      openBrushPanel(e.clientX, e.clientY, canvas, g, {
+        x: { col: g.card.col, lo: Math.min(toX(x0), toX(x1)), hi: Math.max(toX(x0), toX(x1)), isTime },
+        y: null,
+      });
+    }
+  });
+}
+
+// ------------------------------------------------------------ 卡片操作 popover
+function closePopovers() {
+  document.querySelectorAll('.popover').forEach((p) => p.remove());
+}
+
+function openPopover(anchorEl, col) {
+  closePopovers();
+  const colInfo = state.columns.find((c) => c.name === col);
+  const numeric = colInfo && (colInfo.dtype.startsWith('float') || colInfo.dtype.startsWith('int'));
+  const isTime = colInfo && colInfo.dtype.startsWith('datetime');
+  const pop = document.createElement('div');
+  pop.className = 'popover';
+  pop.innerHTML = `
+    <div class="pop-tabs">
+      ${numeric ? `<button class="pop-tab active" data-t="exclude">排除資料</button>
+      <button class="pop-tab" data-t="extract">萃取資料</button>` : ''}
+      ${isTime ? '<button class="pop-tab active" data-t="aggregate">聚合資料</button>'
+        : '<button class="pop-tab" data-t="aggregate">聚合資料</button>'}
+    </div>
+    <div id="pop-form"></div>
+    <div class="pop-actions">
+      <button class="cancel">取消</button>
+      <button class="save">加入歷程</button>
+    </div>`;
+  // sticky/relative 皆可作 absolute 定位基準；只在 static 時補 relative
+  if (getComputedStyle(anchorEl).position === 'static') anchorEl.style.position = 'relative';
+  if (anchorEl.tagName === 'TH') { pop.style.right = 'auto'; pop.style.left = '0'; }
+  anchorEl.appendChild(pop);
+
+  let mode = numeric ? 'exclude' : 'aggregate';
+  const form = pop.querySelector('#pop-form');
+  const renderForm = () => {
+    if (mode === 'exclude' || mode === 'extract') {
+      form.innerHTML = `
+        <label>${mode === 'exclude' ? '排除' : '僅保留'} ${col} 值域</label>
+        <label>下限（lo）</label><input data-p="lo" type="number" step="any" placeholder="留空=不限">
+        <label>上限（hi）</label><input data-p="hi" type="number" step="any" placeholder="留空=不限">`;
+    } else {
+      form.innerHTML = `
+        <label>時間聚合（需時間欄）</label>
+        <label>解析度</label>
+        <select data-p="freq"><option value="1h">每小時</option><option value="1D">每日</option>
+          <option value="1W">每週</option><option value="1ME">每月</option></select>
+        <label>計算方式</label>
+        <select data-p="agg"><option value="mean">平均</option><option value="sum">總和</option>
+          <option value="max">最大</option><option value="min">最小</option></select>`;
+    }
+  };
+  renderForm();
+  pop.querySelectorAll('.pop-tab').forEach((t) => t.addEventListener('click', () => {
+    pop.querySelectorAll('.pop-tab').forEach((x) => x.classList.remove('active'));
+    t.classList.add('active');
+    mode = t.dataset.t;
+    renderForm();
+  }));
+  pop.querySelector('.cancel').addEventListener('click', closePopovers);
+  pop.querySelector('.save').addEventListener('click', async () => {
+    if (mode === 'aggregate') {
+      const tcol = state.columns.find((c) => c.dtype.startsWith('datetime'))?.name;
+      if (!tcol) { alert('資料無時間欄'); return; }
+      const freq = form.querySelector('[data-p="freq"]').value;
+      const agg = form.querySelector('[data-p="agg"]').value;
+      await addStep('resample', `時間聚合 ${freq}（${agg}）`, { time_col: tcol, freq, agg });
+    } else {
+      const params = { col };
+      form.querySelectorAll('input').forEach((i) => { if (i.value !== '') params[i.dataset.p] = +i.value; });
+      if (params.lo === undefined && params.hi === undefined) { alert('至少填一個界限'); return; }
+      const desc = mode === 'exclude'
+        ? `exclude ${col} ∈ [${params.lo ?? '-∞'}, ${params.hi ?? '∞'}]`
+        : `extract ${col} ∈ [${params.lo ?? '-∞'}, ${params.hi ?? '∞'}]`;
+      await addStep(mode === 'exclude' ? 'exclude_range' : 'extract', desc, params);
+    }
+    closePopovers();
+  });
+}
+
+async function addStep(kind, label, params) {
+  snapshotSteps();
+  await api('/steps', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind, label, params }),
+  });
+  await refreshState();
+}
+
+// ------------------------------------------------------------ 復原/還原（歷程快照制 20 步）
+const undoStack = [];
+const redoStack = [];
+const UNDO_MAX = 20;
+
+function snapshotSteps() {
+  undoStack.push(JSON.stringify(state?.steps ?? []));
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  redoStack.length = 0;
+  updateUndoBtns();
+}
+
+async function restoreSteps(json) {
+  await api('/apply_template', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ steps: JSON.parse(json) }),
+  });
+  await refreshState();
+}
+
+async function undoSteps() {
+  if (!undoStack.length) return;
+  redoStack.push(JSON.stringify(state?.steps ?? []));
+  await restoreSteps(undoStack.pop());
+  updateUndoBtns();
+}
+
+async function redoSteps() {
+  if (!redoStack.length) return;
+  undoStack.push(JSON.stringify(state?.steps ?? []));
+  await restoreSteps(redoStack.pop());
+  updateUndoBtns();
+}
+
+function updateUndoBtns() {
+  $('btn-undo').disabled = !undoStack.length;
+  $('btn-redo').disabled = !redoStack.length;
+}
+
+$('btn-undo').addEventListener('click', undoSteps);
+$('btn-redo').addEventListener('click', redoSteps);
+document.addEventListener('keydown', (e) => {
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
+  const k = e.key.toLowerCase();
+  if (e.ctrlKey && !e.shiftKey && k === 'z') { e.preventDefault(); undoSteps(); }
+  else if ((e.ctrlKey && k === 'y') || (e.ctrlKey && e.shiftKey && k === 'z')) { e.preventDefault(); redoSteps(); }
+});
+
+// ------------------------------------------------------------ 隱藏欄位
 async function toggleHide(col) {
-  // 隱藏欄位以單一 hide_columns 步驟維護（Tukey 資料編輯器同款）
-  const existing = stepsState.find((s) => s.kind === 'hide_columns');
+  snapshotSteps();
+  const existing = state.steps.find((s) => s.kind === 'hide_columns');
   const cur = new Set(existing?.params?.cols ?? []);
   cur.has(col) ? cur.delete(col) : cur.add(col);
-  if (existing) await fetch(`/api/data/${sid}/steps/${existing.id}`, { method: 'DELETE' });
+  if (existing) await api(`/steps/${existing.id}`, { method: 'DELETE' });
   if (cur.size) {
-    await fetch(`/api/data/${sid}/steps`, {
+    await api('/steps', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ kind: 'hide_columns', label: `隱藏欄位（${cur.size}）`, params: { cols: [...cur] } }),
     });
@@ -90,385 +698,787 @@ async function toggleHide(col) {
   await refreshState();
 }
 
-const checkedCols = () =>
-  [...$('col-list').querySelectorAll('input:checked')].map((i) => i.dataset.col);
+// ------------------------------------------------------------ 放大 modal
+async function openZoom(col) {
+  const res = await api(`/cards?target=${encodeURIComponent(target)}&page=1&per_page=999`);
+  const card = res.cards.find((c) => c.col === col);
+  if (!card) return;
+  card.target = res.target;
+  $('zoom-title').textContent = `${col}${res.target && col !== res.target ? `｜vs ${res.target}` : ''}`;
+  const { lo, hi } = theme();
+  $('zoom-modal').querySelector('.zl-bar').style.background =
+    `linear-gradient(90deg, rgb(${lo.join(',')}), rgb(${hi.join(',')}))`;
+  $('zoom-modal').classList.add('open');
+  requestAnimationFrame(() => drawCard($('zoom-canvas'), card, true));
+}
+bindBrush($('zoom-canvas'));
+$('zoom-close').addEventListener('click', () => $('zoom-modal').classList.remove('open'));
+$('zoom-modal').addEventListener('click', (e) => { if (e.target === $('zoom-modal')) $('zoom-modal').classList.remove('open'); });
 
-function fillSelects() {
-  const numeric = columns.filter((c) => !c.hidden && (c.dtype.startsWith('float') || c.dtype.startsWith('int')));
-  const all = columns.filter((c) => !c.hidden);
-  const opt = (c) => `<option>${c.name}</option>`;
-  $('rule-col').innerHTML = '<option value="">欄位…</option>' + numeric.map(opt).join('');
-  $('bi-x').innerHTML = '<option value="">X 欄位…</option>' + all.map(opt).join('');
-  $('bi-y').innerHTML = '<option value="">Y 欄位…</option>' + all.map(opt).join('');
-  $('props-tcol').innerHTML = '<option value="">溫度欄位…</option>' + numeric.map(opt).join('');
-  $('props-pcol').innerHTML = '<option value="">壓力欄位（選填）…</option>' + numeric.map(opt).join('');
-  renderRuleParams();
+// ------------------------------------------------------------ 資料集表格（Tukey 多行欄頭）
+async function renderTable() {
+  const res = await api(`/rows?page=${tablePage}&per_page=${perTable}`);
+  const table = $('ds-table');
+  table.innerHTML = `<tr>${res.columns.map((c) => {
+    const isId = c.name === '__id__';
+    const typeLine = isId
+      ? `${ICONS.key} id`
+      : `${kindIcon(c.kind)} ${kindName[c.kind] ?? c.kind}`;
+    return `
+    <th class="rel" data-col="${c.name}">
+      <div class="tname">${c.name}
+        ${isId ? '' : `<button class="thops" title="資料操作（排除/萃取/聚合）">${ICONS.dots}</button>`}
+      </div>
+      <div class="tgroup">一般欄位</div>
+      <div class="ttype">${typeLine}</div>
+    </th>`;
+  }).join('')}</tr>`
+    + res.rows.map((r) => `<tr>${res.columns.map((c) => {
+      let v = r[c.name];
+      if (v == null) v = '';
+      if (c.kind === 'time' && v) v = String(v).replace('T', ' ').slice(0, 19);
+      return `<td>${v}</td>`;
+    }).join('')}</tr>`).join('');
+  table.querySelectorAll('.thops').forEach((btn) => btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const th = btn.closest('th');
+    openPopover(th, th.dataset.col);
+  }));
+  renderPager($('table-pager'), tablePage, Math.ceil(res.n_view / perTable), async (p) => {
+    tablePage = p;
+    await renderTable();
+  });
 }
 
-// ------------------------------------------------------------ 編輯歷程
-function renderSteps() {
-  $('step-list').innerHTML = stepsState.length ? stepsState.map((s) => `
-    <div class="step-row ${s.enabled ? '' : 'off'}">
-      <input type="checkbox" data-id="${s.id}" ${s.enabled ? 'checked' : ''} title="停用=還原此步驟">
-      <span class="lbl">${s.label}</span>
-      <span class="hits">${s.kind === 'hide_columns' ? '' : `−${s.hits}`}</span>
-      <span class="del" data-id="${s.id}">刪除</span>
-    </div>`).join('')
-    : '<span class="hint">清理動作會記錄於此，可個別停用還原（同一份資料、不同歷程）</span>';
-  $('step-list').querySelectorAll('input').forEach((inp) =>
+// ------------------------------------------------------------ 編輯歷程 drawer
+function renderHistory() {
+  const meta = state;
+  const stepsHtml = state.steps.map((s, i) => `
+    <div class="hist-node ${s.enabled ? '' : 'off'}">
+      <div class="n-row">
+        <input type="checkbox" data-id="${s.id}" ${s.enabled ? 'checked' : ''} title="停用=還原此步驟">
+        <span class="n-title">${i + 2}. ${s.label}</span>
+        <span class="del" data-id="${s.id}">刪除</span>
+      </div>
+      <div class="n-meta">${s.kind === 'hide_columns' ? '欄位管理' : s.kind === 'resample' ? '聚合' : `剔除 ${s.hits} 筆`}</div>
+    </div>`).join('');
+  $('d-history').innerHTML = `
+    <div class="hist-node origin">
+      <div class="n-title">1. 原始資料集</div>
+      <div class="n-meta">${meta.filename ?? ''}<br>${meta.n_base?.toLocaleString()} 筆
+        ${meta.uploaded_at ? `<br>上傳時間: ${meta.uploaded_at}` : ''}</div>
+    </div>
+    ${stepsHtml || '<p class="hint" style="margin-top:8px">卡片上的排除／萃取／聚合操作會記錄於此，可個別停用還原。</p>'}`;
+  $('d-history').querySelectorAll('input[type="checkbox"]').forEach((inp) =>
     inp.addEventListener('change', async () => {
-      await fetch(`/api/data/${sid}/steps/${inp.dataset.id}`, {
+      snapshotSteps();
+      await api(`/steps/${inp.dataset.id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: inp.checked }),
       });
       await refreshState();
     }));
-  $('step-list').querySelectorAll('.del').forEach((el) =>
+  $('d-history').querySelectorAll('.del').forEach((el) =>
     el.addEventListener('click', async () => {
-      await fetch(`/api/data/${sid}/steps/${el.dataset.id}`, { method: 'DELETE' });
+      snapshotSteps();
+      await api(`/steps/${el.dataset.id}`, { method: 'DELETE' });
       await refreshState();
     }));
 }
 
-async function addStep(kind, label, params) {
-  await fetch(`/api/data/${sid}/steps`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ kind, label, params }),
-  });
-  await refreshState();
+// ------------------------------------------------------------ 資料編輯器（欄位）
+function renderColMgr() {
+  const q = ($('col-search').value || '').toLowerCase();
+  $('col-mgr').innerHTML = state.columns
+    .filter((c) => c.name !== '__id__' && (!q || c.name.toLowerCase().includes(q)))
+    .map((c) => `
+      <div class="col-row ${c.hidden ? 'hid' : ''}">
+        <span class="nm" title="${c.dtype}">${c.name}</span>
+        <span class="hint">${c.dtype.startsWith('datetime') ? '時間' : c.dtype.startsWith('float') || c.dtype.startsWith('int') ? '數值' : '字串'}</span>
+        <span class="act" data-col="${c.name}">${c.hidden ? '顯示' : '隱藏'}</span>
+      </div>`).join('');
+  $('col-mgr').querySelectorAll('.act').forEach((el) =>
+    el.addEventListener('click', () => toggleHide(el.dataset.col)));
+}
+$('col-search').addEventListener('input', renderColMgr);
+
+// ------------------------------------------------------------ 模型（AutoML，對標 Tukey fitting）
+let ALGO_META = null;      // /api/automl/algos
+let modelPollTimer = null;
+const apiML = (path, opts) => fetch(`/api/automl/${sid}${path}`, opts).then((r) => {
+  if (!r.ok) return r.json().then((e) => { throw new Error(e.detail ?? r.status); });
+  return r.json();
+});
+
+async function loadAlgoMeta() {
+  if (!ALGO_META) ALGO_META = (await fetch('/api/automl/algos').then((r) => r.json())).algos;
+  return ALGO_META;
 }
 
-// 規則編輯器
-const RULE_PARAMS = {
-  range: ['lo', 'hi'], jump: ['max_abs'], jump_pct: ['max_pct'],
-  quantile: ['lo_q', 'hi_q'], flatline: ['min_run'],
+async function renderModels() {
+  if (!sid) return;
+  clearTimeout(modelPollTimer);
+  const models = await apiML('/models');
+  $('model-empty').style.display = models.length ? 'none' : '';
+  $('model-main').style.display = models.length ? '' : 'none';
+  if (models.length) {
+    const stName = { done: '完成', training: '訓練中…', error: '失敗' };
+    // 指標四欄雙語意：迴歸 RMSE/MAE/MAAPE/R²、分類 Acc/F1/Precision/Recall
+    const mv = (m) => {
+      const c = m.metrics_cv;
+      if (!c) return ['—', '—', '—', '—'];
+      return m.task === 'classification'
+        ? [c.accuracy, c.f1, c.precision, c.recall]
+        : [c.rmse, c.mae, c.maape, c.r2];
+    };
+    $('model-table').innerHTML = `<thead><tr>
+      <th>排名</th><th>模型</th><th>目標</th><th>任務</th><th>演算法</th>
+      <th>RMSE｜Acc</th><th>MAE｜F1</th><th>MAAPE｜Prec</th><th>R²｜Recall</th>
+      <th>狀態</th><th>建立時間</th><th></th></tr></thead><tbody>${
+      models.map((m, i) => `<tr data-id="${m.id}">
+        <td>${m.status === 'done' ? `#${i + 1}` : ''}</td>
+        <td>${m.name}</td><td>${m.target}</td>
+        <td>${m.task === 'classification' ? '分類' : m.task === 'timeseries' ? '時序' : '迴歸'}</td>
+        <td>${(ALGO_META?.find((a) => a.key === m.algo)?.name) ?? m.algo}${m.auto_tune ? '（自動調參）' : ''}</td>
+        ${mv(m).map((v) => `<td>${v}</td>`).join('')}
+        <td class="st-${m.status}" title="${m.error ?? ''}">${stName[m.status] ?? m.status}</td>
+        <td>${m.created}</td>
+        <td><span class="del" data-id="${m.id}">刪除</span></td></tr>`).join('')}</tbody>`;
+    $('model-table').querySelectorAll('.del').forEach((el) => el.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await apiML(`/models/${el.dataset.id}`, { method: 'DELETE' });
+      $('model-detail').style.display = 'none';
+      await renderModels();
+    }));
+    $('model-table').querySelectorAll('tbody tr').forEach((tr) => tr.addEventListener('click', () =>
+      openModelDetail(tr.dataset.id)));
+    if (models.some((m) => m.status === 'training')) modelPollTimer = setTimeout(renderModels, 2500);
+  }
+}
+
+const METRIC_HEADS = {
+  regression: ['RMSE', 'MAE', 'MAAPE', 'R²'],
+  classification: ['Accuracy', 'F1', 'Precision', 'Recall'],
 };
-function renderRuleParams() {
-  const kind = $('rule-kind').value;
-  $('rule-params').innerHTML = RULE_PARAMS[kind].map((p) =>
-    `<input data-p="${p}" type="number" step="any" placeholder="${p}">`).join('');
+const metricRow = (label, mt, cls) => `<tr><td>${label}</td>${
+  (cls ? [mt.accuracy, mt.f1, mt.precision, mt.recall] : [mt.rmse, mt.mae, mt.maape, mt.r2])
+    .map((v) => `<td>${v}</td>`).join('')}</tr>`;
+
+async function openModelDetail(mid) {
+  const m = await apiML(`/models/${mid}`);
+  if (m.status !== 'done') { alert(m.status === 'error' ? `訓練失敗：${m.error}` : '訓練中，請稍候'); return; }
+  await loadAlgoMeta();
+  const cls = m.task === 'classification';
+  const isTs = m.task === 'timeseries';
+  const heads = METRIC_HEADS[cls ? 'classification' : 'regression'];
+  const algoName = ALGO_META.find((a) => a.key === m.algo)?.name ?? m.algo;
+  const tuned = m.tuned_params ? `<div class="md-sub">自動調參結果：${
+    Object.entries(m.tuned_params).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : v}`).join('、')}</div>` : '';
+  const charts = cls ? `
+      <div class="md-chart"><h4>混淆矩陣 Confusion Matrix（驗證集）</h4><canvas id="md-cm"></canvas></div>
+      <div class="md-chart"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>` : isTs ? `
+      <div class="md-chart wide"><h4>時序預測——訓練脈絡＋外推 vs 實際</h4><canvas id="md-ts"></canvas></div>` : `
+      <div class="md-chart"><h4>模型準確度 Actual – Predicted</h4><canvas id="md-pa"></canvas></div>
+      <div class="md-chart"><h4>模型準確度 Actual – Error</h4><canvas id="md-err"></canvas></div>
+      <div class="md-chart wide"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>`;
+  const taskName = cls ? '分類' : isTs ? '時序預測（單變量）' : '迴歸';
+  $('model-detail').innerHTML = `
+    <h3>${m.name}</h3>
+    <div class="md-sub">${algoName}｜${taskName}｜訓練資料 ${m.n_rows.toLocaleString()} 筆｜目標 ${m.target}</div>
+    ${tuned}
+    <table class="md-metrics">
+      <tr><th>模型指標</th>${heads.map((h) => `<th>${h}</th>`).join('')}</tr>
+      ${metricRow(m.val_desc ?? '交叉驗證集', m.metrics_cv, cls)}${metricRow('訓練資料集', m.metrics_train, cls)}
+      <tbody id="ev-metric-row"></tbody>
+    </table>
+    <div class="md-charts">${charts}</div>
+    <details class="md-app" id="app-eval">
+      <summary>模型評估——以「現行資料視圖」重新評估（隨選）</summary>
+      <p class="hint" style="margin:8px 0">資料視圖若已改變（新增篩選步驟、樣板複用到新資料），
+        這裡評的就是模型在現在這份資料上的表現，與上方訓練時指標對照可看外推退化。</p>
+      <button class="dbtn" style="width:auto;padding:8px 22px" id="btn-eval">建立評估</button>
+      <div id="ev-out">${m.evaluation ? '' : '<p class="hint" style="margin-top:8px">尚無評估——點擊「建立評估」開始。</p>'}</div>
+    </details>
+    ${isTs ? '' : `
+    <details class="md-app" id="app-whatif">
+      <summary>操作差異試算——改變輸入條件，看預測怎麼變</summary>
+      <p class="hint" style="margin:8px 0">基準值＝現行視圖各特徵中位數；留空＝維持基準。</p>
+      <div class="wiz-params" id="wi-grid"></div>
+      <button class="dbtn" style="width:auto;padding:8px 22px;margin-top:10px" id="btn-whatif">試算</button>
+      <div id="wi-out"></div>
+    </details>`}
+    ${(cls || isTs) ? '' : `
+    <details class="md-app" id="app-opt">
+      <summary>配方優化（參數最佳化）——設定目標，輸出最佳參數建議</summary>
+      <div class="opt-row">
+        <select class="mini" id="opt-mode" style="width:auto">
+          <option value="target">達到目標值</option>
+          <option value="max">最大化 ${m.target}</option>
+          <option value="min">最小化 ${m.target}</option>
+        </select>
+        <input class="mini" id="opt-value" type="number" step="any" placeholder="目標值" style="width:160px">
+      </div>
+      <label style="font-size:13px;color:var(--text2);margin:8px 0 4px;display:block">可調參數（未勾＝固定在基準值；邊界＝資料 P1–P99）</label>
+      <div id="opt-knobs"></div>
+      <button class="dbtn" style="width:auto;padding:8px 22px;margin-top:10px" id="btn-opt">執行優化</button>
+      <div id="opt-out"></div>
+    </details>`}`;
+  $('model-detail').style.display = '';
+  requestAnimationFrame(() => {
+    if (cls) drawCM($('md-cm'), m.plots.cm.labels, m.plots.cm.matrix);
+    else if (isTs) drawTSF($('md-ts'), m.plots.tsf);
+    else {
+      drawXY($('md-pa'), m.plots.pa.actual, m.plots.pa.pred, '實際值', '預測值', true);
+      drawXY($('md-err'), m.plots.err.actual, m.plots.err.error, '實際值', '誤差值', false, true);
+    }
+    if (m.plots.fi && $('md-fi')) drawFI($('md-fi'), m.plots.fi.names, m.plots.fi.values);
+    if (m.evaluation) renderEvaluation(m, m.evaluation);
+  });
+  bindModelApps(m);
+  $('model-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
-$('rule-kind').addEventListener('change', renderRuleParams);
-$('btn-add-rule').addEventListener('click', () => {
-  const kind = $('rule-kind').value;
-  const col = $('rule-col').value;
-  if (!col) { alert('請選欄位'); return; }
-  const params = { col };
-  $('rule-params').querySelectorAll('input').forEach((i) => { if (i.value !== '') params[i.dataset.p] = +i.value; });
-  const kindName = $('rule-kind').selectedOptions[0].textContent;
-  addStep(kind, `${kindName}：${col}`, params);
-});
 
-// 時間聚合
-$('btn-agg').addEventListener('click', () => {
-  const freq = $('agg-freq').value;
-  if (!freq) { alert('請選解析度'); return; }
-  const tcol = columns.find((c) => c.dtype.startsWith('datetime'))?.name;
-  if (!tcol) { alert('資料無時間欄位'); return; }
-  const agg = $('agg-fn').value;
-  addStep('resample', `時間聚合 ${freq}（${agg}）`, { time_col: tcol, freq, agg });
-});
-
-// ---------------------------------------------------------------- 主圖
-async function loadSeries() {
-  const cols = checkedCols();
-  if (!sid || !cols.length) { seriesData = null; draw(); return; }
-  seriesData = await fetch(`/api/data/${sid}/series?cols=${encodeURIComponent(cols.join(','))}`)
-    .then((r) => r.json()).catch(() => null);
-  selectedRows.clear();
-  updateSelButtons();
-  draw();
+// ---------------- 模型應用：評估 / 試算 / 優化
+function renderEvaluation(m, ev) {
+  const cls = m.task === 'classification';
+  const isTs = m.task === 'timeseries';
+  $('ev-metric-row').innerHTML = metricRow(`現行視圖評估（${ev.n_rows.toLocaleString()} 筆）`, ev.metrics, cls);
+  $('ev-out').innerHTML = `
+    <div class="md-sub" style="margin-top:10px">評估時間 ${ev.evaluated_at}｜${ev.n_rows.toLocaleString()} 筆</div>
+    <table class="md-metrics">
+      <tr><th>評估指標</th>${METRIC_HEADS[cls ? 'classification' : 'regression'].map((h) => `<th>${h}</th>`).join('')}</tr>
+      ${metricRow('現行視圖', ev.metrics, cls)}
+    </table>
+    <div class="md-chart" style="max-width:${isTs ? '100%' : '560px'}"><h4>${
+      cls ? '混淆矩陣（現行視圖）' : isTs ? '時序預測 vs 實際（現行視圖）' : 'Actual – Predicted（現行視圖）'}</h4>
+      <canvas id="ev-chart"></canvas></div>`;
+  requestAnimationFrame(() => {
+    if (cls) drawCM($('ev-chart'), ev.cm.labels, ev.cm.matrix);
+    else if (isTs) drawTSF($('ev-chart'), ev.tsf);
+    else drawXY($('ev-chart'), ev.pa.actual, ev.pa.pred, '實際值', '預測值', true);
+  });
 }
 
-const canvas = $('chart');
-const ctx = canvas.getContext('2d');
-const M = { l: 60, r: 16, t: 24, b: 30 };
-let dragBox = null;
-
-function fitCanvas(cv, c2) {
-  const w = cv.parentElement.clientWidth, h = cv.parentElement.clientHeight;
-  cv.width = w * devicePixelRatio;
-  cv.height = h * devicePixelRatio;
-  cv.style.width = w + 'px';
-  cv.style.height = h + 'px';
-  c2.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-}
-new ResizeObserver(() => { fitCanvas(canvas, ctx); draw(); }).observe(canvas.parentElement);
-
-function draw() {
+// 時序預測疊圖：訓練脈絡（淺灰）＋測試實際（深灰）＋外推預測（主題色）＋切分虛線
+function drawTSF(canvas, tsf) {
+  const dpr = devicePixelRatio;
   const w = canvas.clientWidth, h = canvas.clientHeight;
-  ctx.clearRect(0, 0, w, h);
-  $('chart-hint').style.display = seriesData ? 'none' : '';
-  if (!seriesData) return;
-  const cols = Object.keys(seriesData.cols);
-  const n = seriesData.x.length;
-  if (!n) return;
-  const px = (i) => M.l + (i / Math.max(n - 1, 1)) * (w - M.l - M.r);
-  cols.forEach((c, ci) => {
-    const vals = seriesData.cols[c];
-    const nums = vals.filter((v) => v != null);
-    if (!nums.length) return;
-    const lo = Math.min(...nums), hi = Math.max(...nums);
-    const span = hi - lo || 1;
-    const py = (v) => h - M.b - ((v - lo) / span) * (h - M.t - M.b);
-    ctx.strokeStyle = PALETTE[ci % PALETTE.length];
-    ctx.lineWidth = 1.2;
-    ctx.globalAlpha = 0.75;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '11px Inter';
+  const M = { l: 64, r: 16, t: 14, b: 44 };
+  const tAll = tsf.t_hist.concat(tsf.t_test);
+  const yAll = tsf.y_hist.concat(tsf.y_test, tsf.pred);
+  const xlo = Math.min(...tAll), xhi = Math.max(...tAll);
+  const ylo = Math.min(...yAll), yhi = Math.max(...yAll);
+  const px = (v) => M.l + ((v - xlo) / ((xhi - xlo) || 1)) * (w - M.l - M.r);
+  const py = (v) => h - M.b - ((v - ylo) / ((yhi - ylo) || 1)) * (h - M.t - M.b);
+  ctx.textAlign = 'right';
+  niceTicks(ylo, yhi, 5).forEach((tv) => {
+    const y = py(tv);
+    ctx.strokeStyle = C_GRID; ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(w - M.r, y); ctx.stroke();
+    ctx.fillStyle = C_LABEL; ctx.fillText(fmtTick(tv), M.l - 8, y + 3.5);
+  });
+  ctx.textAlign = 'left';
+  Array.from({ length: 6 }, (_, i) => xlo + ((xhi - xlo) * i) / 5).forEach((tv) => {
+    const x = px(tv);
+    ctx.strokeStyle = C_AXIS; ctx.beginPath(); ctx.moveTo(x, h - M.b); ctx.lineTo(x, h - M.b + 4); ctx.stroke();
+    ctx.fillStyle = C_LABEL;
+    const lb = fmtTime(tv);
+    ctx.fillText(lb, x - ctx.measureText(lb).width / 2, h - M.b + 18);
+  });
+  ctx.strokeStyle = C_AXIS;
+  ctx.beginPath(); ctx.moveTo(M.l, M.t); ctx.lineTo(M.l, h - M.b); ctx.lineTo(w - M.r, h - M.b); ctx.stroke();
+  const line = (ts, ys, color, width) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width;
     ctx.beginPath();
-    let started = false;
-    vals.forEach((v, i) => {
-      if (v == null) { started = false; return; }
-      if (!started) { ctx.moveTo(px(i), py(v)); started = true; }
-      else ctx.lineTo(px(i), py(v));
-    });
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    vals.forEach((v, i) => {
-      if (v == null) return;
-      const row = seriesData.row_idx[i];
-      const ex = seriesData.excluded[i];
-      const sel = selectedRows.has(row);
-      if (!ex && !sel && n > 1500) return;
-      ctx.fillStyle = ex ? '#ff4d4f' : sel ? '#ffe14d' : PALETTE[ci % PALETTE.length];
-      ctx.beginPath();
-      ctx.arc(px(i), py(v), ex || sel ? 3 : 1.8, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.fillStyle = PALETTE[ci % PALETTE.length];
-    ctx.fillRect(M.l + ci * 140, 8, 10, 10);
-    ctx.fillStyle = '#dbe5ee';
-    ctx.font = '11px Inter, sans-serif';
-    ctx.fillText(`${c}（${lo.toFixed(1)}~${hi.toFixed(1)}）`, M.l + ci * 140 + 14, 17);
-  });
-  if (dragBox) {
-    ctx.strokeStyle = '#ffe14d';
-    ctx.setLineDash([5, 4]);
-    ctx.strokeRect(dragBox[0], dragBox[1], dragBox[2] - dragBox[0], dragBox[3] - dragBox[1]);
-    ctx.setLineDash([]);
-  }
-}
-
-let dragStart = null;
-canvas.addEventListener('pointerdown', (e) => { dragStart = [e.offsetX, e.offsetY]; });
-canvas.addEventListener('pointermove', (e) => {
-  if (!dragStart) return;
-  dragBox = [Math.min(dragStart[0], e.offsetX), Math.min(dragStart[1], e.offsetY),
-             Math.max(dragStart[0], e.offsetX), Math.max(dragStart[1], e.offsetY)];
-  draw();
-});
-canvas.addEventListener('pointerup', () => {
-  if (dragBox && seriesData && (dragBox[2] - dragBox[0] > 6)) hitTest(dragBox);
-  dragStart = null;
-  dragBox = null;
-  draw();
-});
-
-function hitTest(box) {
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  const n = seriesData.x.length;
-  const px = (i) => M.l + (i / Math.max(n - 1, 1)) * (w - M.l - M.r);
-  for (const c of Object.keys(seriesData.cols)) {
-    const vals = seriesData.cols[c];
-    const nums = vals.filter((v) => v != null);
-    if (!nums.length) continue;
-    const lo = Math.min(...nums), hi = Math.max(...nums);
-    const span = hi - lo || 1;
-    const py = (v) => h - M.b - ((v - lo) / span) * (h - M.t - M.b);
-    vals.forEach((v, i) => {
-      if (v == null) return;
-      const X = px(i), Y = py(v);
-      if (X >= box[0] && X <= box[2] && Y >= box[1] && Y <= box[3]) selectedRows.add(seriesData.row_idx[i]);
-    });
-  }
-  updateSelButtons();
-}
-
-function updateSelButtons() {
-  const has = selectedRows.size > 0;
-  $('btn-exclude').disabled = !has;
-  $('btn-clear-sel').disabled = !has;
-  $('btn-exclude').textContent = has ? `剔除圈選（${selectedRows.size}）` : '剔除圈選';
-}
-
-$('btn-clear-sel').addEventListener('click', () => { selectedRows.clear(); updateSelButtons(); draw(); });
-$('btn-exclude').addEventListener('click', async () => {
-  await addStep('manual_exclude', `手動圈選剔除（${selectedRows.size} 筆）`, { rows: [...selectedRows] });
-  selectedRows.clear();
-  updateSelButtons();
-});
-$('btn-export').addEventListener('click', () => { location.href = `/api/data/${sid}/export`; });
-$('btn-report').addEventListener('click', () => { location.href = `/api/data/${sid}/report`; });
-
-// ------------------------------------------------------------ 下方 detail 圖
-const detail = $('detail');
-const dctx = detail.getContext('2d');
-new ResizeObserver(() => fitCanvas(detail, dctx)).observe(detail.parentElement);
-
-function clearDetail(title) {
-  fitCanvas(detail, dctx);
-  dctx.clearRect(0, 0, detail.clientWidth, detail.clientHeight);
-  $('detail-title').textContent = title;
-}
-
-async function showHist(col) {
-  const res = await fetch(`/api/data/${sid}/hist?col=${encodeURIComponent(col)}`).then((r) => r.json()).catch(() => null);
-  if (!res || res.type === 'empty') { clearDetail(`${col}：無資料`); return; }
-  const w = detail.clientWidth, h = detail.clientHeight;
-  const Mm = { l: 50, r: 16, t: 28, b: 24 };
-  if (res.type === 'hist') {
-    clearDetail(`${col}｜直方圖｜均值 ${res.stats.mean}・std ${res.stats.std}・遺漏 ${res.stats.missing_pct}%`);
-    const maxC = Math.max(...res.counts);
-    const bw = (w - Mm.l - Mm.r) / res.counts.length;
-    dctx.fillStyle = '#46c2e0';
-    res.counts.forEach((cnt, i) => {
-      const bh = (cnt / maxC) * (h - Mm.t - Mm.b);
-      dctx.fillRect(Mm.l + i * bw + 1, h - Mm.b - bh, bw - 2, bh);
-    });
-    dctx.fillStyle = '#8ba0b3';
-    dctx.font = '10px Inter';
-    dctx.fillText(String(res.edges[0]), Mm.l, h - 8);
-    dctx.fillText(String(res.edges.at(-1)), w - Mm.r - 40, h - 8);
-  } else if (res.type === 'bar') {
-    clearDetail(`${col}｜類別分布（前 ${res.labels.length}）`);
-    const maxC = Math.max(...res.counts);
-    const bw = (w - Mm.l - Mm.r) / res.labels.length;
-    res.labels.forEach((lb, i) => {
-      const bh = (res.counts[i] / maxC) * (h - Mm.t - Mm.b);
-      dctx.fillStyle = '#ffaa3c';
-      dctx.fillRect(Mm.l + i * bw + 2, h - Mm.b - bh, bw - 4, bh);
-      dctx.fillStyle = '#8ba0b3';
-      dctx.font = '10px Inter';
-      dctx.save();
-      dctx.translate(Mm.l + i * bw + bw / 2, h - 10);
-      dctx.fillText(lb.slice(0, 10), -dctx.measureText(lb.slice(0, 10)).width / 2, 0);
-      dctx.restore();
-    });
-  }
-}
-
-$('btn-bi').addEventListener('click', async () => {
-  const x = $('bi-x').value, y = $('bi-y').value;
-  if (!x || !y) { alert('請選 X 與 Y'); return; }
-  const res = await fetch(`/api/data/${sid}/bivariate?x=${encodeURIComponent(x)}&y=${encodeURIComponent(y)}`)
-    .then((r) => { if (!r.ok) throw 0; return r.json(); }).catch(() => null);
-  if (!res) { clearDetail('雙變量繪製失敗'); return; }
-  const w = detail.clientWidth, h = detail.clientHeight;
-  const Mm = { l: 56, r: 16, t: 28, b: 26 };
-  if (res.type === 'scatter') {
-    clearDetail(`${x} × ${y}｜散佈圖（${res.x.length} 點）`);
-    const xs = res.x, ys = res.y;
-    const xlo = Math.min(...xs), xhi = Math.max(...xs), ylo = Math.min(...ys), yhi = Math.max(...ys);
-    const pxf = (v) => Mm.l + ((v - xlo) / ((xhi - xlo) || 1)) * (w - Mm.l - Mm.r);
-    const pyf = (v) => h - Mm.b - ((v - ylo) / ((yhi - ylo) || 1)) * (h - Mm.t - Mm.b);
-    dctx.fillStyle = 'rgba(70,194,224,0.55)';
-    xs.forEach((xv, i) => {
-      dctx.beginPath();
-      dctx.arc(pxf(xv), pyf(ys[i]), 2, 0, Math.PI * 2);
-      dctx.fill();
-    });
-  } else if (res.type === 'box') {
-    clearDetail(`${res.cat} × ${res.num}｜箱型圖（${res.groups.length} 組）`);
-    const g = res.groups;
-    const lo = Math.min(...g.map((v) => v.min)), hi = Math.max(...g.map((v) => v.max));
-    const pyf = (v) => h - Mm.b - ((v - lo) / ((hi - lo) || 1)) * (h - Mm.t - Mm.b);
-    const bw = (w - Mm.l - Mm.r) / g.length;
-    g.forEach((grp, i) => {
-      const cx = Mm.l + i * bw + bw / 2;
-      dctx.strokeStyle = '#46c2e0';
-      dctx.fillStyle = 'rgba(70,194,224,0.25)';
-      dctx.beginPath();
-      dctx.moveTo(cx, pyf(grp.min)); dctx.lineTo(cx, pyf(grp.max));
-      dctx.stroke();
-      const bx = cx - bw * 0.28, bws = bw * 0.56;
-      dctx.fillRect(bx, pyf(grp.q3), bws, pyf(grp.q1) - pyf(grp.q3));
-      dctx.strokeRect(bx, pyf(grp.q3), bws, pyf(grp.q1) - pyf(grp.q3));
-      dctx.strokeStyle = '#ffe14d';
-      dctx.beginPath();
-      dctx.moveTo(bx, pyf(grp.med)); dctx.lineTo(bx + bws, pyf(grp.med));
-      dctx.stroke();
-      dctx.fillStyle = '#8ba0b3';
-      dctx.font = '10px Inter';
-      dctx.fillText(grp.label.slice(0, 8), cx - 16, h - 8);
-    });
-  }
-});
-
-// ---------------------------------------------------------------- Tabs
-document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
-  document.querySelectorAll('.tab-body').forEach((x) => x.classList.remove('show'));
-  t.classList.add('active');
-  $(`tab-${t.dataset.tab}`).classList.add('show');
-}));
-
-// ------------------------------------------------------------ 相關分析＋健檢
-$('btn-corr').addEventListener('click', async () => {
-  const cols = checkedCols();
-  const method = $('corr-method').value;
-  const res = await fetch(`/api/data/${sid}/corr?cols=${encodeURIComponent(cols.join(','))}&method=${method}`)
-    .then((r) => { if (!r.ok) throw r; return r.json(); }).catch(async (r) => {
-      const err = await r.json?.().catch(() => ({}));
-      $('corr-out').innerHTML = `<span class="hint">${err?.detail ?? '計算失敗（勾選 ≥2 個數值欄）'}</span>`;
-      return null;
-    });
-  if (!res) return;
-  const n = res.cols.length;
-  const cell = (v) => {
-    const t = Math.max(-1, Math.min(1, v));
-    const col = t >= 0 ? `rgba(70,194,224,${Math.abs(t) * 0.9})` : `rgba(255,77,79,${Math.abs(t) * 0.9})`;
-    return `<div class="corr-cell" style="background:${col}" title="${v}">${(v * 100).toFixed(0)}</div>`;
+    ys.forEach((v, i) => { const x = px(ts[i]), y = py(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke(); ctx.lineWidth = 1;
   };
-  let html = `<div id="corr-grid" style="grid-template-columns:70px repeat(${n},1fr)">`;
-  html += '<div></div>' + res.cols.map((c) => `<div class="corr-label" title="${c}">${c.slice(0, 8)}</div>`).join('');
-  res.matrix.forEach((row, i) => {
-    html += `<div class="corr-label" title="${res.cols[i]}">${res.cols[i].slice(0, 10)}</div>` + row.map(cell).join('');
+  line(tsf.t_hist, tsf.y_hist, '#C3C8D0', 1.2);
+  line(tsf.t_test, tsf.y_test, '#6B7280', 1.4);
+  line(tsf.t_test, tsf.pred, theme().selL, 1.8);
+  // 訓練／測試切分虛線
+  const xSplit = px(tsf.t_test[0]);
+  ctx.strokeStyle = C_LABEL; ctx.setLineDash([5, 4]);
+  ctx.beginPath(); ctx.moveTo(xSplit, M.t); ctx.lineTo(xSplit, h - M.b); ctx.stroke();
+  ctx.setLineDash([]);
+  // 圖例
+  const legend = [['訓練段', '#C3C8D0'], ['實際', '#6B7280'], ['外推預測', theme().selL]];
+  let lx = w - 250;
+  legend.forEach(([txt, color]) => {
+    ctx.fillStyle = color; ctx.fillRect(lx, M.t, 16, 3);
+    ctx.fillStyle = C_LABEL; ctx.fillText(txt, lx + 20, M.t + 5);
+    lx += 30 + ctx.measureText(txt).width + 20;
   });
-  html += `</div><p class="hint">${res.method} r ×100（藍正紅負）｜樣本 ${res.n_used.toLocaleString()} 列（清理後）</p>`;
-  $('corr-out').innerHTML = html;
+}
+
+// 時序線圖：實際（灰）vs 預測（主題色）
+function drawTS(canvas, t, actual, pred) {
+  const dpr = devicePixelRatio;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '11px Inter';
+  const M = { l: 64, r: 16, t: 14, b: 44 };
+  const xlo = Math.min(...t), xhi = Math.max(...t);
+  const all = actual.concat(pred);
+  const ylo = Math.min(...all), yhi = Math.max(...all);
+  const px = (v) => M.l + ((v - xlo) / ((xhi - xlo) || 1)) * (w - M.l - M.r);
+  const py = (v) => h - M.b - ((v - ylo) / ((yhi - ylo) || 1)) * (h - M.t - M.b);
+  ctx.textAlign = 'right';
+  niceTicks(ylo, yhi, 5).forEach((tv) => {
+    const y = py(tv);
+    ctx.strokeStyle = C_GRID; ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(w - M.r, y); ctx.stroke();
+    ctx.fillStyle = C_LABEL; ctx.fillText(fmtTick(tv), M.l - 8, y + 3.5);
+  });
+  ctx.textAlign = 'left';
+  Array.from({ length: 6 }, (_, i) => xlo + ((xhi - xlo) * i) / 5).forEach((tv) => {
+    const x = px(tv);
+    ctx.strokeStyle = C_AXIS; ctx.beginPath(); ctx.moveTo(x, h - M.b); ctx.lineTo(x, h - M.b + 4); ctx.stroke();
+    ctx.fillStyle = C_LABEL;
+    const lb = fmtTime(tv);
+    ctx.fillText(lb, x - ctx.measureText(lb).width / 2, h - M.b + 18);
+  });
+  ctx.strokeStyle = C_AXIS;
+  ctx.beginPath(); ctx.moveTo(M.l, M.t); ctx.lineTo(M.l, h - M.b); ctx.lineTo(w - M.r, h - M.b); ctx.stroke();
+  const line = (ys, color, width) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width;
+    ctx.beginPath();
+    ys.forEach((v, i) => { const x = px(t[i]), y = py(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke(); ctx.lineWidth = 1;
+  };
+  line(actual, '#9AA1AC', 1.2);
+  line(pred, theme().selL, 1.6);
+  // 圖例
+  ctx.fillStyle = '#9AA1AC'; ctx.fillRect(w - 150, M.t, 16, 3);
+  ctx.fillStyle = C_LABEL; ctx.fillText('實際', w - 128, M.t + 5);
+  ctx.fillStyle = theme().selL; ctx.fillRect(w - 90, M.t, 16, 3);
+  ctx.fillStyle = C_LABEL; ctx.fillText('預測', w - 68, M.t + 5);
+}
+
+function bindModelApps(m) {
+  const cls = m.task === 'classification';
+  $('btn-eval').addEventListener('click', async () => {
+    $('btn-eval').disabled = true;
+    try {
+      const ev = await apiML(`/models/${m.id}/evaluate`, { method: 'POST' });
+      renderEvaluation(m, ev);
+    } catch (e) { alert(`評估失敗：${e.message}`); } finally { $('btn-eval').disabled = false; }
+  });
+
+  // what-if：開啟時抓 baseline 填 placeholder（時序模型無此區）
+  if (!$('app-whatif')) return;
+  let wiLoaded = false;
+  $('app-whatif').addEventListener('toggle', async () => {
+    if (!$('app-whatif').open || wiLoaded) return;
+    wiLoaded = true;
+    try {
+      const base = (await apiML(`/models/${m.id}/whatif`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"values":{}}',
+      })).baseline;
+      $('wi-grid').innerHTML = m.features.map((f) => `
+        <div class="wp"><label>${f}</label>
+          <input data-f="${f}" type="number" step="any" placeholder="基準 ${base[f]}"></div>`).join('');
+    } catch (e) { $('wi-grid').innerHTML = `<p class="hint">${e.message}</p>`; }
+  });
+  $('btn-whatif').addEventListener('click', async () => {
+    const values = {};
+    $('wi-grid').querySelectorAll('input[data-f]').forEach((i) => { if (i.value !== '') values[i.dataset.f] = +i.value; });
+    $('btn-whatif').disabled = true;
+    try {
+      const r = await apiML(`/models/${m.id}/whatif`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values }),
+      });
+      $('wi-out').innerHTML = cls ? `
+        <table class="md-metrics" style="margin-top:12px">
+          <tr><th>基準預測</th><th>試算預測</th><th>是否改變</th></tr>
+          <tr><td>${r.baseline_pred}</td><td>${r.pred}</td>
+            <td>${r.changed ? '<b class="wi-up">類別改變</b>' : '不變'}</td></tr>
+        </table>${r.proba ? `<div class="md-sub" style="margin-top:6px">機率：${
+          Object.entries(r.proba).map(([k, v]) => `${k} ${v}`).join('、')}</div>` : ''}` : `
+        <table class="md-metrics" style="margin-top:12px">
+          <tr><th>基準預測 ${m.target}</th><th>試算預測</th><th>差異 Δ</th></tr>
+          <tr><td>${r.baseline_pred}</td><td>${r.pred}</td>
+            <td class="${r.delta > 0 ? 'wi-up' : r.delta < 0 ? 'wi-dn' : ''}">${r.delta > 0 ? '+' : ''}${r.delta}</td></tr>
+        </table>`;
+    } catch (e) { alert(`試算失敗：${e.message}`); } finally { $('btn-whatif').disabled = false; }
+  });
+
+  if (cls || !$('app-opt')) return;
+  // 配方優化
+  $('opt-knobs').innerHTML = `<div class="feat-grid" style="max-height:150px">${
+    m.features.map((f) => `<label><input type="checkbox" checked value="${f}">${f}</label>`).join('')}</div>`;
+  $('opt-mode').addEventListener('change', () => {
+    $('opt-value').style.display = $('opt-mode').value === 'target' ? '' : 'none';
+  });
+  $('btn-opt').addEventListener('click', async () => {
+    const knobs = [...$('opt-knobs').querySelectorAll('input:checked')].map((i) => i.value);
+    const mode = $('opt-mode').value;
+    if (mode === 'target' && $('opt-value').value === '') { alert('請輸入目標值'); return; }
+    $('btn-opt').disabled = true;
+    $('opt-out').innerHTML = '<p class="hint" style="margin-top:8px">搜尋中…（隨機搜尋 3000 組＋鄰域細化）</p>';
+    try {
+      const r = await apiML(`/models/${m.id}/optimize`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode, value: $('opt-value').value, knobs }),
+      });
+      $('opt-out').innerHTML = `
+        <table class="md-metrics" style="margin-top:12px">
+          <tr><th>參數</th><th>基準值</th><th>建議值</th><th>變化</th><th>搜尋邊界</th></tr>
+          ${Object.keys(r.best).map((k) => {
+            const d = r.best[k] - r.baseline[k];
+            return `<tr><td>${k}</td><td>${r.baseline[k]}</td><td><b>${r.best[k]}</b></td>
+              <td class="${d > 0 ? 'wi-up' : d < 0 ? 'wi-dn' : ''}">${d > 0 ? '+' : ''}${Math.round(d * 100000) / 100000}</td>
+              <td>[${r.bounds[k][0]}, ${r.bounds[k][1]}]</td></tr>`;
+          }).join('')}
+        </table>
+        <table class="md-metrics" style="margin-top:10px">
+          <tr><th>基準預測 ${m.target}</th><th>建議配方預測</th>${mode === 'target' ? '<th>目標值</th>' : ''}</tr>
+          <tr><td>${r.baseline_pred}</td><td><b>${r.pred}</b></td>${mode === 'target' ? `<td>${r.value}</td>` : ''}</tr>
+        </table>`;
+    } catch (e) { $('opt-out').innerHTML = `<p class="hint" style="margin-top:8px">優化失敗：${e.message}</p>`; }
+    finally { $('btn-opt').disabled = false; }
+  });
+}
+
+// 混淆矩陣（深淺＝筆數，主題色）
+function drawCM(canvas, labels, matrix) {
+  const dpr = devicePixelRatio;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '11.5px Inter';
+  const n = labels.length;
+  const M = { l: 90, r: 16, t: 28, b: 48 };
+  const cw = (w - M.l - M.r) / n, ch = (h - M.t - M.b) / n;
+  const maxV = Math.max(...matrix.flat(), 1);
+  matrix.forEach((rowArr, i) => rowArr.forEach((v, j) => {
+    const x = M.l + j * cw, y = M.t + i * ch;
+    ctx.fillStyle = v ? ink(v / maxV) : '#F6F7FA';
+    ctx.fillRect(x + 1, y + 1, cw - 2, ch - 2);
+    ctx.fillStyle = v / maxV > 0.55 ? '#fff' : C_LABEL;
+    const t = String(v);
+    ctx.fillText(t, x + cw / 2 - ctx.measureText(t).width / 2, y + ch / 2 + 4);
+  }));
+  ctx.fillStyle = C_LABEL;
+  labels.forEach((lb, j) => {
+    const t = String(lb).slice(0, 10);
+    ctx.fillText(t, M.l + j * cw + cw / 2 - ctx.measureText(t).width / 2, h - M.b + 16);
+  });
+  ctx.textAlign = 'right';
+  labels.forEach((lb, i) => ctx.fillText(String(lb).slice(0, 10), M.l - 8, M.t + i * ch + ch / 2 + 4));
+  ctx.textAlign = 'left';
+  ctx.fillText('預測類別', M.l + (w - M.l - M.r) / 2 - 24, h - 8);
+  ctx.save(); ctx.translate(14, M.t + (h - M.t - M.b) / 2 + 24); ctx.rotate(-Math.PI / 2);
+  ctx.fillText('實際類別', 0, 0); ctx.restore();
+}
+
+// XY 散佈（diag=對角參考線；zero=誤差零線）
+function drawXY(canvas, xs, ys, xLabel, yLabel, diag = false, zero = false) {
+  const dpr = devicePixelRatio;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '11px Inter';
+  const M = { l: 64, r: 16, t: 12, b: 44 };
+  let xlo = Math.min(...xs), xhi = Math.max(...xs);
+  let ylo = Math.min(...ys), yhi = Math.max(...ys);
+  if (diag) { xlo = ylo = Math.min(xlo, ylo); xhi = yhi = Math.max(xhi, yhi); }
+  const px = (v) => M.l + ((v - xlo) / ((xhi - xlo) || 1)) * (w - M.l - M.r);
+  const py = (v) => h - M.b - ((v - ylo) / ((yhi - ylo) || 1)) * (h - M.t - M.b);
+  ctx.textAlign = 'right';
+  niceTicks(ylo, yhi, 5).forEach((tv) => {
+    const y = py(tv);
+    ctx.strokeStyle = C_GRID; ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(w - M.r, y); ctx.stroke();
+    ctx.fillStyle = C_LABEL; ctx.fillText(fmtTick(tv), M.l - 8, y + 3.5);
+  });
+  ctx.textAlign = 'left';
+  niceTicks(xlo, xhi, 6).forEach((tv) => {
+    const x = px(tv);
+    ctx.strokeStyle = C_AXIS; ctx.beginPath(); ctx.moveTo(x, h - M.b); ctx.lineTo(x, h - M.b + 4); ctx.stroke();
+    ctx.fillStyle = C_LABEL;
+    const lb = fmtTick(tv);
+    ctx.fillText(lb, x - ctx.measureText(lb).width / 2, h - M.b + 17);
+  });
+  ctx.strokeStyle = C_AXIS;
+  ctx.beginPath(); ctx.moveTo(M.l, M.t); ctx.lineTo(M.l, h - M.b); ctx.lineTo(w - M.r, h - M.b); ctx.stroke();
+  if (diag) { ctx.strokeStyle = C_LABEL; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(px(xlo), py(xlo)); ctx.lineTo(px(xhi), py(xhi)); ctx.stroke(); ctx.setLineDash([]); }
+  if (zero) { ctx.strokeStyle = C_LABEL; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(M.l, py(0)); ctx.lineTo(w - M.r, py(0)); ctx.stroke(); ctx.setLineDash([]); }
+  ctx.fillStyle = theme().dot;
+  xs.forEach((xv, i) => { ctx.beginPath(); ctx.arc(px(xv), py(ys[i]), 2.2, 0, Math.PI * 2); ctx.fill(); });
+  ctx.fillStyle = C_LABEL;
+  ctx.fillText(xLabel, (w - ctx.measureText(xLabel).width) / 2, h - 6);
+  ctx.save(); ctx.translate(12, (h + ctx.measureText(yLabel).width) / 2); ctx.rotate(-Math.PI / 2);
+  ctx.fillText(yLabel, 0, 0); ctx.restore();
+}
+
+// Feature importance 水平條（依重要度深淺）
+function drawFI(canvas, names, values) {
+  const dpr = devicePixelRatio;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '11.5px Inter';
+  const M = { l: Math.min(280, Math.max(...names.map((n) => ctx.measureText(n).width)) + 20), r: 60, t: 8, b: 8 };
+  const maxV = Math.max(...values, 1e-12);
+  const rowH = Math.min(26, (h - M.t - M.b) / names.length);
+  names.forEach((n, i) => {
+    const y = M.t + i * rowH;
+    const bw = Math.max((values[i] / maxV) * (w - M.l - M.r), 1);
+    ctx.fillStyle = ink(values[i] / maxV);
+    ctx.fillRect(M.l, y + 3, bw, rowH - 7);
+    ctx.fillStyle = C_LABEL;
+    ctx.textAlign = 'right'; ctx.fillText(n, M.l - 8, y + rowH / 2 + 4);
+    ctx.textAlign = 'left'; ctx.fillText(String(values[i]), M.l + bw + 6, y + rowH / 2 + 4);
+  });
+  ctx.textAlign = 'left';
+}
+
+// ------------------------------------------------------------ 建模精靈
+let wizMode = 'auto';
+const openWizard = async () => {
+  await loadAlgoMeta();
+  wizMode = 'auto';
+  $('model-wizard').classList.add('open');
+  $('wiz-step-mode').style.display = '';
+  $('wiz-step-form').style.display = 'none';
+  document.querySelectorAll('.wiz-mode').forEach((c) => c.classList.toggle('on', c.dataset.mode === 'auto'));
+};
+$('btn-new-model').addEventListener('click', openWizard);
+$('btn-model-empty').addEventListener('click', openWizard);
+$('wiz-close').addEventListener('click', () => $('model-wizard').classList.remove('open'));
+$('wiz-mode-cancel').addEventListener('click', () => $('model-wizard').classList.remove('open'));
+document.querySelectorAll('.wiz-mode').forEach((c) => c.addEventListener('click', () => {
+  wizMode = c.dataset.mode;
+  document.querySelectorAll('.wiz-mode').forEach((x) => x.classList.toggle('on', x === c));
+}));
+$('wiz-back').addEventListener('click', () => {
+  $('wiz-step-form').style.display = 'none';
+  $('wiz-step-mode').style.display = '';
 });
 
+$('wiz-mode-ok').addEventListener('click', () => {
+  const numeric = state.columns.filter((c) => !c.hidden && c.name !== '__id__' &&
+    (c.dtype.startsWith('float') || c.dtype.startsWith('int')));
+  // 字串欄可當分類目標（任務由後端依欄型態自動判定）
+  const stringCols = state.columns.filter((c) => !c.hidden && c.name !== '__id__' &&
+    !c.dtype.startsWith('float') && !c.dtype.startsWith('int') && !c.dtype.startsWith('datetime'));
+  $('wiz-form-title').textContent = wizMode === 'auto'
+    ? '全自動建立——全部適用演算法各建一個模型（自動調參）' : '手動建立模型';
+  $('wiz-target').innerHTML = numeric.map((c) => `<option>${c.name}</option>`).join('')
+    + stringCols.map((c) => `<option value="${c.name}">${c.name}（分類）</option>`).join('');
+  const renderFeatures = () => {
+    const tgt = $('wiz-target').value;
+    $('wiz-features').innerHTML = numeric.filter((c) => c.name !== tgt).map((c) =>
+      `<label><input type="checkbox" checked value="${c.name}">${c.name}</label>`).join('');
+  };
+  $('wiz-target').onchange = () => { renderFeatures(); renderAlgos(); };
+  renderFeatures();
+  // 任務型態：時序預測需要時間欄；時序＝單變量（特徵工程請於上傳前完成）
+  const hasTime = state.columns.some((c) => !c.hidden && c.dtype.startsWith('datetime'));
+  $('wiz-task').value = 'auto';
+  $('wiz-task').querySelector('[value="timeseries"]').disabled = !hasTime;
+  const taskKey = () => {
+    if ($('wiz-task').value === 'timeseries') return 'timeseries';
+    const tgt = state.columns.find((c) => c.name === $('wiz-target').value);
+    const isNum = tgt && (tgt.dtype.startsWith('float') || tgt.dtype.startsWith('int'));
+    return isNum ? 'regression' : 'classification';
+  };
+  const syncTask = () => {
+    const isTs = $('wiz-task').value === 'timeseries';
+    $('wiz-ts-cfg').style.display = isTs ? '' : 'none';
+    $('wiz-val-cfg').style.display = isTs ? 'none' : '';
+    $('wiz-feat-label').style.display = isTs ? 'none' : '';
+    $('wiz-features').style.display = isTs ? 'none' : '';
+    renderAlgos();
+  };
+  $('wiz-task').onchange = syncTask;
+  // 驗證方法動態參數
+  const VAL_HINTS = {
+    kfold: 'K 折：資料分 K 份輪流當驗證集；不洗牌＝依資料順序切。',
+    holdout: '保留法：切出一段當測試集；勾洗牌＝隨機抽樣、不勾＝取資料末端（時間排序資料建議不勾）。',
+    timesplit: '時序切分：只用過去預測未來的走前驗證，永不洗牌；折數＝輸入框數字。',
+  };
+  const syncVal = () => {
+    const m = $('wiz-val-method').value;
+    $('wiz-val-k-wrap').style.display = m === 'holdout' ? 'none' : '';
+    $('wiz-val-ts-wrap').style.display = m === 'holdout' ? '' : 'none';
+    $('wiz-val-shuffle-wrap').style.display = m === 'timesplit' ? 'none' : '';
+    $('wiz-val-hint').textContent = VAL_HINTS[m];
+  };
+  $('wiz-val-method').onchange = syncVal;
+  syncVal();
+
+  const renderAlgos = () => {
+    if (wizMode !== 'manual') return;
+    const tk = taskKey();
+    const list = ALGO_META.filter((a) => a.tasks.includes(tk));
+    const def = tk === 'timeseries' ? 'ARIMA' : 'XGB';
+    $('wiz-algo').innerHTML = list.map((a) =>
+      `<option value="${a.key}" ${a.key === def ? 'selected' : ''}>${a.name}</option>`).join('');
+    renderParams();
+  };
+  const renderParams = () => {
+    const meta = ALGO_META.find((a) => a.key === $('wiz-algo').value);
+    if (!meta) { $('wiz-params').innerHTML = ''; return; }
+    $('wiz-params').innerHTML = meta.params.length ? meta.params.map((p) => `
+      <div class="wp"><label>${p.label}</label>${
+      p.type === 'choice'
+        ? `<select data-key="${p.key}">${p.choices.map((c) => `<option ${c === p.default ? 'selected' : ''}>${c}</option>`).join('')}</select>`
+        : `<input data-key="${p.key}" type="${p.type === 'str' ? 'text' : 'number'}" step="any"
+             placeholder="預設 ${p.default ?? '自動'}">`}</div>`).join('')
+      : '<p class="hint" style="grid-column:1/-1">此演算法無關鍵超參數（用預設即可）</p>';
+    $('wiz-tune').disabled = !meta.tunable || taskKey() === 'timeseries';
+  };
+  $('wiz-manual-only').style.display = wizMode === 'manual' ? '' : 'none';
+  if (wizMode === 'manual') $('wiz-algo').onchange = renderParams;
+  syncTask();
+  $('wiz-step-mode').style.display = 'none';
+  $('wiz-step-form').style.display = '';
+});
+
+$('wiz-submit').addEventListener('click', async () => {
+  const isTs = $('wiz-task').value === 'timeseries';
+  const features = [...$('wiz-features').querySelectorAll('input:checked')].map((i) => i.value);
+  if (!features.length && !isTs) { alert('至少勾選一個自變數'); return; }
+  const body = {
+    mode: wizMode,
+    name: $('wiz-name').value.trim(),
+    target: $('wiz-target').value,
+    features,
+  };
+  if (isTs) {
+    body.task_type = 'timeseries';
+    body.test_size = (+$('wiz-ts-test').value || 20) / 100;
+    body.features = [];
+  } else {
+    body.validation = {
+      method: $('wiz-val-method').value,
+      k: +$('wiz-val-k').value || 5,
+      test_size: (+$('wiz-val-test').value || 20) / 100,
+      n_splits: +$('wiz-val-k').value || 5,
+      shuffle: $('wiz-val-shuffle').checked,
+    };
+  }
+  if (wizMode === 'manual') {
+    body.algo = $('wiz-algo').value;
+    body.auto_tune = $('wiz-tune').checked;
+    body.params = {};
+    $('wiz-params').querySelectorAll('[data-key]').forEach((el) => {
+      if (el.value !== '') body.params[el.dataset.key] = el.value;
+    });
+  }
+  $('wiz-submit').disabled = true;
+  try {
+    await apiML('/models', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    $('model-wizard').classList.remove('open');
+    await renderModels();
+  } catch (e) {
+    alert(`建立失敗：${e.message}`);
+  } finally {
+    $('wiz-submit').disabled = false;
+  }
+});
+
+// ------------------------------------------------------------ 資料健檢
 $('btn-health').addEventListener('click', async () => {
-  const res = await fetch(`/api/data/${sid}/health`).then((r) => r.json());
-  healthWarns = Object.fromEntries(res.issues.map((i) => [i.col, i.warnings]));
-  renderColumns();
-  $('health-out').innerHTML = res.issues.length
-    ? res.issues.map((i) => `<div class="health-item"><b>${i.col}</b><div class="w">${i.warnings.join('<br>')}</div></div>`).join('')
-    : '<span class="hint" style="color:var(--ok)">全欄位通過健檢</span>';
+  const res = await api('/health');
+  // __id__ 與時間欄本來就是流水號/時戳，ID-ness 警告屬預期，不列出
+  const issues = res.issues.filter((it) => it.col !== '__id__'
+    && !state.columns.find((c) => c.name === it.col)?.dtype.startsWith('datetime'));
+  $('health-out').innerHTML = issues.length
+    ? issues.map((it) => `<div class="props-result"><b>${it.col}</b><br>${it.warnings.join('<br>')}</div>`).join('')
+    : '<div class="props-result"><span class="good">全數欄位通過三判準</span></div>';
 });
 
-// ---------------------------------------------------------------- CoolProp
-async function refreshPropsCols() {
+$('btn-scan').addEventListener('click', async () => {
+  const res = await api('/scan');
+  if (!res.hits.length) {
+    $('scan-out').innerHTML = '<div class="props-result"><span class="good">未掃出異常（預設參數）</span></div>';
+    return;
+  }
+  const ruleName = Object.fromEntries(res.rules.map((r) => [r.kind, r.name]));
+  const ruleParams = Object.fromEntries(res.rules.map((r) => [r.kind, r.params]));
+  $('scan-out').innerHTML = res.hits.flatMap((row) =>
+    res.rules.filter((r) => row[r.kind] > 0).map((r) => `
+      <label class="scan-row">
+        <input type="checkbox" data-col="${row.col}" data-kind="${r.kind}">
+        ${row.col}｜${ruleName[r.kind]}
+        <span class="cnt">${row[r.kind]} 筆</span>
+      </label>`)).join('')
+    + '<button class="dbtn" id="btn-scan-apply" style="margin-top:8px">將勾選項加入編輯歷程</button>';
+  $('btn-scan-apply').addEventListener('click', async () => {
+    const checked = [...$('scan-out').querySelectorAll('input:checked')];
+    if (!checked.length) { alert('請先勾選要加入的規則'); return; }
+    snapshotSteps();
+    for (const inp of checked) {
+      const kind = inp.dataset.kind;
+      const col = inp.dataset.col;
+      await api('/steps', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, label: `${ruleName[kind]}（${col}）`,
+          params: { col, ...ruleParams[kind] } }),
+      });
+    }
+    $('scan-out').innerHTML = '';
+    await refreshState();
+  });
+});
+
+// ------------------------------------------------------------ 流體物性（進階，選配）
+async function refreshPropsFluids() {
   const fl = await fetch('/api/data/props/fluids').then((r) => r.json());
-  $('props-fluid').innerHTML = fl.map((f) => `<option>${f}</option>`).join('');
+  $('fluid-list').innerHTML = fl.map((f) => `<option value="${f}">`).join('');
+}
+function fillPropsCols() {
+  const numeric = state.columns.filter((c) => !c.hidden && c.name !== '__id__' &&
+    (c.dtype.startsWith('float') || c.dtype.startsWith('int')));
+  const opt = (c) => `<option>${c.name}</option>`;
+  $('props-tcol').innerHTML = '<option value="">溫度欄位…</option>' + numeric.map(opt).join('');
+  $('props-pcol').innerHTML = '<option value="">壓力欄位（選填）…</option>' + numeric.map(opt).join('');
 }
 function propsBody(mark = false) {
   return { fluid: $('props-fluid').value, t_col: $('props-tcol').value, t_unit: $('props-tunit').value,
            p_col: $('props-pcol').value || null, p_unit: $('props-punit').value, mark };
 }
 $('btn-props-check').addEventListener('click', async () => {
+  if (!$('props-fluid').value) { alert('請先搜尋並選定製程流體'); return; }
   if (!$('props-tcol').value) { alert('請選溫度欄位'); return; }
-  const res = await fetch(`/api/data/${sid}/props/check`, {
+  snapshotSteps();
+  const res = await api('/props/check', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(propsBody(true)),
-  }).then((r) => r.json());
+  });
   const okT = res.out_of_T_range === 0;
   $('props-out').innerHTML = `<div class="props-result">
     ${res.fluid}｜物理溫度範圍 ${(res.T_range_K[0] - 273.15).toFixed(0)}～${(res.T_range_K[1] - 273.15).toFixed(0)} °C<br>
     超出溫度範圍：<span class="${okT ? 'good' : 'bad'}">${res.out_of_T_range} 筆</span><br>
     ${res.out_of_P_range !== undefined ? `超出壓力範圍（P_crit ${res.P_crit_bar} bar）：<span class="${res.out_of_P_range === 0 ? 'good' : 'bad'}">${res.out_of_P_range} 筆</span><br>` : ''}
-    ${res.marked !== undefined ? `已記入編輯歷程 ${res.marked} 筆（物理不合理）` : ''}
+    ${res.marked !== undefined ? `已記入編輯歷程 ${res.marked} 筆` : ''}
   </div>`;
   await refreshState();
 });
 $('btn-props-derive').addEventListener('click', async () => {
+  if (!$('props-fluid').value) { alert('請先搜尋並選定製程流體'); return; }
   if (!$('props-tcol').value) { alert('請選溫度欄位'); return; }
-  const res = await fetch(`/api/data/${sid}/props/derive`, {
+  const res = await api('/props/derive', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(propsBody()),
-  }).then((r) => r.json());
+  });
   if (res.new_columns) {
     $('props-out').innerHTML = `<div class="props-result">已新增物性欄位：<br>${res.new_columns.join('<br>')}</div>`;
     await refreshState();
   }
 });
-refreshPropsCols();

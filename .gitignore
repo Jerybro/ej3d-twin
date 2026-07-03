@@ -29,3 +29,9 @@ scans/*
 .DS_Store
 Thumbs.db
 server_8601.log
+
+# 本機開發工具設定
+.claude/
+
+# AutoML 模型持久化（含使用者資料衍生）
+data/automl/

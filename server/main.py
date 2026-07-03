@@ -360,6 +360,10 @@ async def ws_endpoint(ws: WebSocket) -> None:
 app.include_router(scenes_router)
 app.include_router(dataprep_router)
 
+from .automl import router as automl_router  # noqa: E402
+
+app.include_router(automl_router)
+
 # --------------------------------------------------------- P&ID 圖面管理
 UPLOADS_DIR = BASE_DIR / "uploads"
 PID_DIR = UPLOADS_DIR / "pid"

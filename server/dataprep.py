@@ -56,16 +56,40 @@ def _save_steps(sid: str, steps: list) -> None:
 
 
 # ------------------------------------------------------ steps pipeline 重放
+def _series_num(df: pd.DataFrame, col: str) -> pd.Series:
+    """欄位轉數值序列；時間欄轉 epoch 秒。
+    不能用 astype("int64")——單位隨 dtype 變（[us] 給微秒）；Timedelta 除法單位無關。"""
+    if pd.api.types.is_datetime64_any_dtype(df[col]):
+        return (df[col] - pd.Timestamp(0)) / pd.Timedelta(seconds=1)
+    return pd.to_numeric(df[col], errors="coerce")
+
+
 def _step_mask(df: pd.DataFrame, step: dict) -> pd.Series:
     """回傳該步驟要「剔除」的布林遮罩（True=剔除）。"""
     kind = step["kind"]
     p = step.get("params", {})
     if kind == "manual_exclude":
         return pd.Series(df.index.isin(p.get("rows", [])), index=df.index)
+    if kind in ("exclude_box", "extract_box"):
+        # 矩形框選：X、Y 兩欄同時落在範圍內 = 框內
+        xc, yc = p.get("x_col"), p.get("y_col")
+        if xc not in df.columns or yc not in df.columns:
+            return pd.Series(False, index=df.index)
+        sx, sy = _series_num(df, xc), _series_num(df, yc)
+        inside = ((sx >= p.get("x_lo", -np.inf)) & (sx <= p.get("x_hi", np.inf))
+                  & (sy >= p.get("y_lo", -np.inf)) & (sy <= p.get("y_hi", np.inf))).fillna(False)
+        return inside if kind == "exclude_box" else ~inside
     col = p.get("col")
     if col not in df.columns:
         return pd.Series(False, index=df.index)
-    s = pd.to_numeric(df[col], errors="coerce")
+    s = _series_num(df, col)
+    if kind == "extract":
+        # 萃取：僅保留條件內 → 條件外剔除（Tukey 四操作之一）
+        keep = ((s >= p.get("lo", -np.inf)) & (s <= p.get("hi", np.inf))).fillna(False)
+        return ~keep
+    if kind == "exclude_range":
+        # 排除：刪除選定區間內的資料（Tukey「排除資料」語意）
+        return ((s >= p.get("lo", -np.inf)) & (s <= p.get("hi", np.inf))).fillna(False)
     if kind == "range":
         return ((s < p.get("lo", -np.inf)) | (s > p.get("hi", np.inf))).fillna(False)
     if kind == "jump":
@@ -149,30 +173,64 @@ def _summary(df: pd.DataFrame, hidden: list | None = None) -> dict:
 
 
 # ---------------------------------------------------------------- 上傳
+FORMAT_SPEC = ("上傳格式規定：CSV（UTF-8）或 Excel，第一列為欄位名稱；"
+               "必須包含一個時間欄（建議名為 time，ISO 格式如 2025-06-01 00:00:00）"
+               "＋至少一個數值欄（PI 位號等）。範例：time, 8AR1_FIC70005, 8AR1_TIC70016, ...")
+
+
 @router.post("/upload")
 async def upload(file: UploadFile = File(...)) -> dict:
     name = (file.filename or "").lower()
     raw = await file.read()
+    if len(raw) > 50 * 1024 * 1024:
+        raise HTTPException(422, f"檔案超過 50MB 上限。{FORMAT_SPEC}")
     try:
         if name.endswith((".xlsx", ".xls", ".xlsm")):
             df = pd.read_excel(io.BytesIO(raw))
         else:
             df = pd.read_csv(io.BytesIO(raw), encoding="utf-8-sig")
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(422, f"解析失敗: {type(e).__name__}") from None
+        raise HTTPException(422, f"解析失敗（{type(e).__name__}）。{FORMAT_SPEC}") from None
     if df.empty:
-        raise HTTPException(422, "檔案無資料")
-    for c in df.columns[:3]:  # 自動偵測時間欄（pandas 2/3 的字串欄可能是 object 或 str dtype）
-        if pd.api.types.is_string_dtype(df[c]) or df[c].dtype == object:
-            dt = pd.to_datetime(df[c], errors="coerce")
+        raise HTTPException(422, f"檔案無資料。{FORMAT_SPEC}")
+
+    # 時間欄偵測與驗證：優先名為 time 的欄，否則前 3 欄中找可解析者
+    time_col = None
+    candidates = [c for c in df.columns if str(c).lower() == "time"] + list(df.columns[:3])
+    for c in candidates:
+        s = df[c]
+        if pd.api.types.is_datetime64_any_dtype(s):
+            time_col = c
+            break
+        if pd.api.types.is_string_dtype(s) or s.dtype == object:
+            dt = pd.to_datetime(s, errors="coerce")
             if dt.notna().mean() > 0.9:
                 df[c] = dt
+                time_col = c
                 break
+    if time_col is None:
+        raise HTTPException(422, f"找不到有效時間欄（ISO 時戳解析成功率需 >90%）。{FORMAT_SPEC}")
+    n_numeric = df.select_dtypes(include="number").shape[1]
+    if n_numeric < 1:
+        raise HTTPException(422, f"至少需要一個數值欄。{FORMAT_SPEC}")
+
+    # 系統欄 __id__（流水號，Tukey 同款）
+    if "__id__" not in df.columns:
+        df.insert(0, "__id__", range(1, len(df) + 1))
+
     sid = uuid.uuid4().hex[:8]
     df.to_parquet(DATA_DIR / f"{sid}.parquet")
     _save_steps(sid, [])
-    return {"sid": sid, "filename": file.filename, **_summary(df),
+    meta = {"filename": file.filename, "time_col": str(time_col),
+            "uploaded_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")}
+    (DATA_DIR / f"{sid}.meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    return {"sid": sid, **meta, **_summary(df),
             "preview": json.loads(df.head(MAX_PREVIEW).to_json(orient="records", date_format="iso", force_ascii=False))}
+
+
+def _load_meta(sid: str) -> dict:
+    p = DATA_DIR / f"{sid}.meta.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
 
 
 @router.get("/{sid}/state")
@@ -182,8 +240,100 @@ def state(sid: str) -> dict:
         "n_base": len(df), "n_view": len(view),
         "excluded": int((reason != "").sum()),
         "steps": [{**st, "hits": per_step.get(st["id"], 0)} for st in steps],
+        **_load_meta(sid),
         **_summary(df, hidden),
     }
+
+
+# ------------------------------------------------- 卡片牆資料（Tukey 探索分析）
+@router.get("/{sid}/cards")
+def cards(sid: str, target: str = "", page: int = 1, per_page: int = 9, bins: int = 24) -> dict:
+    """一次回傳一頁卡片的圖資料。
+    單維模式（target 空）：每欄直方圖；二維模式：每欄 vs target 散佈抽樣。"""
+    df, steps, view, reason, per_step, hidden, _ = _view(sid)
+    cols = [c for c in view.columns if c != "__id__"]
+    total = len(cols)
+    lo, hi = (page - 1) * per_page, page * per_page
+    page_cols = cols[lo:hi]
+    tgt = view[target] if target and target in view.columns else None
+    tgt_time = tgt is not None and pd.api.types.is_datetime64_any_dtype(tgt)
+
+    out = []
+    for c in page_cols:
+        s = view[c]
+        is_time = pd.api.types.is_datetime64_any_dtype(s)
+        is_num = pd.api.types.is_numeric_dtype(s)
+        card = {"col": str(c), "kind": "time" if is_time else "numeric" if is_num else "string"}
+        if tgt is not None and c != target and tgt_time and is_num:
+            # 時序模式（target=時間欄）：X=時間、Y=c —— 每欄變時序圖
+            sub = pd.DataFrame({"x": tgt, "y": pd.to_numeric(s, errors="coerce")}).dropna()
+            if len(sub) > 500:
+                sub = sub.sample(500, random_state=0).sort_index()
+            xs = ((sub["x"] - pd.Timestamp(0)) // pd.Timedelta(seconds=1)).tolist()
+            card.update({"mode": "scatter", "x": xs, "y": [_f(v) for v in sub["y"]],
+                         "x_is_time": True, "x_col": str(target), "y_col": str(c)})
+        elif tgt is not None and c != target and pd.api.types.is_numeric_dtype(tgt):
+            # 二維：c（X）vs target（Y）散佈
+            sub = pd.DataFrame({"x": s, "y": tgt}).dropna()
+            if len(sub) > 500:
+                sub = sub.sample(500, random_state=0).sort_index()
+            xs = ((sub["x"] - pd.Timestamp(0)) // pd.Timedelta(seconds=1)).tolist() if is_time else \
+                 [_f(v) for v in sub["x"]] if is_num else sub["x"].astype(str).tolist()
+            card.update({"mode": "scatter", "x": xs, "y": [_f(v) for v in sub["y"]],
+                         "x_is_time": is_time, "x_col": str(c), "y_col": str(target)})
+        elif is_num:
+            vals = pd.to_numeric(s, errors="coerce").dropna()
+            if len(vals):
+                counts, edges = np.histogram(vals, bins=bins)
+                card.update({"mode": "hist", "counts": counts.tolist(),
+                             "edges": [_f(e) for e in edges]})
+            else:
+                card.update({"mode": "empty"})
+        elif is_time:
+            vals = (s.dropna() - pd.Timestamp(0)) // pd.Timedelta(seconds=1)
+            if len(vals):
+                counts, edges = np.histogram(vals, bins=bins)
+                card.update({"mode": "hist", "counts": counts.tolist(),
+                             "edges": edges.tolist(), "x_is_time": True})
+            else:
+                card.update({"mode": "empty"})
+        else:
+            vc = s.astype(str).value_counts().head(10)
+            card.update({"mode": "bar", "labels": vc.index.tolist(), "counts": vc.values.tolist()})
+        out.append(card)
+    return {"cards": out, "total_cols": total, "page": page, "per_page": per_page,
+            "n_view": len(view), "target": target or None}
+
+
+# ------------------------------------------------- 資料萃取樣板（歷程複用）
+@router.get("/{sid}/template")
+def get_template(sid: str) -> dict:
+    return {"steps": _load_steps(sid), "note": "資料萃取樣板：可套用至相同欄位結構的新資料集"}
+
+
+@router.post("/{sid}/apply_template")
+def apply_template(sid: str, body: dict) -> dict:
+    """把樣板 steps 套到本 session（覆蓋現有歷程）。body = {steps: [...]}"""
+    steps = body.get("steps", [])
+    for st in steps:
+        st.setdefault("id", uuid.uuid4().hex[:6])
+        st.setdefault("enabled", True)
+    _save_steps(sid, steps)
+    return state(sid)
+
+
+# ------------------------------------------------- 資料集表格頁
+@router.get("/{sid}/rows")
+def rows(sid: str, page: int = 1, per_page: int = 15) -> dict:
+    _, _, view, *_ = _view(sid)
+    lo = (page - 1) * per_page
+    sub = view.iloc[lo:lo + per_page]
+    return {"rows": json.loads(sub.to_json(orient="records", date_format="iso", force_ascii=False)),
+            "n_view": len(view), "page": page, "per_page": per_page,
+            "columns": [{"name": str(c),
+                         "kind": "time" if pd.api.types.is_datetime64_any_dtype(view[c])
+                         else "numeric" if pd.api.types.is_numeric_dtype(view[c]) else "string"}
+                        for c in view.columns]}
 
 
 # ------------------------------------------------------------ 編輯歷程 CRUD
@@ -311,7 +461,39 @@ def health(sid: str) -> dict:
         if warns:
             out.append({"col": str(c), "warnings": warns})
     return {"n_rows": n, "issues": out,
-            "note": "有警告的欄位不建議作為自變數（Tukey 資料健檢同款判準）"}
+            "note": "有警告的欄位不建議作為自變數"}
+
+
+# ------------------------------------------------------------ 通用異常掃描
+SCAN_RULES = [
+    {"kind": "jump_pct", "params": {"max_pct": 20}, "name": "跳變 >20%"},
+    {"kind": "flatline", "params": {"min_run": 5}, "name": "凍結值 ≥5 點"},
+    {"kind": "quantile", "params": {"lo_q": 0.005, "hi_q": 0.995}, "name": "分位離群 0.5% 尾"},
+]
+
+
+@router.get("/{sid}/scan")
+def scan(sid: str) -> dict:
+    """通用異常掃描（dry-run）：全數值欄試算三種清理規則的新增命中數，不假設流體。
+
+    與 apply_steps 同語意：mask 算在 base df，僅計入未被現行步驟剔除的 fresh 命中。
+    """
+    df = _load_base(sid)
+    _, reason, *_ = apply_steps(df, _load_steps(sid))
+    hits = []
+    num_cols = [c for c in df.columns if c != "__id__" and pd.api.types.is_numeric_dtype(df[c])]
+    for c in num_cols:
+        row = {"col": str(c)}
+        any_hit = False
+        for rule in SCAN_RULES:
+            mask = _step_mask(df, {"kind": rule["kind"], "params": {"col": c, **rule["params"]}})
+            n = int((mask & (reason == "")).sum())
+            row[rule["kind"]] = n
+            any_hit = any_hit or n > 0
+        if any_hit:
+            hits.append(row)
+    return {"rules": [{"kind": r["kind"], "name": r["name"], "params": r["params"]} for r in SCAN_RULES],
+            "hits": hits}
 
 
 # ------------------------------------------------------------ 相關分析
@@ -392,9 +574,17 @@ def export(sid: str) -> PlainTextResponse:
                              headers={"Content-Disposition": f"attachment; filename=cleaned_{sid}.csv"})
 
 
-# ---------------------------------------------------- CoolProp 物性模組
-FLUIDS = ["Water", "Toluene", "Benzene", "p-Xylene", "m-Xylene", "o-Xylene",
-          "Methane", "Hydrogen", "Nitrogen", "Ammonia", "CarbonDioxide", "Propane", "IsoButane"]
+# ---------------------------------------------------- CoolProp 物性模組（選配進階）
+_FLUIDS_CACHE: list[str] = []
+
+
+def _all_fluids() -> list[str]:
+    """CoolProp 全流體庫（~120 種）——不預設任何製程流體，由使用者宣告。"""
+    global _FLUIDS_CACHE
+    if not _FLUIDS_CACHE:
+        import CoolProp.CoolProp as CP
+        _FLUIDS_CACHE = sorted(CP.get_global_param_string("fluids_list").split(","))
+    return _FLUIDS_CACHE
 
 
 def _to_K(v, unit):
@@ -407,7 +597,7 @@ def _to_Pa(v, unit):
 
 @router.get("/props/fluids")
 def fluids() -> list:
-    return FLUIDS
+    return _all_fluids()
 
 
 @router.post("/{sid}/props/check")
@@ -418,7 +608,7 @@ def props_check(sid: str, body: dict) -> dict:
     df = _load_base(sid)
     fluid, t_col = body.get("fluid"), body.get("t_col")
     t_unit, p_col, p_unit = body.get("t_unit", "C"), body.get("p_col"), body.get("p_unit", "kgcm2")
-    if fluid not in FLUIDS or t_col not in df.columns:
+    if fluid not in _all_fluids() or t_col not in df.columns:
         raise HTTPException(422, "需要有效 fluid 與 t_col")
     T = _to_K(pd.to_numeric(df[t_col], errors="coerce"), t_unit)
     Tmin, Tcrit, Pcrit = CP.PropsSI("Tmin", fluid), CP.PropsSI("Tcrit", fluid), CP.PropsSI("Pcrit", fluid)
@@ -451,7 +641,7 @@ def props_derive(sid: str, body: dict) -> dict:
     df = _load_base(sid)
     fluid, t_col = body.get("fluid"), body.get("t_col")
     t_unit, p_col, p_unit = body.get("t_unit", "C"), body.get("p_col"), body.get("p_unit", "kgcm2")
-    if fluid not in FLUIDS or t_col not in df.columns:
+    if fluid not in _all_fluids() or t_col not in df.columns:
         raise HTTPException(422, "需要有效 fluid 與 t_col")
     T = _to_K(pd.to_numeric(df[t_col], errors="coerce"), t_unit)
     Tmin, Tcrit = CP.PropsSI("Tmin", fluid), CP.PropsSI("Tcrit", fluid)

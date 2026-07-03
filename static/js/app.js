@@ -8,6 +8,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { std, markShadow, builders, detailedBuilders, dm, dFlange, mergeByMaterial, labelHeight, buildPipeComponent } from './plant-builders.js';
+import { initSprite } from './sprite.js';
 
 const ACCENT = new THREE.Color('#46c2e0');
 const ALARM_RED = new THREE.Color('#ff2a2d');
@@ -592,6 +593,30 @@ function flyCam(toPos, toTgt) {
 
 // console／導覽用：EJ3D.fly([camX,camY,camZ],[lookX,lookY,lookZ])
 window.EJ3D = { fly: (p, t) => flyCam(new THREE.Vector3(...p), new THREE.Vector3(...t)) };
+
+// AI 小精靈：右下角情境建議（scenario-bar 上方）
+initSprite({
+  page: 'twin',
+  bottom: 58,
+  context: () => {
+    const t = window.__lastTick ?? {};
+    const insts = Object.entries(t.tags ?? {}).map(([tag, d]) => {
+      const base = plantData.instruments?.[tag]?.base;
+      const dev = base ? Math.abs(d.v - base) / Math.max(Math.abs(base), 1) : 0;
+      return { tag, name: d.name, v: d.v, unit: d.unit, dev };
+    }).sort((a, b) => b.dev - a.dev).slice(0, 6)
+      .map(({ tag, name, v, unit, dev }) => `${tag} ${name}=${v}${unit}（偏離 ${(dev * 100).toFixed(0)}%）`);
+    return {
+      場景: plantData.plant?.name ?? SCENE_ID,
+      資料來源: plantData.source ?? '內建示範',
+      設備數: plantData.plant.units.reduce((n, u) => n + (u.equipment?.length ?? 0), 0),
+      管線數: plantData.pipes?.length ?? 0,
+      目前情境: scenarioDefs[t.scenario]?.name ?? t.scenario ?? 'normal',
+      告警: (t.alarms ?? []).slice(0, 5).map((a) => a.text),
+      偏離最大儀錶: insts,
+    };
+  },
+});
 
 function selectEquipment(tag, flyTo = false) {
   if (selectedTag && eqMap[selectedTag]) eqMap[selectedTag].treeEl.classList.remove('active');
@@ -1759,6 +1784,7 @@ function connectWS() {
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type !== 'tick') return;
+    window.__lastTick = msg;
     setScenario(msg.scenario);
     renderMatch(msg.match);
 

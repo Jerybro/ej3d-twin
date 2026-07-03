@@ -10,6 +10,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight,
          buildPrim, buildPipeComponent, PIPE_COMPONENTS,
          PIPE_SPECS, PIPE_BORES } from './plant-builders.js';
+import { initSprite } from './sprite.js';
 import { runClash } from './clash.js';
 
 const viewport = document.getElementById('viewport');
@@ -2532,6 +2533,35 @@ function animate() {
 animate();
 
 // console 除錯/自動化測試用
+// AI 小精靈：右下角建模建議（statusbar 上方）
+initSprite({
+  page: 'e3d',
+  bottom: 40,
+  context: () => {
+    const eq = sceneData.plant?.units?.flatMap((u) => u.equipment ?? []) ?? [];
+    let sel = null;
+    if (selected?.kind === 'eq') {
+      const d = selected.def;
+      sel = { 種類: '設備', 位號: d.tag, 類型: d.type, 尺寸: d.dims };
+    } else if (selected?.kind === 'pipe') {
+      const pp = sceneData.pipes[selected.index];
+      sel = { 種類: '管線', 編號: selected.index + 1, spec: pp.spec ?? null, 管徑: pp.dn ?? `r${pp.r}`,
+              節點數: pp.pts.length, 總長m: +pipeLength(pp).toFixed(1),
+              元件數: (pp.components ?? []).length };
+    }
+    return {
+      場景: sceneData.plant?.name ?? '未命名',
+      設備數: eq.length,
+      設備類型分佈: eq.slice(0, 200).reduce((m, d) => { m[d.type] = (m[d.type] ?? 0) + 1; return m; }, {}),
+      管線數: sceneData.pipes?.length ?? 0,
+      無元件管線數: (sceneData.pipes ?? []).filter((pp) => !(pp.components ?? []).length).length,
+      無Spec管線數: (sceneData.pipes ?? []).filter((pp) => !pp.spec).length,
+      目前選取: sel,
+      剖切模式: clip.mode,
+    };
+  },
+});
+
 window.EJ3D_EDITOR = {
   get scene() { return sceneData; },
   get undoDepth() { return undoStack.length; },

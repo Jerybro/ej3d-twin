@@ -40,10 +40,13 @@ INST_RE = re.compile(
 EQUIP_RE = re.compile(r"^[A-Z]-?[1-9]\d{2}(?:A|B|AB|S|SA|SB|-\d)?$")
 
 # 首字母 → 編輯器素材類型
+# 'S' 不收：TA32 慣例 S6xx＝流股號（stream number，性能表 S601 進料/
+# S604 出口同源），PFD/P&ID 上被抓到的 S 開頭全是流股標記非設備——
+# 曾生 15 顆假旋風分離器。真旋風可在編輯器手動放（素材仍在）。
 TYPE_MAP = {
     "R": "reactor", "C": "column", "T": "tank", "V": "flash_v", "E": "hx",
     "P": "pump", "F": "furnace", "B": "compressor", "K": "compressor",
-    "S": "cyclone", "M": "block", "D": "flash_v", "G": "pump",
+    "M": "block", "D": "flash_v", "G": "pump",
 }
 TYPE_NAME = {
     "reactor": "反應器", "column": "蒸餾塔", "tank": "儲槽", "flash_v": "槽/罐",
@@ -86,8 +89,24 @@ def _get_reader():
     return _reader
 
 
+def _orientation_score(img) -> float:
+    """OCR 小樣本信心總和（判斷圖面是否倒置用）。"""
+    import numpy as np
+
+    reader = _get_reader()
+    w, h = img.size
+    band = img.crop((int(w * 0.2), int(h * 0.35), int(w * 0.8), int(h * 0.65)))
+    band = band.resize((1600, round(band.height * 1600 / band.width)))
+    return sum(
+        conf for _, text, conf in reader.readtext(
+            np.array(band.convert("RGB")), text_threshold=0.5, low_text=0.3)
+        if len(text.strip()) >= 3)
+
+
 def _render(pdf_path: Path, scale: float = 6.0):
-    """渲染第一頁；直式頁面（CAD 橫圖轉 90° 存檔的常態）自動轉正。"""
+    """渲染第一頁；直式頁面（CAD 橫圖轉 90° 存檔的常態）自動轉正，
+    再以 OCR 小樣本投票防整張倒置（ARO-1 PFD 實測 180° 倒放，
+    倒置圖 OCR 全滅只剩幽靈）。"""
     import pypdfium2 as pdfium
 
     doc = pdfium.PdfDocument(str(pdf_path))
@@ -99,6 +118,9 @@ def _render(pdf_path: Path, scale: float = 6.0):
         doc.close()
     if img.height > img.width:  # 直式 → 逆時針轉正
         img = img.rotate(90, expand=True)
+    flipped = img.rotate(180)
+    if _orientation_score(flipped) > _orientation_score(img) * 1.15:
+        img = flipped  # 倒置圖：180° 修正（1.15 遲滯防抖動）
     return img
 
 

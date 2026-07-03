@@ -101,7 +101,9 @@ def _optimize_slots(order: list[str], edges: list[tuple], cols: int,
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATUS_PATH = BASE_DIR / "data" / "pid_batch_status.json"
 MERGED_ID = "pid-ta32-full"
-MERGED_NAME = "TA32 整廠｜P&ID 批次解析"
+MERGED_NAME = "台化 FCFC ARO-1 TA32 整廠"
+# 資料來源標籤（顯示在孿生檢視標題列——本批 30 張全部出自同一工程包，無混雜）
+SOURCE_LABEL = "台化 FCFC ARO-1 Tatoray（TA32）工程包 P&ID×29＋PFD×1"
 
 # ------------------------------------------------- 製程流向排序（進料→產品）
 # 錨定設備 → 製程階段。圖紙群聚依「圖上優先級最高的錨定設備」的階段排序，
@@ -318,11 +320,13 @@ def run_batch(files: list[str] | None = None) -> dict:
                 continue
             results[p.stem] = res
             scene = _normalize(res["scene"])
+            scene["source"] = SOURCE_LABEL  # 資料來源標籤（孿生標題列顯示）
             (SCENES_DIR / f"{_slug(p.stem)}.json").write_text(
                 json.dumps(scene, ensure_ascii=False, indent=2), encoding="utf-8")
 
         merged = _normalize(merge_results(results)) if results else None
         if merged:
+            merged["source"] = SOURCE_LABEL
             (SCENES_DIR / f"{MERGED_ID}.json").write_text(
                 json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
 

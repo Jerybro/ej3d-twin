@@ -21,6 +21,14 @@ const [plantData, scenarioList] = await Promise.all([
 ]);
 const scenarioDefs = Object.fromEntries(plantData.scenarios.map((s) => [s.id, s]));
 
+// 場景感知標題：P&ID 解析場景顯示廠名與資料來源，不再掛示範廠字樣
+if (SCENE_ID !== 'demo') {
+  document.getElementById('brand-title').textContent = plantData.plant?.name ?? SCENE_ID;
+  document.getElementById('brand-sub').textContent =
+    plantData.source ? `資料來源：${plantData.source}` : `場景：${SCENE_ID}`;
+  document.title = `${plantData.plant?.name ?? SCENE_ID}｜J.S_3D Ai`;
+}
+
 // ---------------------------------------------------------------- 基礎場景
 const viewport = document.getElementById('viewport');
 const scene = new THREE.Scene();

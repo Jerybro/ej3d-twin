@@ -218,6 +218,26 @@
       border: 1px solid #0e141b; cursor: grab; pointer-events: auto; }
     .clip-handle:hover { background: var(--warn); }
 
+    /* PowerWheel 放射狀選單（E3D 3D 視圖右鍵） */
+    #power-wheel { position: fixed; z-index: 82; width: 230px; height: 230px; display: none; }
+    #power-wheel.show { display: block; }
+    .pw-tile {
+      position: absolute; width: 64px; height: 64px; margin: -32px; left: 50%; top: 50%;
+      border-radius: 50%; background: rgba(19, 27, 36, 0.96); border: 1px solid var(--bdr);
+      color: var(--text); font-size: 11px; font-family: inherit; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); transition: transform .1s, border-color .1s;
+      line-height: 1.15; text-align: center; padding: 4px;
+    }
+    .pw-tile:hover { border-color: var(--accent); background: var(--panel3); transform: scale(1.08); }
+    .pw-tile.danger { color: var(--danger); }
+    .pw-center {
+      position: absolute; width: 44px; height: 44px; margin: -22px; left: 50%; top: 50%;
+      border-radius: 50%; background: var(--panel2); border: 1px solid var(--bdr);
+      color: var(--dim); font-size: 12px; cursor: pointer; font-family: inherit;
+    }
+    .pw-center:hover { color: var(--danger); border-color: var(--danger); }
+
     /* Clash 底部面板 */
     #clash-dock { position: absolute; left: 0; right: 0; bottom: 0; height: 170px; z-index: 26;
       background: rgba(19, 27, 36, 0.96); border-top: 1px solid var(--bdr); display: none;
@@ -273,6 +293,7 @@
         <select class="rsel" id="qat-discipline" title="專業領域（Discipline）——切換情境功能頁籤">
           <option value="pipe" selected>管線 PIPING</option>
           <option value="equip">設備 EQUIPMENT</option>
+          <option value="struct">結構 STRUCTURES</option>
           <option value="none">通用 GENERAL</option>
         </select>
         <span id="scene-name" style="margin-left:auto">未儲存場景</span>
@@ -301,6 +322,7 @@
           <div class="rgroup">
             <div class="rgroup-tools">
               <a class="rbtn" id="btn-view-twin" href="#" target="_blank" style="display:none"><span class="ric" data-ic="eye"></span>孿生檢視</a>
+              <button class="rbtn" id="btn-ga" title="輸出俯視配置圖（GA Plot Plan，SVG 可列印）"><span class="ric" data-ic="ga"></span>出圖 GA</button>
             </div>
             <div class="rgroup-label">交付</div>
           </div>
@@ -477,6 +499,7 @@
   </div>
 
   <div id="ctx-menu"></div>
+  <div id="power-wheel"></div>
 
   <div id="open-modal">
     <div class="modal-box">

@@ -814,6 +814,176 @@ builders.conveyor = function ({ len, h, w }) { // 輸送帶
   return g;
 };
 
+// -------------------------------------------------- 自建設備（primitives 堆疊）
+// E3D Create Equipment 流程：BOX/CYLI/CONE/DISH 基元組合成設備
+// def.prims: [{kind, dims, pos:[dx,dy,dz], rot_y}]；builders 第二參數傳 def
+export function buildPrim(p) {
+  const d = p.dims;
+  let mesh;
+  if (p.kind === 'box') {
+    mesh = new THREE.Mesh(new THREE.BoxGeometry(d.w, d.h, d.d), std(0x8a97a5));
+    mesh.geometry.translate(0, d.h / 2, 0);
+  } else if (p.kind === 'cyli') {
+    mesh = new THREE.Mesh(new THREE.CylinderGeometry(d.r, d.r, d.h, 28), std(0x9aa7b4));
+    mesh.geometry.translate(0, d.h / 2, 0);
+  } else if (p.kind === 'cone') {
+    mesh = new THREE.Mesh(new THREE.CylinderGeometry(d.r2 ?? 0.3, d.r1 ?? 1, d.h, 28), std(0x9aa7b4));
+    mesh.geometry.translate(0, d.h / 2, 0);
+  } else if (p.kind === 'dish') {
+    mesh = new THREE.Mesh(new THREE.SphereGeometry(d.r, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), std(0x9aa7b4));
+  } else {
+    mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), std(0x8a97a5));
+  }
+  mesh.position.set(...(p.pos ?? [0, 0, 0]));
+  mesh.rotation.y = p.rot_y ?? 0;
+  return mesh;
+}
+
+builders.assembly = function (_dims, def) {
+  const g = new THREE.Group();
+  for (const p of def?.prims ?? []) g.add(buildPrim(p));
+  if (!g.children.length) {  // 空 assembly 放佔位圓柱
+    g.add(buildPrim({ kind: 'cyli', dims: { r: 0.8, h: 2 }, pos: [0, 0, 0] }));
+  }
+  return g;
+};
+
+// -------------------------------------------------- 結構鋼構（STRUCTURES 專業）
+const steelMat = std(0x9aa4ad, { metalness: 0.5, roughness: 0.55 });
+function hSection(len, depth = 0.24, flange = 0.18, t = 0.028) {
+  // 沿 Y 軸的 H 型鋼（柱姿態），樑用旋轉擺放
+  const g = new THREE.Group();
+  const web = new THREE.Mesh(new THREE.BoxGeometry(t, len, depth - 2 * t), steelMat);
+  const f1 = new THREE.Mesh(new THREE.BoxGeometry(flange, len, t), steelMat);
+  f1.position.z = (depth - t) / 2;
+  const f2 = f1.clone();
+  f2.position.z = -(depth - t) / 2;
+  g.add(web, f1, f2);
+  g.children.forEach((c) => c.geometry.translate(0, len / 2, 0));
+  return g;
+}
+
+builders.scolumn = function ({ h }) {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.03, 0.42), steelMat);
+  base.position.y = 0.015;
+  g.add(base, hSection(h));
+  return g;
+};
+
+builders.sbeam = function ({ len, elev }) {
+  const g = new THREE.Group();
+  const beam = hSection(len);
+  beam.rotation.z = -Math.PI / 2;             // 轉水平（沿 +X）
+  beam.position.set(-len / 2, elev ?? 3, 0);
+  g.add(beam);
+  return g;
+};
+
+builders.stairs = function ({ w, h, run }) {
+  const g = new THREE.Group();
+  const n = Math.max(3, Math.round(h / 0.2));
+  for (let i = 0; i < n; i++) {
+    const step = new THREE.Mesh(new THREE.BoxGeometry(run / n, 0.05, w), steelMat);
+    step.position.set(-run / 2 + (i + 0.5) * (run / n), (i + 1) * (h / n), 0);
+    g.add(step);
+  }
+  for (const side of [-1, 1]) {  // 斜樑
+    const s = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(run, h), 0.16, 0.05), steelMat);
+    s.position.set(0, h / 2, side * (w / 2 + 0.03));
+    s.rotation.z = Math.atan2(h, run);
+    g.add(s);
+    const rail = s.clone();
+    rail.position.y = h / 2 + 0.95;
+    rail.scale.set(1, 0.25, 1);
+    g.add(rail);
+  }
+  return g;
+};
+
+builders.srail = function ({ len }) {
+  const g = new THREE.Group();
+  const n = Math.max(2, Math.round(len / 1.5) + 1);
+  for (let i = 0; i < n; i++) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1.1, 8), steelMat);
+    post.position.set(-len / 2 + (i / (n - 1)) * len, 0.55, 0);
+    g.add(post);
+  }
+  for (const y of [1.1, 0.6]) {
+    const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, len, 8), steelMat);
+    rail.rotation.z = Math.PI / 2;
+    rail.position.y = y;
+    g.add(rail);
+  }
+  return g;
+};
+
+builders.splat = function ({ w, d, elev }) {
+  const g = new THREE.Group();
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(w, 0.06, d), std(0x77828d, { roughness: 0.9 }));
+  deck.position.y = elev;
+  const kick = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, 0.02), steelMat);
+  kick.position.set(0, elev + 0.08, d / 2);
+  const kick2 = kick.clone();
+  kick2.position.z = -d / 2;
+  g.add(deck, kick, kick2);
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, elev, 0.08), steelMat);
+    leg.position.set(sx * (w / 2 - 0.1), elev / 2, sz * (d / 2 - 0.1));
+    g.add(leg);
+  }
+  return g;
+};
+
+// -------------------------------------------------- 管線元件（Piping Components）
+// E3D Component Editor：閥/法蘭對/異徑管/止回閥，沿管線弧長定位
+export function buildPipeComponent(kind, r) {
+  const g = new THREE.Group();
+  const m = std(0xb8c2cc, { metalness: 0.35, roughness: 0.5 });
+  const R = Math.max(r * 2.2, 0.16);
+  if (kind === 'valve') {
+    const c1 = new THREE.Mesh(new THREE.ConeGeometry(R, R * 1.5, 12), m);
+    c1.rotation.z = -Math.PI / 2;
+    c1.position.x = -R * 0.75;
+    const c2 = new THREE.Mesh(new THREE.ConeGeometry(R, R * 1.5, 12), m);
+    c2.rotation.z = Math.PI / 2;
+    c2.position.x = R * 0.75;
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.35, r * 0.35, R * 1.6, 8), m);
+    stem.position.y = R * 0.8;
+    const wheel = new THREE.Mesh(new THREE.TorusGeometry(R * 0.7, r * 0.3, 6, 16), m);
+    wheel.rotation.x = Math.PI / 2;
+    wheel.position.y = R * 1.6;
+    g.add(c1, c2, stem, wheel);
+  } else if (kind === 'check') {
+    const c1 = new THREE.Mesh(new THREE.ConeGeometry(R, R * 1.5, 12), m);
+    c1.rotation.z = -Math.PI / 2;
+    c1.position.x = -R * 0.75;
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(R, R, r * 0.6, 14), m);
+    disc.rotation.z = Math.PI / 2;
+    disc.position.x = R * 0.55;
+    g.add(c1, disc);
+  } else if (kind === 'flangepair') {
+    for (const dx of [-1, 1]) {
+      const f = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.85, R * 0.85, r * 0.55, 16), m);
+      f.rotation.z = Math.PI / 2;
+      f.position.x = dx * r * 0.45;
+      g.add(f);
+    }
+  } else if (kind === 'reducer') {
+    const cone = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.62, r * 1.05, R * 1.4, 16), m);
+    cone.rotation.z = -Math.PI / 2;
+    g.add(cone);
+  }
+  return g;
+}
+
+export const PIPE_COMPONENTS = [
+  { kind: 'valve', name: '閘閥' },
+  { kind: 'check', name: '止回閥' },
+  { kind: 'flangepair', name: '法蘭對' },
+  { kind: 'reducer', name: '異徑管' },
+];
+
 // 素材目錄（編輯器面板用）
 export const ASSET_CATEGORIES = [
   { name: '反應設備', items: [
@@ -857,6 +1027,17 @@ export const ASSET_CATEGORIES = [
     { type: 'stack', name: '煙囪', dims: { r: 0.8, h: 14 }, prefix: 'ST' },
     { type: 'piperack', name: '管架', dims: { w: 8, h: 4, d: 2, bays: 4 }, prefix: 'PR' },
     { type: 'conveyor', name: '輸送帶', dims: { len: 8, h: 2, w: 1 }, prefix: 'CV' },
+  ]},
+  { name: '結構鋼構', discipline: 'struct', items: [
+    { type: 'scolumn', name: 'H 型鋼柱', dims: { h: 4 }, prefix: 'SC' },
+    { type: 'sbeam', name: 'H 型鋼樑', dims: { len: 5, elev: 3 }, prefix: 'SB' },
+    { type: 'stairs', name: '樓梯', dims: { w: 1.0, h: 3, run: 3.6 }, prefix: 'STR' },
+    { type: 'srail', name: '扶手欄杆', dims: { len: 4 }, prefix: 'HR' },
+    { type: 'splat', name: '平台', dims: { w: 3, d: 2.4, elev: 3 }, prefix: 'PF' },
+  ]},
+  { name: '基元（自建設備）', items: [
+    { type: 'assembly', name: '自建設備', dims: {},
+      prims: [{ kind: 'cyli', dims: { r: 1.0, h: 2.5 }, pos: [0, 0, 0] }], prefix: 'EQ' },
   ]},
 ];
 export const ASSET_CATALOG = ASSET_CATEGORIES.flatMap((c) => c.items);

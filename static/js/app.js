@@ -7,7 +7,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
-import { std, markShadow, builders, detailedBuilders, dm, dFlange, mergeByMaterial, labelHeight } from './plant-builders.js';
+import { std, markShadow, builders, detailedBuilders, dm, dFlange, mergeByMaterial, labelHeight, buildPipeComponent } from './plant-builders.js';
 
 const ACCENT = new THREE.Color('#46c2e0');
 const ALARM_RED = new THREE.Color('#ff2a2d');
@@ -389,7 +389,7 @@ function setEquipmentBody(entry, builderSet) {
   // 精細建模器共用材質物件，警報脈動會改 emissive → 每台 clone 材質避免互相污染
   // 新素材（編輯器擴充）尚無精細版 → fallback 簡易幾何
   const build = builderSet[entry.def.type] ?? builders[entry.def.type];
-  let body = build(entry.def.dims);
+  let body = build(entry.def.dims, entry.def);   // assembly 自建設備讀 def.prims
   if (builderSet === detailedBuilders && builderSet[entry.def.type]) body = mergeByMaterial(body);
   body.traverse((o) => {
     if (o.isMesh) {
@@ -457,6 +457,27 @@ const bridgeMat = std(0x2e8ba8); // 跨圖橋接管：主題青，一眼辨識�
         const joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
         joint.position.copy(b);
         plantGroup.add(joint);
+      }
+    }
+    // 管中元件（編輯器放置的閥/法蘭/異徑管）：手繪場景（非合併路徑）呈現
+    if (!manyPipes && pipe.components?.length) {
+      let acc = 0;
+      const segs = pts.map((p, i) => i ? { a: pts[i - 1], b: p, len: pts[i - 1].distanceTo(p) } : null).filter(Boolean);
+      for (const c of pipe.components) {
+        let at = c.at, pose = null, walked = 0;
+        for (const s of segs) {
+          if (walked + s.len >= at || s === segs[segs.length - 1]) {
+            const t = Math.max(0, Math.min(1, (at - walked) / Math.max(s.len, 1e-6)));
+            pose = { pos: s.a.clone().lerp(s.b, t), dir: s.b.clone().sub(s.a).normalize() };
+            break;
+          }
+          walked += s.len;
+        }
+        if (!pose) continue;
+        const comp = buildPipeComponent(c.kind, pipe.r);
+        comp.position.copy(pose.pos);
+        comp.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), pose.dir);
+        plantGroup.add(comp);
       }
     }
   }

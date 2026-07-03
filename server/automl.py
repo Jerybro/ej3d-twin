@@ -102,44 +102,58 @@ TUNE_SPACE = {
 }
 
 
-def _build_pipeline(algo: str, params: dict):
-    from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
-    from sklearn.linear_model import BayesianRidge, ElasticNet, LinearRegression, Ridge
-    from sklearn.neighbors import KNeighborsRegressor
-    from sklearn.neural_network import MLPRegressor
+def _build_pipeline(algo: str, params: dict, task: str = "regression"):
+    from sklearn.ensemble import (HistGradientBoostingClassifier, HistGradientBoostingRegressor,
+                                  RandomForestClassifier, RandomForestRegressor)
+    from sklearn.linear_model import BayesianRidge, ElasticNet, LinearRegression, LogisticRegression, Ridge
+    from sklearn.naive_bayes import GaussianNB
+    from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+    from sklearn.neural_network import MLPClassifier, MLPRegressor
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import SplineTransformer, StandardScaler
-    from sklearn.svm import SVR
+    from sklearn.svm import SVC, SVR
 
     p = {k: v for k, v in (params or {}).items() if v is not None and v != ""}
+    cls = task == "classification"
     steps = [("scaler", StandardScaler())]
     if algo == "GLM":
-        model = LinearRegression()
+        model = LogisticRegression(max_iter=2000) if cls else LinearRegression()
     elif algo == "GNET":
-        model = ElasticNet(alpha=float(p.get("alpha", 1.0)), l1_ratio=float(p.get("l1_ratio", 0.5)), max_iter=5000)
+        model = (LogisticRegression(penalty="elasticnet", solver="saga", max_iter=3000,
+                                    C=1.0 / max(float(p.get("alpha", 1.0)), 1e-6),
+                                    l1_ratio=float(p.get("l1_ratio", 0.5)))
+                 if cls else
+                 ElasticNet(alpha=float(p.get("alpha", 1.0)), l1_ratio=float(p.get("l1_ratio", 0.5)), max_iter=5000))
     elif algo == "GAM":
         steps.append(("spline", SplineTransformer(n_knots=int(p.get("n_knots", 8)), degree=3)))
-        model = Ridge(alpha=float(p.get("alpha", 1.0)))
+        model = (LogisticRegression(max_iter=2000, C=1.0 / max(float(p.get("alpha", 1.0)), 1e-6))
+                 if cls else Ridge(alpha=float(p.get("alpha", 1.0))))
     elif algo == "SVM":
-        model = SVR(C=float(p.get("C", 1.0)), epsilon=float(p.get("epsilon", 0.1)), gamma=p.get("gamma", "scale"))
+        model = (SVC(C=float(p.get("C", 1.0)), gamma=p.get("gamma", "scale"), probability=True, random_state=0)
+                 if cls else
+                 SVR(C=float(p.get("C", 1.0)), epsilon=float(p.get("epsilon", 0.1)), gamma=p.get("gamma", "scale")))
     elif algo == "KNN":
-        model = KNeighborsRegressor(n_neighbors=int(p.get("n_neighbors", 5)), weights=p.get("weights", "uniform"))
+        klass = KNeighborsClassifier if cls else KNeighborsRegressor
+        model = klass(n_neighbors=int(p.get("n_neighbors", 5)), weights=p.get("weights", "uniform"))
     elif algo == "XGB":
-        model = HistGradientBoostingRegressor(
+        klass = HistGradientBoostingClassifier if cls else HistGradientBoostingRegressor
+        model = klass(
             max_iter=int(p.get("max_iter", 200)), learning_rate=float(p.get("learning_rate", 0.1)),
             max_depth=int(p["max_depth"]) if p.get("max_depth") else None,
             l2_regularization=float(p.get("l2_regularization", 0.0)), random_state=0)
     elif algo == "RF":
-        model = RandomForestRegressor(
+        klass = RandomForestClassifier if cls else RandomForestRegressor
+        model = klass(
             n_estimators=int(p.get("n_estimators", 300)),
             max_depth=int(p["max_depth"]) if p.get("max_depth") else None,
             min_samples_leaf=int(p.get("min_samples_leaf", 1)), random_state=0, n_jobs=-1)
     elif algo == "BYS":
-        model = BayesianRidge()
+        model = GaussianNB() if cls else BayesianRidge()
     elif algo == "DNN":
         hidden = tuple(int(x) for x in str(p.get("hidden", "64,64")).split(",") if x.strip())
-        model = MLPRegressor(hidden_layer_sizes=hidden or (64, 64), max_iter=int(p.get("max_iter", 500)),
-                             alpha=float(p.get("alpha", 1e-4)), random_state=0)
+        klass = MLPClassifier if cls else MLPRegressor
+        model = klass(hidden_layer_sizes=hidden or (64, 64), max_iter=int(p.get("max_iter", 500)),
+                      alpha=float(p.get("alpha", 1e-4)), random_state=0)
     else:
         raise HTTPException(422, f"未知演算法 {algo}")
     steps.append(("model", model))
@@ -168,7 +182,58 @@ def _load(sid: str, mid: str) -> dict:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+# ------------------------------------------------------ 共用 helper
+def _current_xy(sid: str, rec: dict):
+    """現行視圖（steps 重放後）取 target/features；評估/試算/優化同源。"""
+    df = _load_base(sid)
+    view, *_ = apply_steps(df, _load_steps(sid))
+    missing = [c for c in (rec["target"], *rec["features"]) if c not in view.columns]
+    if missing:
+        raise HTTPException(422, f"現行視圖缺少欄位：{missing}")
+    feats = view[rec["features"]].apply(pd.to_numeric, errors="coerce")
+    if rec.get("task") == "classification":
+        tgt = view[rec["target"]].astype(str)
+    else:
+        tgt = pd.to_numeric(view[rec["target"]], errors="coerce")
+    data = pd.concat([tgt.rename(rec["target"]), feats], axis=1).dropna()
+    # 強制 numpy：parquet 回讀的字串欄是 Arrow-backed，.values 給 ArrowExtensionArray，
+    # sklearn 的 fancy indexing 會炸（pyarrow scalar index error）
+    X = data[rec["features"]].to_numpy(dtype=float)
+    if rec.get("task") == "classification":
+        y = np.asarray(data[rec["target"]].tolist(), dtype=object)
+    else:
+        y = data[rec["target"]].to_numpy(dtype=float)
+    return X, y
+
+
+def _pipe_path(sid: str, mid: str) -> Path:
+    return _mdir(sid) / f"{mid}.joblib"
+
+
+def _load_pipe(sid: str, mid: str):
+    import joblib
+    p = _pipe_path(sid, mid)
+    if not p.exists():
+        raise HTTPException(422, "此模型未保存訓練成品（一期舊模型）——請重新訓練後再使用此功能")
+    return joblib.load(p)
+
+
+def _baseline(sid: str, rec: dict) -> dict:
+    """what-if / 優化的基準點＝現行視圖各特徵中位數。"""
+    X, _ = _current_xy(sid, rec)
+    med = np.median(X, axis=0)
+    return {f: round(float(med[i]), 6) for i, f in enumerate(rec["features"])}
+
+
 # ------------------------------------------------------ 指標
+def _metrics_cls(y, yhat) -> dict:
+    from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+    return {"accuracy": round(float(accuracy_score(y, yhat)), 5),
+            "f1": round(float(f1_score(y, yhat, average="macro", zero_division=0)), 5),
+            "precision": round(float(precision_score(y, yhat, average="macro", zero_division=0)), 5),
+            "recall": round(float(recall_score(y, yhat, average="macro", zero_division=0)), 5)}
+
+
 def _metrics(y, yhat) -> dict:
     y, yhat = np.asarray(y, float), np.asarray(yhat, float)
     err = y - yhat
@@ -183,46 +248,65 @@ def _metrics(y, yhat) -> dict:
 
 
 def _train_job(sid: str, rec: dict):
-    """背景訓練：5 折交叉驗證指標＋全訓練集指標＋三圖資料＋permutation importance。"""
+    """背景訓練：5 折交叉驗證指標＋全訓練集指標＋圖資料＋permutation importance＋joblib 持久化。"""
     try:
+        import joblib
         from sklearn.inspection import permutation_importance
-        from sklearn.model_selection import KFold, RandomizedSearchCV, cross_val_predict
+        from sklearn.model_selection import KFold, RandomizedSearchCV, StratifiedKFold, cross_val_predict
 
-        df = _load_base(sid)
-        view, *_ = apply_steps(df, _load_steps(sid))
-        cols = [rec["target"], *rec["features"]]
-        data = view[cols].apply(pd.to_numeric, errors="coerce").dropna()
-        if len(data) < 30:
-            raise ValueError(f"有效樣本僅 {len(data)} 筆（<30），不足以訓練")
-        X, y = data[rec["features"]].values, data[rec["target"]].values
+        task = rec.get("task", "regression")
+        cls = task == "classification"
+        X, y = _current_xy(sid, rec)
+        if len(y) < 30:
+            raise ValueError(f"有效樣本僅 {len(y)} 筆（<30），不足以訓練")
+        if cls and len(set(y)) < 2:
+            raise ValueError("分類目標只有一個類別")
 
-        pipe = _build_pipeline(rec["algo"], rec.get("params"))
+        pipe = _build_pipeline(rec["algo"], rec.get("params"), task)
         if rec.get("auto_tune") and rec["algo"] in TUNE_SPACE:
-            search = RandomizedSearchCV(pipe, TUNE_SPACE[rec["algo"]], n_iter=8, cv=3,
-                                        scoring="neg_root_mean_squared_error", random_state=0, n_jobs=1)
-            search.fit(X, y)
-            pipe = search.best_estimator_
-            rec["tuned_params"] = {k.replace("model__", "").replace("spline__", ""): (list(v) if isinstance(v, tuple) else v)
-                                   for k, v in search.best_params_.items()}
+            scoring = "f1_macro" if cls else "neg_root_mean_squared_error"
+            space = {k: v for k, v in TUNE_SPACE[rec["algo"]].items()
+                     if k.replace("model__", "") in {pp["key"] for pp in ALGOS[rec["algo"]]["params"]}
+                     or k.startswith("spline__") or k == "model__hidden_layer_sizes"}
+            try:
+                search = RandomizedSearchCV(pipe, space, n_iter=8, cv=3,
+                                            scoring=scoring, random_state=0, n_jobs=1)
+                search.fit(X, y)
+                pipe = search.best_estimator_
+                rec["tuned_params"] = {k.replace("model__", "").replace("spline__", ""):
+                                       (list(v) if isinstance(v, tuple) else v)
+                                       for k, v in search.best_params_.items()}
+            except Exception:  # noqa: BLE001 分類器參數名不合時退回預設
+                pipe = _build_pipeline(rec["algo"], rec.get("params"), task)
 
-        cv = KFold(n_splits=5, shuffle=True, random_state=0)
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=0) if cls \
+            else KFold(n_splits=5, shuffle=True, random_state=0)
         yhat_cv = cross_val_predict(pipe, X, y, cv=cv)
-        rec["metrics_cv"] = _metrics(y, yhat_cv)
+        rec["metrics_cv"] = _metrics_cls(y, yhat_cv) if cls else _metrics(y, yhat_cv)
         pipe.fit(X, y)
-        rec["metrics_train"] = _metrics(y, pipe.predict(X))
+        rec["metrics_train"] = _metrics_cls(y, pipe.predict(X)) if cls else _metrics(y, pipe.predict(X))
 
-        # 三圖資料（抽樣 ≤600 點）：Actual-Predicted / Actual-Error / Feature Importance
-        idx = np.random.RandomState(0).choice(len(y), min(600, len(y)), replace=False)
-        rec["plots"] = {
-            "pa": {"actual": np.round(y[idx], 4).tolist(), "pred": np.round(yhat_cv[idx], 4).tolist()},
-            "err": {"actual": np.round(y[idx], 4).tolist(), "error": np.round((y - yhat_cv)[idx], 4).tolist()},
-        }
+        rec["plots"] = {}
+        if cls:
+            # 混淆矩陣（交叉驗證預測）
+            from sklearn.metrics import confusion_matrix
+            labels = sorted(set(y))
+            cm = confusion_matrix(y, yhat_cv, labels=labels)
+            rec["plots"]["cm"] = {"labels": [str(l) for l in labels], "matrix": cm.tolist()}
+        else:
+            idx = np.random.RandomState(0).choice(len(y), min(600, len(y)), replace=False)
+            rec["plots"]["pa"] = {"actual": np.round(y[idx].astype(float), 4).tolist(),
+                                  "pred": np.round(yhat_cv[idx].astype(float), 4).tolist()}
+            rec["plots"]["err"] = {"actual": np.round(y[idx].astype(float), 4).tolist(),
+                                   "error": np.round((y - yhat_cv)[idx].astype(float), 4).tolist()}
         sub = np.random.RandomState(0).choice(len(y), min(1500, len(y)), replace=False)
-        imp = permutation_importance(pipe, X[sub], y[sub], n_repeats=5, random_state=0, n_jobs=1)
+        imp = permutation_importance(pipe, X[sub], y[sub], n_repeats=5, random_state=0, n_jobs=1,
+                                     scoring="f1_macro" if cls else None)
         order = np.argsort(imp.importances_mean)[::-1][:15]
         rec["plots"]["fi"] = {"names": [rec["features"][i] for i in order],
                               "values": np.round(imp.importances_mean[order], 5).tolist()}
         rec["n_rows"] = int(len(y))
+        joblib.dump(pipe, _pipe_path(sid, rec["id"]))
         rec["status"] = "done"
     except Exception as e:  # noqa: BLE001
         rec["status"] = "error"
@@ -243,9 +327,14 @@ def list_models(sid: str) -> list:
     for p in sorted(_mdir(sid).glob("*.json")):
         r = json.loads(p.read_text(encoding="utf-8"))
         out.append({k: r.get(k) for k in
-                    ("id", "name", "target", "algo", "status", "created", "metrics_cv", "error", "auto_tune")})
-    # 依交叉驗證 RMSE 排名（完成者優先）
-    out.sort(key=lambda r: (r["status"] != "done", (r.get("metrics_cv") or {}).get("rmse", 1e18)))
+                    ("id", "name", "target", "algo", "task", "status", "created",
+                     "metrics_cv", "error", "auto_tune")})
+    # 排名：迴歸依 CV RMSE、分類依 1−accuracy（完成者優先）
+    def _rank(r):
+        m = r.get("metrics_cv") or {}
+        score = m.get("rmse", 1 - m.get("accuracy", -1e18))
+        return (r["status"] != "done", score)
+    out.sort(key=_rank)
     return out
 
 
@@ -257,16 +346,23 @@ def get_model(sid: str, mid: str) -> dict:
 @router.delete("/{sid}/models/{mid}")
 def delete_model(sid: str, mid: str) -> dict:
     _mpath(sid, mid).unlink(missing_ok=True)
+    _pipe_path(sid, mid).unlink(missing_ok=True)
     return {"ok": True}
 
 
 @router.post("/{sid}/models")
 def create_models(sid: str, body: dict) -> dict:
-    """手動：單一演算法；全自動：九式各建一個（= Tukey 一次性建立多個模型）。"""
+    """手動：單一演算法；全自動：九式各建一個（= Tukey 一次性建立多個模型）。
+    任務自動判定：目標欄數值＝迴歸、字串/類別＝分類。"""
     target = body.get("target")
     features = [f for f in body.get("features", []) if f != target]
     if not target or not features:
         raise HTTPException(422, "需要 target 與至少一個自變數")
+    df = _load_base(sid)
+    view, *_ = apply_steps(df, _load_steps(sid))
+    if target not in view.columns:
+        raise HTTPException(422, f"目標欄 {target} 不存在")
+    task = "regression" if pd.api.types.is_numeric_dtype(view[target]) else "classification"
     mode = body.get("mode", "manual")
     jobs = []
     if mode == "auto":
@@ -284,7 +380,7 @@ def create_models(sid: str, body: dict) -> dict:
     for j in jobs:
         rec = {"id": uuid.uuid4().hex[:8], "sid": sid, "status": "training",
                "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-               "target": target, "features": features, **j}
+               "target": target, "features": features, "task": task, **j}
         _save(sid, rec)
         created.append(rec["id"])
 
@@ -294,3 +390,123 @@ def create_models(sid: str, body: dict) -> dict:
 
     threading.Thread(target=run_all, daemon=True).start()
     return {"created": created, "count": len(created)}
+
+
+# ------------------------------------------------------ 模型應用（Tukey 對齊，除 API 啟用管理）
+@router.post("/{sid}/models/{mid}/evaluate")
+def evaluate(sid: str, mid: str) -> dict:
+    """單一模型評估（隨選）：以現行視圖重評——視圖若已變（新步驟/新資料），
+    這就是模型在「現在這份資料」上的表現。"""
+    rec = _load(sid, mid)
+    if rec.get("status") != "done":
+        raise HTTPException(422, "模型尚未完成訓練")
+    pipe = _load_pipe(sid, mid)
+    X, y = _current_xy(sid, rec)
+    if len(y) < 5:
+        raise HTTPException(422, f"現行視圖有效樣本僅 {len(y)} 筆，無法評估")
+    yhat = pipe.predict(X)
+    cls = rec.get("task") == "classification"
+    ev = {"evaluated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+          "n_rows": int(len(y)),
+          "metrics": _metrics_cls(y, yhat) if cls else _metrics(y, yhat)}
+    if cls:
+        from sklearn.metrics import confusion_matrix
+        labels = sorted(set(list(y) + list(yhat)))
+        ev["cm"] = {"labels": [str(l) for l in labels],
+                    "matrix": confusion_matrix(y, yhat, labels=labels).tolist()}
+    else:
+        idx = np.random.RandomState(0).choice(len(y), min(600, len(y)), replace=False)
+        ev["pa"] = {"actual": np.round(y[idx].astype(float), 4).tolist(),
+                    "pred": np.round(yhat[idx].astype(float), 4).tolist()}
+    rec["evaluation"] = ev
+    _save(sid, rec)
+    return ev
+
+
+@router.post("/{sid}/models/{mid}/whatif")
+def whatif(sid: str, mid: str, body: dict) -> dict:
+    """操作差異試算：baseline＝現行視圖特徵中位數，body.values 覆蓋部分特徵。"""
+    rec = _load(sid, mid)
+    pipe = _load_pipe(sid, mid)
+    base = _baseline(sid, rec)
+    values = body.get("values") or {}
+    row = dict(base)
+    for k, v in values.items():
+        if k in row and v is not None and v != "":
+            row[k] = float(v)
+    Xb = np.array([[base[f] for f in rec["features"]]])
+    Xn = np.array([[row[f] for f in rec["features"]]])
+    if rec.get("task") == "classification":
+        pb, pn = str(pipe.predict(Xb)[0]), str(pipe.predict(Xn)[0])
+        out = {"baseline_pred": pb, "pred": pn, "changed": pb != pn, "baseline": base}
+        if hasattr(pipe, "predict_proba"):
+            proba = pipe.predict_proba(Xn)[0]
+            classes = [str(c) for c in pipe.classes_]
+            out["proba"] = {c: round(float(p), 4) for c, p in
+                            sorted(zip(classes, proba), key=lambda t: -t[1])[:5]}
+        return out
+    pb, pn = float(pipe.predict(Xb)[0]), float(pipe.predict(Xn)[0])
+    return {"baseline_pred": round(pb, 5), "pred": round(pn, 5),
+            "delta": round(pn - pb, 5), "baseline": base}
+
+
+@router.post("/{sid}/models/{mid}/optimize")
+def optimize(sid: str, mid: str, body: dict) -> dict:
+    """配方優化（參數最佳化）：目標值/最大化/最小化，輸出最佳參數建議。
+    可調參數邊界＝現行視圖 P1–P99；隨機搜尋＋最佳鄰域細化。僅迴歸。"""
+    rec = _load(sid, mid)
+    if rec.get("task") == "classification":
+        raise HTTPException(422, "配方優化僅支援迴歸模型")
+    pipe = _load_pipe(sid, mid)
+    mode = body.get("mode", "target")
+    knobs = [k for k in (body.get("knobs") or rec["features"]) if k in rec["features"]]
+    if not knobs:
+        raise HTTPException(422, "至少選一個可調參數")
+    if mode == "target" and body.get("value") in (None, ""):
+        raise HTTPException(422, "target 模式需要目標值")
+
+    X, _ = _current_xy(sid, rec)
+    base = _baseline(sid, rec)
+    lo = {f: float(np.percentile(X[:, i], 1)) for i, f in enumerate(rec["features"])}
+    hi = {f: float(np.percentile(X[:, i], 99)) for i, f in enumerate(rec["features"])}
+    rng = np.random.RandomState(0)
+    kidx = [rec["features"].index(k) for k in knobs]
+
+    def make(n, center=None, spread=1.0):
+        pts = np.tile([base[f] for f in rec["features"]], (n, 1))
+        for j, i in enumerate(kidx):
+            f = rec["features"][i]
+            if center is None:
+                pts[:, i] = rng.uniform(lo[f], hi[f], n)
+            else:
+                span = (hi[f] - lo[f]) * 0.08 * spread
+                pts[:, i] = np.clip(rng.normal(center[j], span or 1e-9, n), lo[f], hi[f])
+        return pts
+
+    def score(preds):
+        if mode == "max":
+            return -preds
+        if mode == "min":
+            return preds
+        return np.abs(preds - float(body["value"]))
+
+    cand = make(3000)
+    preds = pipe.predict(cand)
+    order = np.argsort(score(preds))
+    # 最佳 50 組鄰域細化一輪
+    refined = np.vstack([make(40, center=cand[i, kidx], spread=1.0) for i in order[:50]])
+    preds2 = pipe.predict(refined)
+    all_pts = np.vstack([cand, refined])
+    all_preds = np.concatenate([preds, preds2])
+    best_i = int(np.argmin(score(all_preds)))
+    best_pt = all_pts[best_i]
+
+    baseline_pred = float(pipe.predict(np.array([[base[f] for f in rec["features"]]]))[0])
+    return {
+        "mode": mode, "value": body.get("value"),
+        "best": {rec["features"][i]: round(float(best_pt[i]), 5) for i in kidx},
+        "baseline": {k: base[k] for k in knobs},
+        "bounds": {k: [round(lo[k], 5), round(hi[k], 5)] for k in knobs},
+        "pred": round(float(all_preds[best_i]), 5),
+        "baseline_pred": round(baseline_pred, 5),
+    }

@@ -816,17 +816,25 @@ async function renderModels() {
   $('model-empty').style.display = models.length ? 'none' : '';
   $('model-main').style.display = models.length ? '' : 'none';
   if (models.length) {
-    const fmt = (m, k) => m.metrics_cv ? m.metrics_cv[k] : '—';
     const stName = { done: '完成', training: '訓練中…', error: '失敗' };
+    // 指標四欄雙語意：迴歸 RMSE/MAE/MAAPE/R²、分類 Acc/F1/Precision/Recall
+    const mv = (m) => {
+      const c = m.metrics_cv;
+      if (!c) return ['—', '—', '—', '—'];
+      return m.task === 'classification'
+        ? [c.accuracy, c.f1, c.precision, c.recall]
+        : [c.rmse, c.mae, c.maape, c.r2];
+    };
     $('model-table').innerHTML = `<thead><tr>
-      <th>排名</th><th>模型</th><th>目標</th><th>演算法</th>
-      <th>RMSE</th><th>MAE</th><th>MAAPE</th><th>R²</th>
+      <th>排名</th><th>模型</th><th>目標</th><th>任務</th><th>演算法</th>
+      <th>RMSE｜Acc</th><th>MAE｜F1</th><th>MAAPE｜Prec</th><th>R²｜Recall</th>
       <th>狀態</th><th>建立時間</th><th></th></tr></thead><tbody>${
       models.map((m, i) => `<tr data-id="${m.id}">
         <td>${m.status === 'done' ? `#${i + 1}` : ''}</td>
         <td>${m.name}</td><td>${m.target}</td>
+        <td>${m.task === 'classification' ? '分類' : '迴歸'}</td>
         <td>${(ALGO_META?.find((a) => a.key === m.algo)?.name) ?? m.algo}${m.auto_tune ? '（自動調參）' : ''}</td>
-        <td>${fmt(m, 'rmse')}</td><td>${fmt(m, 'mae')}</td><td>${fmt(m, 'maape')}</td><td>${fmt(m, 'r2')}</td>
+        ${mv(m).map((v) => `<td>${v}</td>`).join('')}
         <td class="st-${m.status}" title="${m.error ?? ''}">${stName[m.status] ?? m.status}</td>
         <td>${m.created}</td>
         <td><span class="del" data-id="${m.id}">刪除</span></td></tr>`).join('')}</tbody>`;
@@ -842,34 +850,217 @@ async function renderModels() {
   }
 }
 
+const METRIC_HEADS = {
+  regression: ['RMSE', 'MAE', 'MAAPE', 'R²'],
+  classification: ['Accuracy', 'F1', 'Precision', 'Recall'],
+};
+const metricRow = (label, mt, cls) => `<tr><td>${label}</td>${
+  (cls ? [mt.accuracy, mt.f1, mt.precision, mt.recall] : [mt.rmse, mt.mae, mt.maape, mt.r2])
+    .map((v) => `<td>${v}</td>`).join('')}</tr>`;
+
 async function openModelDetail(mid) {
   const m = await apiML(`/models/${mid}`);
   if (m.status !== 'done') { alert(m.status === 'error' ? `訓練失敗：${m.error}` : '訓練中，請稍候'); return; }
   await loadAlgoMeta();
+  const cls = m.task === 'classification';
+  const heads = METRIC_HEADS[cls ? 'classification' : 'regression'];
   const algoName = ALGO_META.find((a) => a.key === m.algo)?.name ?? m.algo;
-  const row = (label, mt) => `<tr><td>${label}</td><td>${mt.rmse}</td><td>${mt.mae}</td><td>${mt.maape}</td><td>${mt.r2}</td></tr>`;
   const tuned = m.tuned_params ? `<div class="md-sub">自動調參結果：${
     Object.entries(m.tuned_params).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : v}`).join('、')}</div>` : '';
-  $('model-detail').innerHTML = `
-    <h3>${m.name}</h3>
-    <div class="md-sub">${algoName}｜訓練資料 ${m.n_rows.toLocaleString()} 筆 ${m.features.length} 特徵｜目標 ${m.target}</div>
-    ${tuned}
-    <table class="md-metrics">
-      <tr><th>模型指標</th><th>RMSE</th><th>MAE</th><th>MAAPE</th><th>R²</th></tr>
-      ${row('交叉驗證集', m.metrics_cv)}${row('訓練資料集', m.metrics_train)}
-    </table>
-    <div class="md-charts">
+  const charts = cls ? `
+      <div class="md-chart"><h4>混淆矩陣 Confusion Matrix（交叉驗證）</h4><canvas id="md-cm"></canvas></div>
+      <div class="md-chart"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>` : `
       <div class="md-chart"><h4>模型準確度 Actual – Predicted</h4><canvas id="md-pa"></canvas></div>
       <div class="md-chart"><h4>模型準確度 Actual – Error</h4><canvas id="md-err"></canvas></div>
-      <div class="md-chart wide"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>
-    </div>`;
+      <div class="md-chart wide"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>`;
+  $('model-detail').innerHTML = `
+    <h3>${m.name}</h3>
+    <div class="md-sub">${algoName}｜${cls ? '分類' : '迴歸'}｜訓練資料 ${m.n_rows.toLocaleString()} 筆 ${m.features.length} 特徵｜目標 ${m.target}</div>
+    ${tuned}
+    <table class="md-metrics">
+      <tr><th>模型指標</th>${heads.map((h) => `<th>${h}</th>`).join('')}</tr>
+      ${metricRow('交叉驗證集', m.metrics_cv, cls)}${metricRow('訓練資料集', m.metrics_train, cls)}
+      <tbody id="ev-metric-row"></tbody>
+    </table>
+    <div class="md-charts">${charts}</div>
+    <details class="md-app" id="app-eval">
+      <summary>模型評估——以「現行資料視圖」重新評估（隨選）</summary>
+      <p class="hint" style="margin:8px 0">資料視圖若已改變（新增篩選步驟、樣板複用到新資料），
+        這裡評的就是模型在現在這份資料上的表現，與上方訓練時指標對照可看外推退化。</p>
+      <button class="dbtn" style="width:auto;padding:8px 22px" id="btn-eval">建立評估</button>
+      <div id="ev-out">${m.evaluation ? '' : '<p class="hint" style="margin-top:8px">尚無評估——點擊「建立評估」開始。</p>'}</div>
+    </details>
+    <details class="md-app" id="app-whatif">
+      <summary>操作差異試算——改變輸入條件，看預測怎麼變</summary>
+      <p class="hint" style="margin:8px 0">基準值＝現行視圖各特徵中位數；留空＝維持基準。</p>
+      <div class="wiz-params" id="wi-grid"></div>
+      <button class="dbtn" style="width:auto;padding:8px 22px;margin-top:10px" id="btn-whatif">試算</button>
+      <div id="wi-out"></div>
+    </details>
+    ${cls ? '' : `
+    <details class="md-app" id="app-opt">
+      <summary>配方優化（參數最佳化）——設定目標，輸出最佳參數建議</summary>
+      <div class="opt-row">
+        <select class="mini" id="opt-mode" style="width:auto">
+          <option value="target">達到目標值</option>
+          <option value="max">最大化 ${m.target}</option>
+          <option value="min">最小化 ${m.target}</option>
+        </select>
+        <input class="mini" id="opt-value" type="number" step="any" placeholder="目標值" style="width:160px">
+      </div>
+      <label style="font-size:13px;color:var(--text2);margin:8px 0 4px;display:block">可調參數（未勾＝固定在基準值；邊界＝資料 P1–P99）</label>
+      <div id="opt-knobs"></div>
+      <button class="dbtn" style="width:auto;padding:8px 22px;margin-top:10px" id="btn-opt">執行優化</button>
+      <div id="opt-out"></div>
+    </details>`}`;
   $('model-detail').style.display = '';
   requestAnimationFrame(() => {
-    drawXY($('md-pa'), m.plots.pa.actual, m.plots.pa.pred, '實際值', '預測值', true);
-    drawXY($('md-err'), m.plots.err.actual, m.plots.err.error, '實際值', '誤差值', false, true);
+    if (cls) drawCM($('md-cm'), m.plots.cm.labels, m.plots.cm.matrix);
+    else {
+      drawXY($('md-pa'), m.plots.pa.actual, m.plots.pa.pred, '實際值', '預測值', true);
+      drawXY($('md-err'), m.plots.err.actual, m.plots.err.error, '實際值', '誤差值', false, true);
+    }
     drawFI($('md-fi'), m.plots.fi.names, m.plots.fi.values);
+    if (m.evaluation) renderEvaluation(m, m.evaluation);
   });
+  bindModelApps(m);
   $('model-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ---------------- 模型應用：評估 / 試算 / 優化
+function renderEvaluation(m, ev) {
+  const cls = m.task === 'classification';
+  $('ev-metric-row').innerHTML = metricRow(`現行視圖評估（${ev.n_rows.toLocaleString()} 筆）`, ev.metrics, cls);
+  $('ev-out').innerHTML = `
+    <div class="md-sub" style="margin-top:10px">評估時間 ${ev.evaluated_at}｜${ev.n_rows.toLocaleString()} 筆</div>
+    <table class="md-metrics">
+      <tr><th>評估指標</th>${METRIC_HEADS[cls ? 'classification' : 'regression'].map((h) => `<th>${h}</th>`).join('')}</tr>
+      ${metricRow('現行視圖', ev.metrics, cls)}
+    </table>
+    <div class="md-chart" style="max-width:560px"><h4>${cls ? '混淆矩陣（現行視圖）' : 'Actual – Predicted（現行視圖）'}</h4>
+      <canvas id="ev-chart"></canvas></div>`;
+  requestAnimationFrame(() => {
+    if (cls) drawCM($('ev-chart'), ev.cm.labels, ev.cm.matrix);
+    else drawXY($('ev-chart'), ev.pa.actual, ev.pa.pred, '實際值', '預測值', true);
+  });
+}
+
+function bindModelApps(m) {
+  const cls = m.task === 'classification';
+  $('btn-eval').addEventListener('click', async () => {
+    $('btn-eval').disabled = true;
+    try {
+      const ev = await apiML(`/models/${m.id}/evaluate`, { method: 'POST' });
+      renderEvaluation(m, ev);
+    } catch (e) { alert(`評估失敗：${e.message}`); } finally { $('btn-eval').disabled = false; }
+  });
+
+  // what-if：開啟時抓 baseline 填 placeholder
+  let wiLoaded = false;
+  $('app-whatif').addEventListener('toggle', async () => {
+    if (!$('app-whatif').open || wiLoaded) return;
+    wiLoaded = true;
+    try {
+      const base = (await apiML(`/models/${m.id}/whatif`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"values":{}}',
+      })).baseline;
+      $('wi-grid').innerHTML = m.features.map((f) => `
+        <div class="wp"><label>${f}</label>
+          <input data-f="${f}" type="number" step="any" placeholder="基準 ${base[f]}"></div>`).join('');
+    } catch (e) { $('wi-grid').innerHTML = `<p class="hint">${e.message}</p>`; }
+  });
+  $('btn-whatif').addEventListener('click', async () => {
+    const values = {};
+    $('wi-grid').querySelectorAll('input[data-f]').forEach((i) => { if (i.value !== '') values[i.dataset.f] = +i.value; });
+    $('btn-whatif').disabled = true;
+    try {
+      const r = await apiML(`/models/${m.id}/whatif`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values }),
+      });
+      $('wi-out').innerHTML = cls ? `
+        <table class="md-metrics" style="margin-top:12px">
+          <tr><th>基準預測</th><th>試算預測</th><th>是否改變</th></tr>
+          <tr><td>${r.baseline_pred}</td><td>${r.pred}</td>
+            <td>${r.changed ? '<b class="wi-up">類別改變</b>' : '不變'}</td></tr>
+        </table>${r.proba ? `<div class="md-sub" style="margin-top:6px">機率：${
+          Object.entries(r.proba).map(([k, v]) => `${k} ${v}`).join('、')}</div>` : ''}` : `
+        <table class="md-metrics" style="margin-top:12px">
+          <tr><th>基準預測 ${m.target}</th><th>試算預測</th><th>差異 Δ</th></tr>
+          <tr><td>${r.baseline_pred}</td><td>${r.pred}</td>
+            <td class="${r.delta > 0 ? 'wi-up' : r.delta < 0 ? 'wi-dn' : ''}">${r.delta > 0 ? '+' : ''}${r.delta}</td></tr>
+        </table>`;
+    } catch (e) { alert(`試算失敗：${e.message}`); } finally { $('btn-whatif').disabled = false; }
+  });
+
+  if (cls) return;
+  // 配方優化
+  $('opt-knobs').innerHTML = `<div class="feat-grid" style="max-height:150px">${
+    m.features.map((f) => `<label><input type="checkbox" checked value="${f}">${f}</label>`).join('')}</div>`;
+  $('opt-mode').addEventListener('change', () => {
+    $('opt-value').style.display = $('opt-mode').value === 'target' ? '' : 'none';
+  });
+  $('btn-opt').addEventListener('click', async () => {
+    const knobs = [...$('opt-knobs').querySelectorAll('input:checked')].map((i) => i.value);
+    const mode = $('opt-mode').value;
+    if (mode === 'target' && $('opt-value').value === '') { alert('請輸入目標值'); return; }
+    $('btn-opt').disabled = true;
+    $('opt-out').innerHTML = '<p class="hint" style="margin-top:8px">搜尋中…（隨機搜尋 3000 組＋鄰域細化）</p>';
+    try {
+      const r = await apiML(`/models/${m.id}/optimize`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode, value: $('opt-value').value, knobs }),
+      });
+      $('opt-out').innerHTML = `
+        <table class="md-metrics" style="margin-top:12px">
+          <tr><th>參數</th><th>基準值</th><th>建議值</th><th>變化</th><th>搜尋邊界</th></tr>
+          ${Object.keys(r.best).map((k) => {
+            const d = r.best[k] - r.baseline[k];
+            return `<tr><td>${k}</td><td>${r.baseline[k]}</td><td><b>${r.best[k]}</b></td>
+              <td class="${d > 0 ? 'wi-up' : d < 0 ? 'wi-dn' : ''}">${d > 0 ? '+' : ''}${Math.round(d * 100000) / 100000}</td>
+              <td>[${r.bounds[k][0]}, ${r.bounds[k][1]}]</td></tr>`;
+          }).join('')}
+        </table>
+        <table class="md-metrics" style="margin-top:10px">
+          <tr><th>基準預測 ${m.target}</th><th>建議配方預測</th>${mode === 'target' ? '<th>目標值</th>' : ''}</tr>
+          <tr><td>${r.baseline_pred}</td><td><b>${r.pred}</b></td>${mode === 'target' ? `<td>${r.value}</td>` : ''}</tr>
+        </table>`;
+    } catch (e) { $('opt-out').innerHTML = `<p class="hint" style="margin-top:8px">優化失敗：${e.message}</p>`; }
+    finally { $('btn-opt').disabled = false; }
+  });
+}
+
+// 混淆矩陣（深淺＝筆數，主題色）
+function drawCM(canvas, labels, matrix) {
+  const dpr = devicePixelRatio;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '11.5px Inter';
+  const n = labels.length;
+  const M = { l: 90, r: 16, t: 28, b: 48 };
+  const cw = (w - M.l - M.r) / n, ch = (h - M.t - M.b) / n;
+  const maxV = Math.max(...matrix.flat(), 1);
+  matrix.forEach((rowArr, i) => rowArr.forEach((v, j) => {
+    const x = M.l + j * cw, y = M.t + i * ch;
+    ctx.fillStyle = v ? ink(v / maxV) : '#F6F7FA';
+    ctx.fillRect(x + 1, y + 1, cw - 2, ch - 2);
+    ctx.fillStyle = v / maxV > 0.55 ? '#fff' : C_LABEL;
+    const t = String(v);
+    ctx.fillText(t, x + cw / 2 - ctx.measureText(t).width / 2, y + ch / 2 + 4);
+  }));
+  ctx.fillStyle = C_LABEL;
+  labels.forEach((lb, j) => {
+    const t = String(lb).slice(0, 10);
+    ctx.fillText(t, M.l + j * cw + cw / 2 - ctx.measureText(t).width / 2, h - M.b + 16);
+  });
+  ctx.textAlign = 'right';
+  labels.forEach((lb, i) => ctx.fillText(String(lb).slice(0, 10), M.l - 8, M.t + i * ch + ch / 2 + 4));
+  ctx.textAlign = 'left';
+  ctx.fillText('預測類別', M.l + (w - M.l - M.r) / 2 - 24, h - 8);
+  ctx.save(); ctx.translate(14, M.t + (h - M.t - M.b) / 2 + 24); ctx.rotate(-Math.PI / 2);
+  ctx.fillText('實際類別', 0, 0); ctx.restore();
 }
 
 // XY 散佈（diag=對角參考線；zero=誤差零線）
@@ -963,9 +1154,13 @@ $('wiz-back').addEventListener('click', () => {
 $('wiz-mode-ok').addEventListener('click', () => {
   const numeric = state.columns.filter((c) => !c.hidden && c.name !== '__id__' &&
     (c.dtype.startsWith('float') || c.dtype.startsWith('int')));
+  // 字串欄可當分類目標（任務由後端依欄型態自動判定）
+  const stringCols = state.columns.filter((c) => !c.hidden && c.name !== '__id__' &&
+    !c.dtype.startsWith('float') && !c.dtype.startsWith('int') && !c.dtype.startsWith('datetime'));
   $('wiz-form-title').textContent = wizMode === 'auto'
     ? '全自動建立——九種演算法各建一個模型（自動調參）' : '手動建立模型';
-  $('wiz-target').innerHTML = numeric.map((c) => `<option>${c.name}</option>`).join('');
+  $('wiz-target').innerHTML = numeric.map((c) => `<option>${c.name}</option>`).join('')
+    + stringCols.map((c) => `<option value="${c.name}">${c.name}（分類）</option>`).join('');
   const renderFeatures = () => {
     const tgt = $('wiz-target').value;
     $('wiz-features').innerHTML = numeric.filter((c) => c.name !== tgt).map((c) =>

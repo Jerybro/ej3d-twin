@@ -298,6 +298,13 @@
     .md-chart.wide { grid-column: 1 / -1; }
     .md-chart h4 { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 8px; }
     .md-chart canvas { width: 100%; height: 300px; display: block; }
+    .md-app { margin-top: 16px; border: 1px solid var(--bdr); border-radius: 8px; padding: 14px 18px; }
+    .md-app summary { font-size: 15px; font-weight: 500; color: var(--text); cursor: pointer; }
+    .md-app summary:hover { color: var(--blue); }
+    .md-app .wiz-params { margin-top: 10px; grid-template-columns: repeat(3, 1fr); }
+    .opt-row { display: flex; gap: 10px; margin-top: 10px; }
+    .wi-up { color: var(--ok); font-weight: 600; }
+    .wi-dn { color: var(--danger); font-weight: 600; }
 
     /* 建模精靈 */
     .wiz-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(6, 16, 39, 0.4);
@@ -312,11 +319,11 @@
     .wiz-mode.on { border-color: var(--blue); background: rgba(4, 106, 251, 0.05); }
     .wiz-mode b { font-size: 15px; font-weight: 500; color: var(--text); }
     .wiz-mode p { font-size: 13px; color: var(--text2); margin-top: 4px; line-height: 1.6; }
-    #wiz-features { max-height: 180px; overflow-y: auto; border: 1px solid var(--bdr);
+    #wiz-features, .feat-grid { max-height: 180px; overflow-y: auto; border: 1px solid var(--bdr);
       border-radius: 5px; padding: 8px 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; }
-    #wiz-features label { display: flex; align-items: center; gap: 7px; margin: 3px 0;
+    #wiz-features label, .feat-grid label { display: flex; align-items: center; gap: 7px; margin: 3px 0;
       font-size: 13.5px; color: var(--text); cursor: pointer; }
-    #wiz-features input { accent-color: var(--blue); }
+    #wiz-features input, .feat-grid input { accent-color: var(--blue); }
     .wiz-params-head { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
     .wiz-tune { display: flex; align-items: center; gap: 7px; font-size: 13.5px !important;
       color: var(--text2) !important; margin: 0 !important; cursor: pointer; }

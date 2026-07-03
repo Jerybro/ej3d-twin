@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { builders, markShadow, labelHeight, ASSET_CATALOG, std } from './plant-builders.js';
+import { builders, markShadow, labelHeight, ASSET_CATEGORIES, std } from './plant-builders.js';
 
 // ---------------------------------------------------------------- 基礎場景
 const viewport = document.getElementById('viewport');
@@ -48,12 +48,46 @@ grid.position.y = 0.02;
 scene.add(grid);
 
 const transform = new TransformControls(camera, renderer.domElement);
-transform.addEventListener('dragging-changed', (e) => { controls.enabled = !e.value; });
+transform.addEventListener('dragging-changed', (e) => {
+  controls.enabled = !e.value;
+  if (e.value) pushUndo(); // 變換開始前存快照
+});
 scene.add(transform);
 
 // ---------------------------------------------------------------- 場景資料
 let sceneId = null;         // null = 未儲存
 let sceneData = emptyScene('未命名場景');
+
+// ------------------------------------------------------------ Undo / Redo（20 步）
+const UNDO_LIMIT = 20;
+const undoStack = [];
+const redoStack = [];
+
+function pushUndo() {
+  undoStack.push(JSON.stringify(sceneData));
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  redoStack.length = 0;
+  updateUndoButtons();
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(JSON.stringify(sceneData));
+  loadSceneData(JSON.parse(undoStack.pop()), sceneId);
+  updateUndoButtons();
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(JSON.stringify(sceneData));
+  loadSceneData(JSON.parse(redoStack.pop()), sceneId);
+  updateUndoButtons();
+}
+
+function updateUndoButtons() {
+  document.getElementById('btn-undo').disabled = !undoStack.length;
+  document.getElementById('btn-redo').disabled = !redoStack.length;
+}
 const eqObjects = new Map();  // tag → { group, def, labelEl }
 const pipeObjects = [];       // index 對齊 sceneData.pipes → { group }
 
@@ -206,7 +240,7 @@ function selectEquipment(tag) {
   if (!entry) return;
   selected = { kind: 'eq', def: entry.def };
   transform.attach(entry.group);
-  transform.setMode('translate');
+  setTransformMode('translate');
   renderPropPanel(entry.def);
 }
 
@@ -231,6 +265,7 @@ function renderPropPanel(def) {
   const rows = [];
   rows.push(`<div class="prop-row"><label>Tag</label><input data-k="tag" value="${def.tag}"></div>`);
   rows.push(`<div class="prop-row"><label>名稱</label><input data-k="name" value="${def.name}"></div>`);
+  rows.push(`<div class="prop-row"><label>旋轉（度）</label><input data-k="rot" type="number" step="5" value="${Math.round((def.rot_y ?? 0) * 180 / Math.PI)}"></div>`);
   for (const [k, v] of Object.entries(def.dims)) {
     rows.push(`<div class="prop-row"><label>尺寸 ${k}</label><input data-k="dims.${k}" type="number" step="0.1" value="${v}"></div>`);
   }
@@ -238,7 +273,11 @@ function renderPropPanel(def) {
   document.getElementById('prop-rows').querySelectorAll('input').forEach((inp) => {
     inp.addEventListener('change', () => {
       const k = inp.dataset.k;
-      if (k === 'tag') {
+      pushUndo();
+      if (k === 'rot') {
+        def.rot_y = (+inp.value) * Math.PI / 180;
+        eqObjects.get(def.tag).group.rotation.y = def.rot_y;
+      } else if (k === 'tag') {
         const nt = inp.value.trim();
         if (!nt || (eqObjects.has(nt) && nt !== def.tag)) { inp.value = def.tag; return; }
         const entry = eqObjects.get(def.tag);
@@ -258,28 +297,37 @@ function renderPropPanel(def) {
   });
 }
 
-// ------------------------------------------------------------ 素材面板
-const grid2 = document.getElementById('asset-grid');
-for (const asset of ASSET_CATALOG) {
-  const btn = document.createElement('button');
-  btn.className = 'asset-btn';
-  btn.textContent = asset.name;
-  btn.addEventListener('click', () => {
-    setMode('placing');
-    placingAsset = asset;
-    btn.classList.add('active');
-    ghost = builders[asset.type](asset.dims);
-    ghost.traverse((o) => {
-      if (o.isMesh) {
-        o.material = o.material.clone();
-        o.material.transparent = true;
-        o.material.opacity = 0.5;
-      }
+// ------------------------------------------------------------ 素材面板（分類）
+const catsRoot = document.getElementById('asset-cats');
+for (const cat of ASSET_CATEGORIES) {
+  const det = document.createElement('details');
+  det.open = cat === ASSET_CATEGORIES[0];
+  det.innerHTML = `<summary>${cat.name}<span class="cat-n">${cat.items.length}</span></summary>`;
+  const gridEl = document.createElement('div');
+  gridEl.className = 'asset-grid';
+  for (const asset of cat.items) {
+    const btn = document.createElement('button');
+    btn.className = 'asset-btn';
+    btn.textContent = asset.name;
+    btn.addEventListener('click', () => {
+      setMode('placing');
+      placingAsset = asset;
+      btn.classList.add('active');
+      ghost = builders[asset.type](asset.dims);
+      ghost.traverse((o) => {
+        if (o.isMesh) {
+          o.material = o.material.clone();
+          o.material.transparent = true;
+          o.material.opacity = 0.5;
+        }
+      });
+      scene.add(ghost);
+      setHint(`放置 <b>${asset.name}</b>：點擊地面確定位置，Esc 取消`);
     });
-    scene.add(ghost);
-    setHint(`放置 <b>${asset.name}</b>：點擊地面確定位置，Esc 取消`);
-  });
-  grid2.appendChild(btn);
+    gridEl.appendChild(btn);
+  }
+  det.appendChild(gridEl);
+  catsRoot.appendChild(det);
 }
 
 document.getElementById('pipe-btn').addEventListener('click', () => {
@@ -329,6 +377,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   if (transform.dragging) return;
 
   if (mode === 'placing' && ghost && placingAsset) {
+    pushUndo();
     const def = {
       tag: nextTag(placingAsset.prefix),
       name: placingAsset.name,
@@ -388,6 +437,7 @@ transform.addEventListener('mouseUp', () => {
   } else if (transform.mode === 'rotate') {
     g.rotation.x = 0; g.rotation.z = 0; // 只允許水平旋轉
     def.rot_y = g.rotation.y;
+    renderPropPanel(def); // 同步旋轉欄位
   } else if (transform.mode === 'scale') {
     // uniform scale 燒進 dims 後歸一
     const s = (g.scale.x + g.scale.y + g.scale.z) / 3;
@@ -402,7 +452,14 @@ transform.addEventListener('mouseUp', () => {
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
   if (e.key === 'Escape') { setMode('idle'); selectNone(); }
-  else if (e.key === 'Enter' && mode === 'pipe' && pipeDraft.length >= 2) {
+  else if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+    e.preventDefault();
+    undo();
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) {
+    e.preventDefault();
+    redo();
+  } else if (e.key === 'Enter' && mode === 'pipe' && pipeDraft.length >= 2) {
+    pushUndo();
     sceneData.pipes.push({ r: 0.1, pts: pipeDraft.map((p) => [Math.round(p.x * 100) / 100, p.y, Math.round(p.z * 100) / 100]) });
     buildPipe(sceneData.pipes.at(-1), sceneData.pipes.length - 1);
     clearPipeDraft();
@@ -410,16 +467,27 @@ addEventListener('keydown', (e) => {
   } else if (e.key === 'Delete' || e.key === 'Backspace') {
     deleteSelected();
   } else if (selected?.kind === 'eq') {
-    if (e.key === 'w' || e.key === 'W') transform.setMode('translate');
-    if (e.key === 'e' || e.key === 'E') transform.setMode('rotate');
-    if (e.key === 'r' || e.key === 'R') transform.setMode('scale');
+    if (e.key === 'w' || e.key === 'W') setTransformMode('translate');
+    if (e.key === 'e' || e.key === 'E') setTransformMode('rotate');
+    if (e.key === 'r' || e.key === 'R') setTransformMode('scale');
   }
 });
+
+// 變換模式（快捷鍵與按鈕共用，同步按鈕 active 狀態）
+function setTransformMode(m) {
+  transform.setMode(m);
+  document.querySelectorAll('.xf-btn').forEach((b) => b.classList.toggle('active', b.dataset.m === m));
+}
+document.querySelectorAll('.xf-btn').forEach((b) =>
+  b.addEventListener('click', () => { if (selected?.kind === 'eq') setTransformMode(b.dataset.m); }));
+document.getElementById('btn-undo').addEventListener('click', undo);
+document.getElementById('btn-redo').addEventListener('click', redo);
 
 document.getElementById('prop-delete').addEventListener('click', deleteSelected);
 
 function deleteSelected() {
   if (!selected) return;
+  pushUndo();
   if (selected.kind === 'eq') {
     const tag = selected.def.tag;
     const entry = eqObjects.get(tag);
@@ -512,3 +580,10 @@ function animate() {
   labelRenderer.render(scene, camera);
 }
 animate();
+
+// console 除錯/自動化測試用
+window.EJ3D_EDITOR = {
+  get scene() { return sceneData; },
+  get undoDepth() { return undoStack.length; },
+  get redoDepth() { return redoStack.length; },
+};

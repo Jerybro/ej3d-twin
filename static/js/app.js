@@ -312,8 +312,10 @@ const eqMap = {}; // tag → { group(殼層), body(可換本體), def, unitName,
 function setEquipmentBody(entry, builderSet) {
   if (entry.body) entry.group.remove(entry.body);
   // 精細建模器共用材質物件，警報脈動會改 emissive → 每台 clone 材質避免互相污染
-  let body = builderSet[entry.def.type](entry.def.dims);
-  if (builderSet === detailedBuilders) body = mergeByMaterial(body);
+  // 新素材（編輯器擴充）尚無精細版 → fallback 簡易幾何
+  const build = builderSet[entry.def.type] ?? builders[entry.def.type];
+  let body = build(entry.def.dims);
+  if (builderSet === detailedBuilders && builderSet[entry.def.type]) body = mergeByMaterial(body);
   body.traverse((o) => {
     if (o.isMesh) {
       o.material = o.material.clone();

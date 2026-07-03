@@ -51,7 +51,25 @@
       border: 1px solid var(--bdr); border-radius: 12px; padding: 14px;
       backdrop-filter: blur(6px);
     }
-    #asset-panel { top: 62px; left: 12px; width: 200px; }
+    #asset-panel { top: 62px; left: 12px; width: 216px; max-height: calc(100vh - 90px); overflow-y: auto; }
+    #asset-cats details { margin-bottom: 4px; }
+    #asset-cats summary {
+      cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--text);
+      padding: 7px 8px; border-radius: 7px; background: var(--panel2);
+      border: 1px solid var(--bdr); list-style: none;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    #asset-cats summary::-webkit-details-marker { display: none; }
+    #asset-cats summary:hover { border-color: var(--accent); }
+    #asset-cats details[open] summary { color: var(--accent); }
+    .cat-n { font-size: 10.5px; color: var(--dim); font-weight: 400; }
+    #asset-cats .asset-grid { padding: 6px 0 4px; }
+    .xf-group { display: inline-flex; gap: 0; border-radius: 8px; overflow: hidden; }
+    .xf-group .tbtn { border-radius: 0; border-right-width: 0; }
+    .xf-group .tbtn:first-child { border-radius: 8px 0 0 8px; }
+    .xf-group .tbtn:last-child { border-radius: 0 8px 8px 0; border-right-width: 1px; }
+    .xf-btn.active { background: var(--accent-deep); border-color: var(--accent); font-weight: 600; }
+    .tbtn:disabled { opacity: 0.4; pointer-events: none; }
     .panel-title { font-size: 12px; font-weight: 700; color: var(--accent);
       letter-spacing: 1px; margin-bottom: 10px; }
     .asset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -108,6 +126,13 @@
     <span class="title">3D 模塊編輯器</span>
     <span id="scene-name">未儲存場景</span>
     <span class="spacer"></span>
+    <button class="tbtn" id="btn-undo" disabled title="復原（Ctrl+Z）">復原</button>
+    <button class="tbtn" id="btn-redo" disabled title="還原（Ctrl+Y）">還原</button>
+    <span class="xf-group">
+      <button class="tbtn xf-btn active" data-m="translate" title="移動（W）">移動</button>
+      <button class="tbtn xf-btn" data-m="rotate" title="旋轉（E）">旋轉</button>
+      <button class="tbtn xf-btn" data-m="scale" title="縮放（R）">縮放</button>
+    </span>
     <button class="tbtn" id="btn-open">開啟</button>
     <button class="tbtn" id="btn-new">新增</button>
     <button class="tbtn" id="btn-saveas">另存</button>
@@ -117,7 +142,7 @@
 
   <aside id="asset-panel" class="panel">
     <div class="panel-title">工業素材</div>
-    <div class="asset-grid" id="asset-grid"></div>
+    <div id="asset-cats"></div>
     <div class="tool-sep"></div>
     <button class="tbtn" id="pipe-btn">管線繪製</button>
     <div class="hint">

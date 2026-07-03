@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>3D 模塊編輯器｜J.S Process Intelligence</title>
+  <title>3D 設計工作區｜J.S Process Intelligence</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
   <script type="importmap">
     {
@@ -15,150 +15,413 @@
   </script>
   <style>
     :root {
-      --bg: #0e141b; --panel: #131b24; --panel2: #17212c;
+      --bg: #0e141b; --panel: #131b24; --panel2: #17212c; --panel3: #1b2733;
       --bdr: #223140; --accent: #46c2e0; --accent-deep: #1f6ea8;
       --text: #dbe5ee; --dim: #8ba0b3; --warn: #ffaa3c; --danger: #ff4d4f;
+      --ribbon-h: 118px; --status-h: 26px; --vtabs-h: 24px; --tree-w: 236px; --prop-w: 250px;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
-      font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", sans-serif; font-size: 14px; }
-    #viewport { position: absolute; inset: 0; }
-    #viewport canvas { display: block; }
+      font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", sans-serif; font-size: 13px; }
 
-    #topbar {
-      position: absolute; top: 0; left: 0; right: 0; height: 50px; z-index: 30;
-      display: flex; align-items: center; gap: 10px; padding: 0 14px;
-      background: rgba(14, 20, 27, 0.92); border-bottom: 1px solid var(--bdr);
+    /* ================= 停靠佈局（對標 E3D：ribbon/樹/屬性/狀態列） ===== */
+    #workspace {
+      display: grid; height: 100vh;
+      grid-template-rows: var(--ribbon-h) 1fr var(--vtabs-h) var(--status-h);
+      grid-template-columns: var(--tree-w) 1fr var(--prop-w);
+      grid-template-areas: "ribbon ribbon ribbon" "tree view prop" "vtabs vtabs vtabs" "status status status";
     }
+    body.tree-collapsed #workspace { grid-template-columns: 0 1fr var(--prop-w); }
+    body.prop-collapsed #workspace { grid-template-columns: var(--tree-w) 1fr 0; }
+    body.tree-collapsed.prop-collapsed #workspace { grid-template-columns: 0 1fr 0; }
+
+    /* ================= Ribbon 功能區（QAT＋Tabs＋Body 三列） ================= */
+    #ribbon { grid-area: ribbon; background: var(--panel); border-bottom: 1px solid var(--bdr);
+      display: flex; flex-direction: column; user-select: none; }
+    #qat { display: flex; align-items: center; height: 26px; padding: 0 8px; gap: 3px;
+      background: var(--panel3); border-bottom: 1px solid var(--bdr); font-size: 12px; }
+    .qbtn { width: 24px; height: 20px; border-radius: 4px; cursor: pointer; background: none;
+      border: 1px solid transparent; color: var(--accent); font-size: 12px; line-height: 1; }
+    .qbtn:hover { background: var(--panel2); border-color: var(--bdr); }
+    .qbtn:disabled { opacity: 0.3; pointer-events: none; }
+    #qat-discipline { margin-left: 10px; }
+    #ribbon-tabs { display: flex; align-items: center; height: 30px; padding: 0 8px; gap: 2px;
+      border-bottom: 1px solid var(--bdr); }
+    .rtab-sep { width: 12px; }
+    .rtab.hidden { display: none; }
     .brand-home {
       display: inline-flex; align-items: center; justify-content: center;
-      width: 26px; height: 26px; border-radius: 6px;
+      width: 22px; height: 22px; border-radius: 5px; margin-right: 8px;
       background: rgba(70, 194, 224, 0.15); border: 1px solid var(--bdr);
-      color: var(--accent); font-size: 11px; font-weight: 700; text-decoration: none;
+      color: var(--accent); font-size: 10px; font-weight: 700; text-decoration: none;
     }
-    .title { font-weight: 700; font-size: 15px; }
-    #scene-name { color: var(--dim); font-size: 13px; }
-    .spacer { flex: 1; }
-    .tbtn {
-      padding: 7px 14px; border-radius: 8px; cursor: pointer; font-family: inherit;
-      background: var(--panel2); border: 1px solid var(--bdr); color: var(--text); font-size: 13px;
-    }
-    .tbtn:hover { border-color: var(--accent); }
-    .tbtn.primary { background: var(--accent-deep); border-color: var(--accent); font-weight: 600; }
+    .rtab { padding: 5px 14px; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 12.5px;
+      color: var(--dim); border: 1px solid transparent; border-bottom: none; background: none; font-family: inherit; }
+    .rtab:hover { color: var(--text); }
+    .rtab.active { color: var(--accent); background: var(--panel2); border-color: var(--bdr); font-weight: 600; }
+    #scene-name { margin-left: auto; color: var(--dim); font-size: 12px; padding-right: 6px; }
 
-    .panel {
-      position: absolute; z-index: 20; background: rgba(19, 27, 36, 0.94);
-      border: 1px solid var(--bdr); border-radius: 12px; padding: 14px;
-      backdrop-filter: blur(6px);
+    #ribbon-body { flex: 1; display: flex; align-items: stretch; padding: 4px 8px 5px; gap: 6px; overflow-x: auto; }
+    .rgroup { display: flex; flex-direction: column; border-right: 1px solid var(--bdr); padding-right: 6px; }
+    .rgroup:last-child { border-right: none; }
+    .rgroup-tools { display: flex; gap: 4px; flex: 1; align-items: center; flex-wrap: wrap; max-height: 44px; }
+    .rgroup-label { text-align: center; font-size: 10px; color: var(--dim); padding-top: 2px; letter-spacing: 1px; }
+    .rbtn {
+      min-width: 46px; padding: 4px 8px; border-radius: 6px; cursor: pointer; text-align: center;
+      background: none; border: 1px solid transparent; color: var(--text); font-size: 11.5px; font-family: inherit;
+      display: flex; flex-direction: column; align-items: center; gap: 1px; line-height: 1.25;
     }
-    #asset-panel { top: 62px; left: 12px; width: 216px; max-height: calc(100vh - 90px); overflow-y: auto; }
-    #asset-cats details { margin-bottom: 4px; }
-    #asset-cats summary {
-      cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--text);
-      padding: 7px 8px; border-radius: 7px; background: var(--panel2);
-      border: 1px solid var(--bdr); list-style: none;
-      display: flex; justify-content: space-between; align-items: center;
-    }
-    #asset-cats summary::-webkit-details-marker { display: none; }
-    #asset-cats summary:hover { border-color: var(--accent); }
-    #asset-cats details[open] summary { color: var(--accent); }
-    .cat-n { font-size: 10.5px; color: var(--dim); font-weight: 400; }
-    #asset-cats .asset-grid { padding: 6px 0 4px; }
-    .xf-group { display: inline-flex; gap: 0; border-radius: 8px; overflow: hidden; }
-    .xf-group .tbtn { border-radius: 0; border-right-width: 0; }
-    .xf-group .tbtn:first-child { border-radius: 8px 0 0 8px; }
-    .xf-group .tbtn:last-child { border-radius: 0 8px 8px 0; border-right-width: 1px; }
-    .xf-btn.active { background: var(--accent-deep); border-color: var(--accent); font-weight: 600; }
-    .tbtn:disabled { opacity: 0.4; pointer-events: none; }
-    .panel-title { font-size: 12px; font-weight: 700; color: var(--accent);
-      letter-spacing: 1px; margin-bottom: 10px; }
-    .asset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .asset-btn {
-      padding: 10px 6px; border-radius: 8px; cursor: pointer; text-align: center;
-      background: var(--panel2); border: 1px solid var(--bdr); color: var(--text);
-      font-size: 12.5px; font-family: inherit;
-    }
-    .asset-btn:hover { border-color: var(--accent); }
-    .asset-btn.active { background: var(--accent-deep); border-color: var(--accent); }
-    .tool-sep { border-top: 1px solid var(--bdr); margin: 12px 0; }
-    #pipe-btn { width: 100%; }
-    #pipe-btn.active { background: rgba(255, 170, 60, 0.25); border-color: var(--warn); }
-    .hint { margin-top: 10px; font-size: 11px; color: var(--dim); line-height: 1.6; }
+    .rbtn .ric { font-size: 15px; line-height: 1; color: var(--accent); font-weight: 700; }
+    .rbtn:hover { background: var(--panel3); border-color: var(--bdr); }
+    .rbtn.active { background: var(--accent-deep); border-color: var(--accent); }
+    .rbtn.warn.active { background: rgba(255, 170, 60, 0.22); border-color: var(--warn); }
+    .rbtn:disabled { opacity: 0.35; pointer-events: none; }
+    .rsel { background: var(--panel2); border: 1px solid var(--bdr); color: var(--text);
+      border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: 12px; max-width: 128px; }
+    .rpage { display: none; flex: 1; }
+    .rpage.active { display: flex; }
 
-    #prop-panel { top: 62px; right: 12px; width: 240px; display: none; }
-    #prop-panel.show { display: block; }
-    .prop-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-    .prop-row label { font-size: 12px; color: var(--dim); }
-    .prop-row input {
-      width: 120px; padding: 5px 8px; border-radius: 6px; font-family: inherit;
-      background: var(--bg); border: 1px solid var(--bdr); color: var(--text); font-size: 13px;
-    }
-    .prop-row input:focus { outline: none; border-color: var(--accent); }
-    #prop-delete { width: 100%; margin-top: 6px; border-color: rgba(255, 77, 79, 0.5); color: var(--danger); }
-    #prop-delete:hover { background: rgba(255, 77, 79, 0.12); }
+    /* ================= Model Explorer 模型樹 ================= */
+    #tree-pane { grid-area: tree; background: var(--panel); border-right: 1px solid var(--bdr);
+      display: flex; flex-direction: column; overflow: hidden; }
+    .pane-head { display: flex; align-items: center; justify-content: space-between;
+      padding: 7px 10px; border-bottom: 1px solid var(--bdr); font-size: 12px; font-weight: 700;
+      color: var(--accent); letter-spacing: 1px; flex-shrink: 0; }
+    .pane-x { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 13px; padding: 0 3px; }
+    .pane-x:hover { color: var(--accent); }
+    #tree-search { margin: 6px 8px; padding: 5px 8px; background: var(--bg); color: var(--text);
+      border: 1px solid var(--bdr); border-radius: 6px; font-family: inherit; font-size: 12px; flex-shrink: 0; }
+    #tree-search:focus { outline: none; border-color: var(--accent); }
+    #model-tree { flex: 1; overflow-y: auto; padding: 2px 4px 10px; }
+    .mt-unit > summary { list-style: none; cursor: pointer; padding: 4px 6px; border-radius: 5px;
+      font-size: 11.5px; color: var(--dim); display: flex; align-items: center; gap: 5px; }
+    .mt-unit > summary::-webkit-details-marker { display: none; }
+    .mt-unit > summary:hover { background: var(--panel3); }
+    .mt-unit > summary .tw { transition: transform .12s; font-size: 9px; }
+    .mt-unit[open] > summary .tw { transform: rotate(90deg); }
+    .mt-eq { display: flex; align-items: center; gap: 6px; padding: 3px 6px 3px 20px;
+      border-radius: 5px; cursor: pointer; font-size: 12px; }
+    .mt-eq:hover { background: var(--panel3); }
+    .mt-eq.selected { background: var(--accent-deep); }
+    .mt-eq.hidden-eq { opacity: 0.4; }
+    .mt-ico { width: 14px; text-align: center; color: var(--accent); font-size: 10px; flex-shrink: 0; }
+    .mt-tag { font-weight: 600; white-space: nowrap; }
+    .mt-name { color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+    /* ================= Properties 屬性格 ================= */
+    #prop-pane { grid-area: prop; background: var(--panel); border-left: 1px solid var(--bdr);
+      display: flex; flex-direction: column; overflow: hidden; }
+    #prop-body { flex: 1; overflow-y: auto; padding: 8px; }
+    .pg-section { font-size: 10.5px; color: var(--dim); letter-spacing: 1px; margin: 10px 2px 4px; }
+    .pg-grid { display: grid; grid-template-columns: 88px 1fr; border: 1px solid var(--bdr); border-radius: 7px; overflow: hidden; }
+    .pg-grid > label { padding: 6px 8px; background: var(--panel2); font-size: 11.5px; color: var(--dim);
+      border-bottom: 1px solid var(--bdr); display: flex; align-items: center; }
+    .pg-grid > .pg-v { padding: 3px; border-bottom: 1px solid var(--bdr); }
+    .pg-grid > label:last-of-type, .pg-grid > .pg-v:last-of-type { border-bottom: none; }
+    .pg-v input, .pg-v span { width: 100%; padding: 4px 6px; background: var(--bg); color: var(--text);
+      border: 1px solid transparent; border-radius: 5px; font-family: inherit; font-size: 12.5px; display: block; }
+    .pg-v span { background: none; color: var(--dim); }
+    .pg-v input:hover { border-color: var(--bdr); }
+    .pg-v input:focus { outline: none; border-color: var(--accent); background: var(--panel2); }
+    .pbtn { width: 100%; margin-top: 8px; padding: 7px; border-radius: 7px; cursor: pointer;
+      background: var(--panel2); border: 1px solid var(--bdr); color: var(--text); font-family: inherit; font-size: 12.5px; }
+    .pbtn:hover { border-color: var(--accent); }
+    .pbtn.danger { color: var(--danger); border-color: rgba(255, 77, 79, 0.4); }
+    .pbtn.danger:hover { background: rgba(255, 77, 79, 0.12); }
+    #prop-empty { color: var(--dim); font-size: 12px; text-align: center; margin-top: 30px; line-height: 1.8; }
+
+    /* ================= 3D 視圖 ================= */
+    #viewport { grid-area: view; position: relative; overflow: hidden; }
+    #viewport canvas { display: block; }
+    #axis-triad { position: absolute; right: 10px; bottom: 8px; width: 84px; height: 84px;
+      z-index: 5; pointer-events: none; }
+
+    /* CE 麵包屑（E3D 頂部路徑列） */
+    #ce-breadcrumb { position: absolute; top: 0; left: 0; right: 0; height: 24px; z-index: 22;
+      display: flex; align-items: center; gap: 4px; padding: 0 10px;
+      background: rgba(19, 27, 36, 0.92); border-bottom: 1px solid var(--bdr);
+      font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; }
+    #ce-breadcrumb .bc-seg { cursor: pointer; padding: 1px 4px; border-radius: 4px; }
+    #ce-breadcrumb .bc-seg:hover { color: var(--accent); background: var(--panel3); }
+    #ce-breadcrumb .bc-type { color: var(--accent); font-family: Consolas, monospace; font-size: 10px; margin-right: 2px; }
+    #ce-breadcrumb .bc-sep { color: var(--bdr); }
+
+    /* PowerCompass（E3D 球形方位羅盤，可拖曳） */
+    #power-compass { position: absolute; left: 12px; bottom: 46px; width: 96px; height: 96px;
+      z-index: 24; cursor: grab; user-select: none; }
+    #power-compass svg { width: 100%; height: 100%; }
+    #power-compass .pc-hot { cursor: pointer; }
+    #power-compass .pc-hot:hover circle { fill: rgba(70, 194, 224, 0.35); }
+    #power-compass .pc-hot text { fill: var(--text); font-size: 13px; font-weight: 700; }
+
+    /* 模型樹 DB 型別字（WORL/SITE/ZONE/EQUI/PIPE） */
+    .mt-dbtype { font-family: Consolas, monospace; font-size: 10px; color: var(--dim);
+      letter-spacing: 0.5px; margin-right: 3px; flex-shrink: 0; }
+    .mt-eq.selected .mt-dbtype { color: rgba(255,255,255,.75); }
+
+    /* 底部視圖分頁列 */
+    #vtabs { grid-area: vtabs; display: flex; align-items: stretch; gap: 2px; padding: 0 8px;
+      background: var(--panel); border-top: 1px solid var(--bdr); user-select: none; }
+    .vtab { display: flex; align-items: center; padding: 0 14px; font-size: 11.5px;
+      color: var(--accent); background: var(--panel2); border: 1px solid var(--bdr); border-top: none;
+      border-radius: 0 0 6px 6px; font-weight: 600; }
+    .vtab-add { align-self: center; margin-left: 4px; width: 20px; height: 18px; border-radius: 4px;
+      background: none; border: 1px solid var(--bdr); color: var(--dim); font-size: 12px;
+      line-height: 1; opacity: 0.5; }
+    /* Prompt Area：E3D 提示固定左下，不浮動置中 */
     #mode-hint {
-      position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
-      z-index: 25; padding: 8px 18px; border-radius: 20px; font-size: 13px;
+      position: absolute; bottom: 12px; left: 12px;
+      z-index: 25; padding: 6px 14px; border-radius: 8px; font-size: 12.5px;
       background: rgba(19, 27, 36, 0.94); border: 1px solid var(--bdr); color: var(--dim);
+      max-width: 46%; text-align: left;
     }
     #mode-hint b { color: var(--accent); font-weight: 600; }
+    #measure-tip { position: absolute; z-index: 26; padding: 3px 9px; border-radius: 10px;
+      background: rgba(255, 170, 60, 0.92); color: #1a1204; font-size: 12px; font-weight: 700;
+      pointer-events: none; display: none; }
+    .pane-reopen { position: absolute; top: 8px; z-index: 24; padding: 5px 9px; border-radius: 7px;
+      cursor: pointer; background: rgba(19, 27, 36, 0.92); border: 1px solid var(--bdr);
+      color: var(--dim); font-family: inherit; font-size: 11.5px; display: none; }
+    .pane-reopen:hover { color: var(--accent); border-color: var(--accent); }
+    #tree-reopen { left: 8px; }
+    #prop-reopen { right: 8px; }
+    body.tree-collapsed #tree-reopen { display: block; }
+    body.prop-collapsed #prop-reopen { display: block; }
 
-    #open-modal {
-      position: absolute; inset: 0; z-index: 60; display: none;
-      background: rgba(5, 9, 13, 0.7); align-items: center; justify-content: center;
-    }
+    /* 右鍵情境選單 */
+    #ctx-menu { position: fixed; z-index: 80; display: none; min-width: 150px;
+      background: var(--panel); border: 1px solid var(--bdr); border-radius: 8px; padding: 4px;
+      box-shadow: 0 8px 28px rgba(0,0,0,.5); }
+    #ctx-menu button { display: block; width: 100%; text-align: left; padding: 7px 12px;
+      background: none; border: none; color: var(--text); font-family: inherit; font-size: 12.5px;
+      border-radius: 5px; cursor: pointer; }
+    #ctx-menu button:hover { background: var(--accent-deep); }
+    #ctx-menu button.danger { color: var(--danger); }
+    #ctx-menu .ctx-sep { border-top: 1px solid var(--bdr); margin: 4px 6px; }
+
+    /* ================= 狀態列 ================= */
+    #statusbar { grid-area: status; display: flex; align-items: center; gap: 18px; padding: 0 12px;
+      background: var(--panel); border-top: 1px solid var(--bdr); font-size: 11.5px; color: var(--dim);
+      user-select: none; white-space: nowrap; overflow: hidden; }
+    #statusbar b { color: var(--text); font-weight: 600; }
+    .st-toggle { cursor: pointer; padding: 1px 8px; border-radius: 5px; border: 1px solid var(--bdr);
+      background: none; color: var(--dim); font-family: inherit; font-size: 11px; }
+    .st-toggle.on { color: var(--accent); border-color: var(--accent); }
+    #st-coords { min-width: 210px; }
+
+    /* ================= 開啟場景 modal ================= */
+    #open-modal { position: fixed; inset: 0; z-index: 90; display: none;
+      background: rgba(5, 9, 13, 0.7); align-items: center; justify-content: center; }
     #open-modal.show { display: flex; }
-    .modal-box { width: 420px; background: var(--panel); border: 1px solid var(--bdr);
-      border-radius: 12px; padding: 20px; }
-    .scene-item {
-      display: flex; justify-content: space-between; align-items: center;
+    .modal-box { width: 440px; max-height: 70vh; overflow-y: auto; background: var(--panel);
+      border: 1px solid var(--bdr); border-radius: 12px; padding: 20px; }
+    .panel-title { font-size: 12px; font-weight: 700; color: var(--accent); letter-spacing: 1px; margin-bottom: 10px; }
+    .scene-item { display: flex; justify-content: space-between; align-items: center;
       padding: 10px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 6px;
-      background: var(--panel2); border: 1px solid var(--bdr);
-    }
+      background: var(--panel2); border: 1px solid var(--bdr); }
     .scene-item:hover { border-color: var(--accent); }
     .scene-item .meta { color: var(--dim); font-size: 12px; }
+    .tbtn { padding: 7px 14px; border-radius: 8px; cursor: pointer; font-family: inherit;
+      background: var(--panel2); border: 1px solid var(--bdr); color: var(--text); font-size: 13px; }
   </style>
 </head>
 <body>
-  <header id="topbar">
-    <a class="brand-home" href="/" title="回平台首頁">J.S</a>
-    <span class="title">3D 模塊編輯器</span>
-    <span id="scene-name">未儲存場景</span>
-    <span class="spacer"></span>
-    <button class="tbtn" id="btn-undo" disabled title="復原（Ctrl+Z）">復原</button>
-    <button class="tbtn" id="btn-redo" disabled title="還原（Ctrl+Y）">還原</button>
-    <span class="xf-group">
-      <button class="tbtn xf-btn active" data-m="translate" title="移動（W）">移動</button>
-      <button class="tbtn xf-btn" data-m="rotate" title="旋轉（E）">旋轉</button>
-      <button class="tbtn xf-btn" data-m="scale" title="縮放（R）">縮放</button>
-    </span>
-    <button class="tbtn" id="btn-open">開啟</button>
-    <button class="tbtn" id="btn-new">新增</button>
-    <button class="tbtn" id="btn-saveas">另存</button>
-    <button class="tbtn primary" id="btn-save">儲存</button>
-    <a class="tbtn" id="btn-view" href="#" target="_blank" style="display:none">在孿生檢視開啟</a>
-  </header>
-
-  <aside id="asset-panel" class="panel">
-    <div class="panel-title">工業素材</div>
-    <div id="asset-cats"></div>
-    <div class="tool-sep"></div>
-    <button class="tbtn" id="pipe-btn">管線繪製</button>
-    <div class="hint">
-      點素材後點地面放置。<br>
-      W 移動・E 旋轉・R 縮放<br>
-      Delete 刪除・Esc 取消
+  <div id="workspace">
+    <!-- ============ Ribbon（QAT＋Tabs＋Body） ============ -->
+    <div id="ribbon">
+      <div id="qat">
+        <a class="brand-home" href="/" title="回平台首頁">J.S</a>
+        <button class="qbtn" id="qat-save" title="儲存（Ctrl+S）">💾</button>
+        <button class="qbtn" id="qat-saveas" title="另存">⧉</button>
+        <button class="qbtn" id="qat-undo" disabled title="復原（Ctrl+Z）">↶</button>
+        <button class="qbtn" id="qat-redo" disabled title="還原（Ctrl+Y）">↷</button>
+        <select class="rsel" id="qat-discipline" title="專業領域（Discipline）——切換情境功能頁籤">
+          <option value="pipe" selected>管線 PIPING</option>
+          <option value="equip">設備 EQUIPMENT</option>
+          <option value="none">通用 GENERAL</option>
+        </select>
+        <span id="scene-name" style="margin-left:auto">未儲存場景</span>
+      </div>
+      <div id="ribbon-tabs">
+        <button class="rtab" data-tab="project">專案</button>
+        <button class="rtab active" data-tab="home">首頁</button>
+        <button class="rtab" data-tab="view">檢視</button>
+        <span class="rtab-sep"></span>
+        <button class="rtab ctx-tab" data-tab="equip">設備 EQUIPMENT</button>
+        <button class="rtab ctx-tab" data-tab="pipe">管線 PIPING</button>
+      </div>
+      <div id="ribbon-body">
+        <!-- 專案 PROJECT -->
+        <div class="rpage" data-page="project">
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" id="btn-save" title="儲存（Ctrl+S）"><span class="ric">💾</span>儲存</button>
+              <button class="rbtn" id="btn-saveas" title="另存新場景"><span class="ric">⧉</span>另存</button>
+              <button class="rbtn" id="btn-open" title="開啟既有場景"><span class="ric">📂</span>開啟</button>
+              <button class="rbtn" id="btn-new" title="清空建立新場景"><span class="ric">✚</span>新增</button>
+            </div>
+            <div class="rgroup-label">場景</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <a class="rbtn" id="btn-view-twin" href="#" target="_blank" style="display:none"><span class="ric">👁</span>孿生檢視</a>
+            </div>
+            <div class="rgroup-label">交付</div>
+          </div>
+        </div>
+        <!-- 首頁 HOME -->
+        <div class="rpage active" data-page="home">
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" id="btn-undo" disabled title="復原（Ctrl+Z）"><span class="ric">↶</span>復原</button>
+              <button class="rbtn" id="btn-redo" disabled title="還原（Ctrl+Y）"><span class="ric">↷</span>還原</button>
+              <button class="rbtn" id="btn-del" title="刪除選取（Delete）"><span class="ric">🗑</span>刪除</button>
+            </div>
+            <div class="rgroup-label">共用</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" id="btn-fit-sel" title="縮放至選取（F）"><span class="ric">◎</span>至選取</button>
+              <button class="rbtn" id="btn-fit" title="縮放至全場景（Home）"><span class="ric">⛶</span>全場</button>
+            </div>
+            <div class="rgroup-label">巡覽</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn warn" id="btn-measure" title="點兩點量距離；Esc 結束"><span class="ric">📐</span>距離</button>
+            </div>
+            <div class="rgroup-label">量測</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn xf-btn active" data-m="translate" title="移動（W）"><span class="ric">⇄</span>移動</button>
+              <button class="rbtn xf-btn" data-m="rotate" title="旋轉（E）"><span class="ric">⟳</span>旋轉</button>
+              <button class="rbtn xf-btn" data-m="scale" title="縮放（R）"><span class="ric">⤢</span>縮放</button>
+            </div>
+            <div class="rgroup-label">修改</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" id="btn-win-tree" title="模型瀏覽器開關"><span class="ric">☰</span>模型樹</button>
+              <button class="rbtn" id="btn-win-prop" title="屬性面板開關"><span class="ric">🗔</span>屬性</button>
+            </div>
+            <div class="rgroup-label">視窗</div>
+          </div>
+        </div>
+        <!-- 設備（JS 依 ASSET_CATEGORIES 動態生成分類群組） -->
+        <div class="rpage" data-page="equip" id="equip-ribbon"></div>
+        <!-- 管線 -->
+        <div class="rpage" data-page="pipe">
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn warn" id="pipe-btn" title="依序點擊路徑點；Enter 完成"><span class="ric">╱</span>繪製管線</button>
+              <label style="display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--dim)">管徑
+                <input class="rsel" id="pipe-r" type="number" step="0.02" value="0.12" style="width:64px"> m
+              </label>
+            </div>
+            <div class="rgroup-label">建立</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn warn" id="pipe-node-btn" title="選中管線後編輯節點：拖曳移動、Delete 刪節點"><span class="ric">◉</span>節點編輯</button>
+            </div>
+            <div class="rgroup-label">修改</div>
+          </div>
+        </div>
+        <!-- 檢視 VIEW -->
+        <div class="rpage" data-page="view">
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" id="btn-underlay" title="P&ID 圖紙底圖顯示切換"><span class="ric">🗺</span>底圖</button>
+              <button class="rbtn" id="btn-grid" title="地面網格顯示切換"><span class="ric">▦</span>網格</button>
+              <button class="rbtn" id="btn-labels" title="設備位號標籤顯示切換"><span class="ric">🏷</span>標籤</button>
+            </div>
+            <div class="rgroup-label">內容</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" data-vp="n" title="看向北">北</button>
+              <button class="rbtn" data-vp="s" title="看向南">南</button>
+              <button class="rbtn" data-vp="e" title="看向東">東</button>
+              <button class="rbtn" data-vp="w" title="看向西">西</button>
+              <button class="rbtn" data-vp="top" title="俯視">俯視</button>
+              <button class="rbtn" data-vp="iso" title="等角視">等角</button>
+            </div>
+            <div class="rgroup-label">視向</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" disabled title="視角書籤（規劃中）"><span class="ric">📌</span>存視角</button>
+              <button class="rbtn" disabled title="視角書籤（規劃中）"><span class="ric">🔖</span>回視角</button>
+            </div>
+            <div class="rgroup-label">操縱</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" id="btn-clip" title="水平剖切面開關"><span class="ric">▤</span>剖切</button>
+              <input type="range" id="clip-slider" min="0" max="100" value="100" style="width:90px;display:none">
+            </div>
+            <div class="rgroup-label">剖切</div>
+          </div>
+        </div>
+      </div>
     </div>
-  </aside>
 
-  <aside id="prop-panel" class="panel">
-    <div class="panel-title" id="prop-title">屬性</div>
-    <div id="prop-rows"></div>
-    <button class="tbtn" id="prop-delete">刪除（Delete）</button>
-  </aside>
+    <!-- ============ Model Explorer ============ -->
+    <aside id="tree-pane">
+      <div class="pane-head">模型瀏覽器<button class="pane-x" id="tree-hide" title="收合">◀</button></div>
+      <input id="tree-search" placeholder="搜尋位號 / 名稱…">
+      <div id="model-tree"></div>
+    </aside>
 
-  <div id="mode-hint">點選素材開始，或點擊場景中的設備編輯</div>
+    <!-- ============ 3D 視圖 ============ -->
+    <main id="viewport">
+      <div id="ce-breadcrumb"></div>
+      <button class="pane-reopen" id="tree-reopen" style="top:32px">☰ 模型樹</button>
+      <button class="pane-reopen" id="prop-reopen" style="top:32px">☰ 屬性</button>
+      <div id="mode-hint">點選素材開始，或點擊場景中的設備編輯</div>
+      <div id="measure-tip"></div>
+      <canvas id="axis-triad"></canvas>
+      <div id="power-compass" title="方位羅盤：點 N/S/E/W 切視向、U 俯視、D 仰視；可拖曳移位">
+        <svg viewBox="0 0 96 96">
+          <circle cx="48" cy="48" r="45" fill="rgba(19,27,36,.85)" stroke="#223140" stroke-width="1.5"/>
+          <circle cx="48" cy="48" r="30" fill="none" stroke="#223140" stroke-width="1"/>
+          <g id="pc-rose">
+            <g class="pc-hot" data-vp="n"><circle cx="48" cy="12" r="10" fill="rgba(70,194,224,.12)"/><text x="48" y="17" text-anchor="middle">N</text></g>
+            <g class="pc-hot" data-vp="s"><circle cx="48" cy="84" r="10" fill="rgba(70,194,224,.12)"/><text x="48" y="89" text-anchor="middle">S</text></g>
+            <g class="pc-hot" data-vp="e"><circle cx="84" cy="48" r="10" fill="rgba(70,194,224,.12)"/><text x="84" y="53" text-anchor="middle">E</text></g>
+            <g class="pc-hot" data-vp="w"><circle cx="12" cy="48" r="10" fill="rgba(70,194,224,.12)"/><text x="12" y="53" text-anchor="middle">W</text></g>
+          </g>
+          <g class="pc-hot" data-vp="top"><circle cx="48" cy="38" r="8" fill="rgba(70,194,224,.12)"/><text x="48" y="42" text-anchor="middle" font-size="10">U</text></g>
+          <g class="pc-hot" data-vp="bottom"><circle cx="48" cy="58" r="8" fill="rgba(70,194,224,.12)"/><text x="48" y="62" text-anchor="middle" font-size="10">D</text></g>
+        </svg>
+      </div>
+    </main>
+
+    <!-- ============ Properties ============ -->
+    <aside id="prop-pane">
+      <div class="pane-head"><span id="prop-title">屬性</span><button class="pane-x" id="prop-hide" title="收合">▶</button></div>
+      <div id="prop-body"><div id="prop-empty">未選取物件<br>點擊 3D 視圖或模型樹選取</div></div>
+    </aside>
+
+    <!-- ============ 視圖分頁列 ============ -->
+    <div id="vtabs">
+      <div class="vtab">3D View (1)</div>
+      <button class="vtab-add" disabled title="多視圖規劃中">＋</button>
+    </div>
+
+    <!-- ============ 狀態列 ============ -->
+    <div id="statusbar">
+      <span id="st-coords">X: — Y: — Z: —</span>
+      <span id="st-sel">選取：無</span>
+      <button class="st-toggle on" id="st-snap" title="放置/節點拖曳吸附 0.5m 網格">捕捉 0.5m</button>
+      <span id="st-count"></span>
+      <span id="st-nav" title="中鍵按住＝目前導航模式；F2 縮放、F3 平移、F5 旋轉">MB2：旋轉</span>
+      <span style="margin-left:auto" id="st-mode">就緒</span>
+    </div>
+  </div>
+
+  <div id="ctx-menu"></div>
 
   <div id="open-modal">
     <div class="modal-box">
@@ -168,7 +431,6 @@
     </div>
   </div>
 
-  <main id="viewport"></main>
   <script type="module" src="/static/js/editor.js"></script>
 </body>
 </html>

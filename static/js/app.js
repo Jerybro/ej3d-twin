@@ -6,6 +6,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { std, markShadow, builders, detailedBuilders, dm, dFlange, mergeByMaterial, labelHeight } from './plant-builders.js';
 
 const ACCENT = new THREE.Color('#46c2e0');
@@ -19,6 +20,14 @@ const [plantData, scenarioList] = await Promise.all([
   fetch(`/api/scenarios?scene=${SCENE_ID}`).then((r) => r.json()),
 ]);
 const scenarioDefs = Object.fromEntries(plantData.scenarios.map((s) => [s.id, s]));
+
+// 場景感知標題：P&ID 解析場景顯示廠名與資料來源，不再掛示範廠字樣
+if (SCENE_ID !== 'demo') {
+  document.getElementById('brand-title').textContent = plantData.plant?.name ?? SCENE_ID;
+  document.getElementById('brand-sub').textContent =
+    plantData.source ? `資料來源：${plantData.source}` : `場景：${SCENE_ID}`;
+  document.title = `${plantData.plant?.name ?? SCENE_ID}｜J.S_3D Ai`;
+}
 
 // ---------------------------------------------------------------- 基礎場景
 const viewport = document.getElementById('viewport');
@@ -244,16 +253,81 @@ function autoAdaptQuality() {
 const plantGroup = new THREE.Group();
 scene.add(plantGroup);
 
+// 地坪自適應：預設 70×45，場景（如 P&ID 整廠合併）超出時放大
+let GROUND_W = 70, GROUND_D = 45;
+for (const unit of plantData.plant.units) {
+  for (const eq of unit.equipment) {
+    GROUND_W = Math.max(GROUND_W, Math.abs(eq.pos[0]) * 2 + 20);
+    GROUND_D = Math.max(GROUND_D, Math.abs(eq.pos[2]) * 2 + 20);
+  }
+}
+for (const u of plantData.underlays ?? []) {  // 圖紙底圖比設備群更寬
+  GROUND_W = Math.max(GROUND_W, (Math.abs(u.x) + u.w / 2) * 2 + 16);
+  GROUND_D = Math.max(GROUND_D, (Math.abs(u.z) + u.h / 2) * 2 + 16);
+}
+GROUND_W = Math.ceil(GROUND_W / 10) * 10;
+GROUND_D = Math.ceil(GROUND_D / 10) * 10;
+if (GROUND_W > 70 || GROUND_D > 45) {  // 大場景：視距/霧/遠平面一起放大
+  const span = Math.max(GROUND_W, GROUND_D);
+  camera.far = Math.max(300, span * 2.5);
+  camera.position.set(span * 0.35, span * 0.3, span * 0.5);
+  camera.updateProjectionMatrix();
+  controls.maxDistance = span * 1.2;
+  // 就地改霧參數（DARK_FOG 持有同一實例，深色/實景切換才不會還原成小場景霧）
+  scene.fog.near = span * 0.9;
+  scene.fog.far = span * 2.2;
+}
 const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(70, 45),
+  new THREE.PlaneGeometry(GROUND_W, GROUND_D),
   new THREE.MeshStandardMaterial({ color: 0x1c232b, roughness: 1 })
 );
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 plantGroup.add(ground);
-const grid = new THREE.GridHelper(70, 35, 0x2a3844, 0x1f2a33);
+const grid = new THREE.GridHelper(Math.max(GROUND_W, GROUND_D), Math.max(GROUND_W, GROUND_D) / 2, 0x2a3844, 0x1f2a33);
 grid.position.y = 0.02;
 plantGroup.add(grid);
+
+// 儀錶 3D 標記：琥珀色小指針柱，立在圖面儀錶圈的位置（有 pos 的儀錶才畫；
+// 示範廠手建場景的儀錶無座標，自然跳過）
+{
+  const geos = [];
+  for (const inst of Object.values(plantData.instruments ?? {})) {
+    if (!inst.pos) continue;
+    const [ix, iz] = inst.pos;
+    const stem = new THREE.CylinderGeometry(0.05, 0.05, 1.0, 5);
+    stem.translate(ix, 0.5, iz);
+    geos.push(stem);
+    const head = new THREE.SphereGeometry(0.16, 8, 6);
+    head.translate(ix, 1.05, iz);
+    geos.push(head);
+  }
+  if (geos.length) {
+    const instMat = std(0xd9a441);
+    const m = new THREE.Mesh(BufferGeometryUtils.mergeGeometries(geos, false), instMat);
+    m.castShadow = false;
+    plantGroup.add(m);
+  }
+}
+
+// 圖紙底圖（P&ID 地毯）：設備站在圖面自己的位置上，可直接對圖
+const texLoader = new THREE.TextureLoader();
+for (const u of plantData.underlays ?? []) {
+  const tex = texLoader.load(u.image);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8; // 斜視角下位號文字才不糊
+  const sheet = new THREE.Mesh(
+    new THREE.PlaneGeometry(u.w, u.h),
+    new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, opacity: 0.9,
+      color: 0xb9c4cd, // 壓暗紙白，貼合深色主題
+      depthWrite: false,
+    })
+  );
+  sheet.rotation.x = -Math.PI / 2;
+  sheet.position.set(u.x, 0.04, u.z); // 在網格之上、設備之下
+  plantGroup.add(sheet);
+}
 
 // 場景敷設（精細模式限定）：防溢堤、管線法蘭與管架、照明桿
 function buildDressing() {
@@ -270,8 +344,9 @@ function buildDressing() {
       g.add(wall);
     }
   }
-  // 主管線：接頭法蘭對+管架支撐
-  for (const pipe of plantData.pipes) {
+  // 主管線：接頭法蘭對+管架支撐（P&ID 自動抽取的大量管線跳過——敷設是給
+  // 手繪示範廠的細節，數千段的法蘭/管架會拖垮效能）
+  for (const pipe of plantData.pipes.length > 60 ? [] : plantData.pipes) {
     const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
     for (let i = 1; i < pts.length - 1; i++) {
       const fl = dFlange(pipe.r * 1.8, dm.steelDark);
@@ -352,21 +427,44 @@ for (const unit of plantData.plant.units) {
 }
 
 // 管線（裝飾用，串接設備）
+// P&ID 自動抽取的管線可達數千段——合併成單一 BufferGeometry（一次 draw call），
+// 手繪少量管線走原路徑（個別 mesh 保留陰影品質）
 const pipeMat = std(0x646f7b);
-for (const pipe of plantData.pipes) {
-  const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
-  for (let i = 0; i < pts.length - 1; i++) {
-    const a = pts[i], b = pts[i + 1];
-    const dir = b.clone().sub(a);
-    const len = dir.length();
-    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(pipe.r, pipe.r, len, 12), pipeMat);
-    cyl.position.copy(a).addScaledVector(dir, 0.5);
-    cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
-    cyl.castShadow = true;
-    plantGroup.add(cyl);
-    const joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
-    joint.position.copy(b);
-    plantGroup.add(joint);
+const bridgeMat = std(0x2e8ba8); // 跨圖橋接管：主題青，一眼辨識「這條是縫合線」
+{
+  const manyPipes = plantData.pipes.length > 60;
+  const geos = [];
+  const bridgeGeos = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  for (const pipe of plantData.pipes) {
+    const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const dir = b.clone().sub(a);
+      const len = dir.length();
+      if (len < 0.01) continue;
+      const cylGeo = new THREE.CylinderGeometry(pipe.r, pipe.r, len, manyPipes ? 6 : 12);
+      const q = new THREE.Quaternion().setFromUnitVectors(up, dir.clone().normalize());
+      const mid = a.clone().addScaledVector(dir, 0.5);
+      cylGeo.applyQuaternion(q);
+      cylGeo.translate(mid.x, mid.y, mid.z);
+      if (manyPipes) {
+        (pipe.bridge ? bridgeGeos : geos).push(cylGeo);
+      } else {
+        const cyl = new THREE.Mesh(cylGeo, pipe.bridge ? bridgeMat : pipeMat);
+        cyl.castShadow = true;
+        plantGroup.add(cyl);
+        const joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
+        joint.position.copy(b);
+        plantGroup.add(joint);
+      }
+    }
+  }
+  for (const [gs, mat] of [[geos, pipeMat], [bridgeGeos, bridgeMat]]) {
+    if (!gs.length) continue;
+    const merged = new THREE.Mesh(BufferGeometryUtils.mergeGeometries(gs, false), mat);
+    merged.castShadow = false; // 數千段的陰影貼圖成本不值得
+    plantGroup.add(merged);
   }
 }
 
@@ -411,7 +509,9 @@ const treeRoot = document.getElementById('plant-tree');
 for (const unit of plantData.plant.units) {
   const unitDiv = document.createElement('div');
   unitDiv.className = 'tree-unit';
-  unitDiv.innerHTML = `<div class="tree-unit-name">${unit.id}｜${unit.name}</div>`;
+  // P&ID 場景的 unit.name 已含圖號（「分離｜C12070-1」）— 不再重複前綴 id
+  const unitLabel = unit.name.includes(unit.id) ? unit.name : `${unit.id}｜${unit.name}`;
+  unitDiv.innerHTML = `<div class="tree-unit-name">${unitLabel}</div>`;
   for (const eq of unit.equipment) {
     const item = document.createElement('div');
     item.className = 'tree-eq';
@@ -421,6 +521,20 @@ for (const unit of plantData.plant.units) {
     eqMap[eq.tag].treeEl = item;
   }
   treeRoot.appendChild(unitDiv);
+}
+
+// 設備樹收合（狀態記 localStorage）
+{
+  const leftPanel = document.getElementById('left-panel');
+  const expandBtn = document.getElementById('tree-expand');
+  const setCollapsed = (on) => {
+    leftPanel.classList.toggle('hidden', on);
+    expandBtn.classList.toggle('hidden', !on);
+    localStorage.setItem('ej-tree-collapsed', on ? '1' : '');
+  };
+  document.getElementById('tree-collapse').addEventListener('click', () => setCollapsed(true));
+  expandBtn.addEventListener('click', () => setCollapsed(false));
+  if (localStorage.getItem('ej-tree-collapsed') === '1') setCollapsed(true);
 }
 
 // 外部資產也列進設備樹，點擊飛到定位

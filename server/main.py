@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import random
 import time
 from contextlib import asynccontextmanager
@@ -381,10 +382,46 @@ async def pid_upload(file: "UploadFile" = FastAPIFile(...)) -> dict:
 
 @app.get("/api/pid/list")
 def pid_list() -> list:
-    return [
-        {"name": p.name, "size": p.stat().st_size}
-        for p in sorted(PID_DIR.glob("*.pdf"))
-    ]
+    from .scenes import SCENES_DIR
+
+    out = []
+    for p in sorted(PID_DIR.glob("*.pdf")):
+        slug = "pid-" + re.sub(r"[^a-z0-9]+", "-", p.stem.lower()).strip("-")
+        out.append({"name": p.name, "size": p.stat().st_size,
+                    "scene_id": slug if (SCENES_DIR / f"{slug}.json").exists() else None})
+    return out
+
+
+@app.post("/api/pid/parse/{filename}")
+def pid_parse_endpoint(filename: str) -> dict:
+    """P&ID 自動解析建模：OCR 抽位號 → 場景草稿 → 編輯器接手修改。"""
+    from .pid_parse import parse_pid
+    from .scenes import SCENES_DIR, _normalize
+
+    try:
+        result = parse_pid(filename)
+    except FileNotFoundError:
+        raise HTTPException(404, f"圖面不存在: {filename}") from None
+    slug = "pid-" + re.sub(r"[^a-z0-9]+", "-", Path(filename).stem.lower()).strip("-")
+    scene = _normalize(result["scene"])
+    (SCENES_DIR / f"{slug}.json").write_text(
+        json.dumps(scene, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"scene_id": slug, **result["stats"]}
+
+
+@app.post("/api/pid/parse_all")
+def pid_parse_all() -> dict:
+    """批次解析全部圖面 → 單圖草稿 ×N + TA32 整廠合併場景（背景執行）。"""
+    from .pid_batch import start_batch_thread
+
+    return start_batch_thread()
+
+
+@app.get("/api/pid/parse_all/status")
+def pid_parse_all_status() -> dict:
+    from .pid_batch import read_status
+
+    return read_status()
 
 
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")

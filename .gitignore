@@ -10,6 +10,9 @@ dataset/
 *.xlsx
 quality_daily*.csv
 uploads/
+# P&ID è§£æè¡ç”Ÿå ´æ™¯å«å®¢æˆ¶ä½è™Ÿï¼Œä¸é€²ç‰ˆæ§
+data/scenes/pid-*.json
+data/pid_batch_status.json
 
 # ç”¢å‡ºç‰©ï¼ˆå¯ç”±ç¨‹å¼é‡æ–°ç”Ÿæˆï¼‰
 exports/*.usda
@@ -25,11 +28,10 @@ scans/*
 .vscode/
 .DS_Store
 Thumbs.db
+server_8601.log
 
-# P&ID ¸ÑªR³õ´º¡]«È¤á¹Ï­±­l¥Íª«¡A§t¦ì¸¹¡^
-data/scenes/pid-*.json
-# ¥»¾÷¶}µo¤u¨ã³]©w
+# æœ¬æ©Ÿé–‹ç™¼å·¥å…·è¨­å®š
 .claude/
 
-# AutoML ¼Ò«¬²£ª«¡]§t¨Ï¥ÎªÌ¸ê®Æ­l¥Í¡^
+# AutoML æ¨¡å‹æŒä¹…åŒ–ï¼ˆå«ä½¿ç”¨è€…è³‡æ–™è¡ç”Ÿï¼‰
 data/automl/

@@ -1,0 +1,750 @@
+{
+  "plant": {
+    "id": "LONGDE-UTIL",
+    "name": "龍德公用廠｜燃煤汽電共生（示範建模）",
+    "units": [
+      {
+        "id": "U-COAL",
+        "name": "煤場｜貯運",
+        "equipment": [
+          {
+            "tag": "CB-101",
+            "name": "煤倉",
+            "type": "building",
+            "pos": [
+              -58,
+              0,
+              -6
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 10,
+              "h": 8,
+              "d": 8
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": []
+          },
+          {
+            "tag": "CV-101",
+            "name": "輸煤帶 1",
+            "type": "conveyor",
+            "pos": [
+              -48,
+              0,
+              -2
+            ],
+            "rot_y": 0,
+            "dims": {
+              "len": 12,
+              "h": 2.5,
+              "w": 1.2
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": []
+          },
+          {
+            "tag": "CV-102",
+            "name": "輸煤帶 2",
+            "type": "conveyor",
+            "pos": [
+              -37,
+              0,
+              2
+            ],
+            "rot_y": 0,
+            "dims": {
+              "len": 10,
+              "h": 4.5,
+              "w": 1.2
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": []
+          }
+        ]
+      },
+      {
+        "id": "U-BLR",
+        "name": "鍋爐島",
+        "equipment": [
+          {
+            "tag": "B-201",
+            "name": "燃煤鍋爐 1 號",
+            "type": "furnace",
+            "pos": [
+              -24,
+              0,
+              -8
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 9,
+              "h": 16,
+              "d": 9
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {
+              "型式": "CFB 循環流化床"
+            },
+            "instruments": [
+              "TI-201",
+              "PI-201"
+            ]
+          },
+          {
+            "tag": "B-202",
+            "name": "燃煤鍋爐 2 號",
+            "type": "furnace",
+            "pos": [
+              -24,
+              0,
+              8
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 9,
+              "h": 16,
+              "d": 9
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {
+              "型式": "CFB 循環流化床"
+            },
+            "instruments": [
+              "TI-202"
+            ]
+          },
+          {
+            "tag": "P-201",
+            "name": "鍋爐給水泵 A",
+            "type": "pump",
+            "pos": [
+              -33,
+              0,
+              -1
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 1.4,
+              "h": 1.0,
+              "d": 0.9
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": []
+          },
+          {
+            "tag": "P-202",
+            "name": "鍋爐給水泵 B",
+            "type": "pump",
+            "pos": [
+              -33,
+              0,
+              1.8
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 1.4,
+              "h": 1.0,
+              "d": 0.9
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": []
+          }
+        ]
+      },
+      {
+        "id": "U-AQC",
+        "name": "煙氣淨化",
+        "equipment": [
+          {
+            "tag": "R-301",
+            "name": "SCR 脫硝反應器 1",
+            "type": "block",
+            "pos": [
+              -9,
+              0,
+              -8
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 6,
+              "h": 9,
+              "d": 6
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {
+              "觸媒": "V2O5-WO3/TiO2"
+            },
+            "instruments": [
+              "TI-301"
+            ]
+          },
+          {
+            "tag": "R-302",
+            "name": "SCR 脫硝反應器 2",
+            "type": "block",
+            "pos": [
+              -9,
+              0,
+              8
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 6,
+              "h": 9,
+              "d": 6
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {
+              "觸媒": "V2O5-WO3/TiO2"
+            },
+            "instruments": []
+          },
+          {
+            "tag": "EP-401",
+            "name": "靜電集塵器 1",
+            "type": "block",
+            "pos": [
+              4,
+              0,
+              -8
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 10,
+              "h": 10,
+              "d": 7
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": []
+          },
+          {
+            "tag": "EP-402",
+            "name": "靜電集塵器 2",
+            "type": "block",
+            "pos": [
+              4,
+              0,
+              8
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 10,
+              "h": 10,
+              "d": 7
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": []
+          },
+          {
+            "tag": "K-401",
+            "name": "引風機 1",
+            "type": "blower",
+            "pos": [
+              13,
+              0,
+              -8
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 2.2,
+              "h": 2.0,
+              "d": 1.6
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": []
+          },
+          {
+            "tag": "K-402",
+            "name": "引風機 2",
+            "type": "blower",
+            "pos": [
+              13,
+              0,
+              8
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 2.2,
+              "h": 2.0,
+              "d": 1.6
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": []
+          },
+          {
+            "tag": "A-501",
+            "name": "FGD 濕式脫硫塔",
+            "type": "packedcol",
+            "pos": [
+              24,
+              0,
+              0
+            ],
+            "rot_y": 0,
+            "dims": {
+              "r": 4.5,
+              "h": 20
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {
+              "吸收劑": "石灰石漿液"
+            },
+            "instruments": [
+              "PI-501"
+            ]
+          },
+          {
+            "tag": "T-501",
+            "name": "石灰石漿液槽",
+            "type": "tank",
+            "pos": [
+              24,
+              0,
+              14
+            ],
+            "rot_y": 0,
+            "dims": {
+              "r": 3,
+              "h": 6
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": [
+              "LI-501"
+            ]
+          },
+          {
+            "tag": "ST-601",
+            "name": "煙囪",
+            "type": "stack",
+            "pos": [
+              40,
+              0,
+              0
+            ],
+            "rot_y": 0,
+            "dims": {
+              "r": 2.4,
+              "h": 42
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {
+              "CEMS": "SOx/NOx/粉塵 連續監測"
+            },
+            "instruments": [
+              "AI-601N",
+              "AI-601S"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "U-TG",
+        "name": "汽機島",
+        "equipment": [
+          {
+            "tag": "TG-701",
+            "name": "汽輪發電機廠房",
+            "type": "building",
+            "pos": [
+              -10,
+              0,
+              30
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 16,
+              "h": 9,
+              "d": 12
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": []
+          },
+          {
+            "tag": "E-701",
+            "name": "表面式冷凝器",
+            "type": "hx",
+            "pos": [
+              -1,
+              0,
+              30
+            ],
+            "rot_y": 0,
+            "dims": {
+              "r": 1.4,
+              "len": 8
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": []
+          },
+          {
+            "tag": "CT-701",
+            "name": "冷卻水塔 1",
+            "type": "coolingtower",
+            "pos": [
+              14,
+              0,
+              26
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 6,
+              "h": 6,
+              "d": 6
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": []
+          },
+          {
+            "tag": "CT-702",
+            "name": "冷卻水塔 2",
+            "type": "coolingtower",
+            "pos": [
+              14,
+              0,
+              34
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 6,
+              "h": 6,
+              "d": 6
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": []
+          },
+          {
+            "tag": "P-701",
+            "name": "循環水泵",
+            "type": "pump",
+            "pos": [
+              7,
+              0,
+              30
+            ],
+            "rot_y": 0,
+            "dims": {
+              "w": 1.6,
+              "h": 1.1,
+              "d": 1.0
+            },
+            "pid_ref": "LONGDE-PPT",
+            "design": {},
+            "instruments": []
+          }
+        ]
+      }
+    ]
+  },
+  "pipes": [
+    {
+      "pts": [
+        [
+          -19.5,
+          6.0,
+          -8
+        ],
+        [
+          -12,
+          6.0,
+          -8
+        ],
+        [
+          -9,
+          6.0,
+          -8
+        ],
+        [
+          -1,
+          6.0,
+          -8
+        ],
+        [
+          4,
+          6.0,
+          -8
+        ],
+        [
+          11.8,
+          6.0,
+          -8
+        ],
+        [
+          13,
+          1.2,
+          -8
+        ]
+      ],
+      "r": 0.55
+    },
+    {
+      "pts": [
+        [
+          14.2,
+          1.2,
+          -8
+        ],
+        [
+          17,
+          6.0,
+          -8
+        ],
+        [
+          24,
+          6.0,
+          -2.0
+        ]
+      ],
+      "r": 0.55
+    },
+    {
+      "pts": [
+        [
+          -19.5,
+          6.0,
+          8
+        ],
+        [
+          -12,
+          6.0,
+          8
+        ],
+        [
+          -9,
+          6.0,
+          8
+        ],
+        [
+          -1,
+          6.0,
+          8
+        ],
+        [
+          4,
+          6.0,
+          8
+        ],
+        [
+          11.8,
+          6.0,
+          8
+        ],
+        [
+          13,
+          1.2,
+          8
+        ]
+      ],
+      "r": 0.55
+    },
+    {
+      "pts": [
+        [
+          14.2,
+          1.2,
+          8
+        ],
+        [
+          17,
+          6.0,
+          8
+        ],
+        [
+          24,
+          6.0,
+          2.0
+        ]
+      ],
+      "r": 0.55
+    },
+    {
+      "pts": [
+        [
+          24,
+          16,
+          0
+        ],
+        [
+          32,
+          16,
+          0
+        ],
+        [
+          40,
+          16,
+          0
+        ],
+        [
+          40,
+          20,
+          0
+        ]
+      ],
+      "r": 0.6
+    },
+    {
+      "pts": [
+        [
+          -24,
+          14,
+          -8
+        ],
+        [
+          -24,
+          7.5,
+          -20
+        ],
+        [
+          -16,
+          7.5,
+          -20
+        ],
+        [
+          -16,
+          7.5,
+          26
+        ],
+        [
+          -12,
+          5,
+          28
+        ]
+      ],
+      "r": 0.3
+    },
+    {
+      "pts": [
+        [
+          -24,
+          14,
+          8
+        ],
+        [
+          -20,
+          7.5,
+          8
+        ],
+        [
+          -20,
+          7.5,
+          24
+        ],
+        [
+          -14,
+          5,
+          28
+        ]
+      ],
+      "r": 0.3
+    },
+    {
+      "pts": [
+        [
+          7,
+          1.0,
+          30
+        ],
+        [
+          14,
+          1.0,
+          26
+        ]
+      ],
+      "r": 0.35
+    },
+    {
+      "pts": [
+        [
+          24,
+          3,
+          14
+        ],
+        [
+          24,
+          3,
+          4.6
+        ]
+      ],
+      "r": 0.18
+    }
+  ],
+  "instruments": {
+    "TI-201": {
+      "name": "鍋爐 1 爐膛溫度",
+      "unit": "°C",
+      "base": 880,
+      "equipment": "B-201",
+      "alarm_hi": 950
+    },
+    "TI-202": {
+      "name": "鍋爐 2 爐膛溫度",
+      "unit": "°C",
+      "base": 875,
+      "equipment": "B-202",
+      "alarm_hi": 950
+    },
+    "PI-201": {
+      "name": "主蒸汽壓力",
+      "unit": "kg/cm²g",
+      "base": 88,
+      "equipment": "B-201",
+      "alarm_hi": 96
+    },
+    "TI-301": {
+      "name": "SCR 入口溫度",
+      "unit": "°C",
+      "base": 345,
+      "equipment": "R-301"
+    },
+    "AI-601N": {
+      "name": "煙囪 NOx",
+      "unit": "ppm",
+      "base": 28,
+      "equipment": "ST-601",
+      "alarm_hi": 60
+    },
+    "AI-601S": {
+      "name": "煙囪 SOx",
+      "unit": "ppm",
+      "base": 12,
+      "equipment": "ST-601",
+      "alarm_hi": 40
+    },
+    "PI-501": {
+      "name": "FGD 漿液泵壓",
+      "unit": "kg/cm²g",
+      "base": 4.2,
+      "equipment": "A-501"
+    },
+    "LI-501": {
+      "name": "石灰石漿液槽液位",
+      "unit": "%",
+      "base": 62,
+      "equipment": "T-501",
+      "alarm_lo": 15
+    }
+  },
+  "scenarios": [
+    {
+      "id": "normal",
+      "name": "正常運轉",
+      "kind": "normal",
+      "desc": ""
+    }
+  ],
+  "source": "龍德簡介 PPT 流程示意（無製程數據；位號為示範自編）"
+}

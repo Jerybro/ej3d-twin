@@ -30,3 +30,6 @@ Thumbs.db
 data/scenes/pid-*.json
 # 本機開發工具設定
 .claude/
+
+# AutoML 模型產物（含使用者資料衍生）
+data/automl/

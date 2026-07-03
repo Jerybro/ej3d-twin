@@ -265,6 +265,70 @@
     .scan-row input[type="checkbox"] { accent-color: var(--blue); }
     .scan-row .cnt { margin-left: auto; color: var(--text2); font-size: 13px; white-space: nowrap; }
 
+    /* ---------- 模型分頁 ---------- */
+    #model-empty { text-align: center; padding: 90px 20px; }
+    #model-empty h3 { font-size: 17px; font-weight: 500; color: var(--text); margin-bottom: 10px; }
+    #model-empty p { font-size: 14px; color: var(--text2); margin-bottom: 20px; }
+    .model-head { display: flex; align-items: center; gap: 12px; padding: 4px 0 14px;
+      font-size: 15px; color: var(--text); }
+    #model-table-wrap { background: var(--white); border: 1px solid var(--bdr);
+      border-radius: 8px; overflow: auto; }
+    #model-table { border-collapse: collapse; font-size: 14px; width: 100%; }
+    #model-table th { text-align: left; padding: 12px 14px; color: var(--text2);
+      font-weight: 500; font-size: 13px; border-bottom: 1px solid var(--bdr); white-space: nowrap; }
+    #model-table td { padding: 12px 14px; color: var(--text); border-bottom: 1px solid var(--bdr);
+      white-space: nowrap; }
+    #model-table tr:last-child td { border-bottom: none; }
+    #model-table tbody tr { cursor: pointer; }
+    #model-table tbody tr:hover td { background: var(--bg); }
+    #model-table .st-done { color: var(--ok); }
+    #model-table .st-training { color: var(--blue); }
+    #model-table .st-error { color: var(--danger); }
+    #model-table .del { color: var(--danger); cursor: pointer; font-size: 13px; }
+    #model-detail { margin-top: 20px; background: var(--white); border: 1px solid var(--bdr);
+      border-radius: 8px; padding: 20px; }
+    #model-detail h3 { font-size: 16px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
+    #model-detail .md-sub { font-size: 13px; color: var(--text2); margin-bottom: 14px; }
+    .md-metrics { border-collapse: collapse; font-size: 14px; margin-bottom: 20px; }
+    .md-metrics th, .md-metrics td { border: 1px solid var(--bdr); padding: 8px 16px; text-align: right; }
+    .md-metrics th { background: var(--bg); color: var(--text2); font-weight: 500; }
+    .md-metrics td:first-child, .md-metrics th:first-child { text-align: left; }
+    .md-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .md-chart { border: 1px solid var(--bdr); border-radius: 8px; padding: 12px; }
+    .md-chart.wide { grid-column: 1 / -1; }
+    .md-chart h4 { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 8px; }
+    .md-chart canvas { width: 100%; height: 300px; display: block; }
+
+    /* 建模精靈 */
+    .wiz-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(6, 16, 39, 0.4);
+      display: none; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 48px 0; }
+    .wiz-overlay.open { display: flex; }
+    .wiz-box { width: min(680px, 92vw); background: var(--white); border-radius: 8px;
+      border: 1px solid var(--bdr); padding: 26px 30px; }
+    .wiz-box h3 { font-size: 17px; font-weight: 500; color: var(--text); margin-bottom: 16px; }
+    .wiz-box label { display: block; font-size: 14px; color: var(--text); margin: 12px 0 6px; }
+    .wiz-mode { border: 1px solid var(--bdr); border-radius: 6px; padding: 14px 16px;
+      margin-bottom: 10px; cursor: pointer; }
+    .wiz-mode.on { border-color: var(--blue); background: rgba(4, 106, 251, 0.05); }
+    .wiz-mode b { font-size: 15px; font-weight: 500; color: var(--text); }
+    .wiz-mode p { font-size: 13px; color: var(--text2); margin-top: 4px; line-height: 1.6; }
+    #wiz-features { max-height: 180px; overflow-y: auto; border: 1px solid var(--bdr);
+      border-radius: 5px; padding: 8px 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; }
+    #wiz-features label { display: flex; align-items: center; gap: 7px; margin: 3px 0;
+      font-size: 13.5px; color: var(--text); cursor: pointer; }
+    #wiz-features input { accent-color: var(--blue); }
+    .wiz-params-head { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+    .wiz-tune { display: flex; align-items: center; gap: 7px; font-size: 13.5px !important;
+      color: var(--text2) !important; margin: 0 !important; cursor: pointer; }
+    .wiz-params { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-top: 8px; }
+    .wiz-params .wp label { font-size: 13px; color: var(--text2); margin: 0 0 4px; }
+    .wiz-params .wp input, .wiz-params .wp select { width: 100%; padding: 6px 10px;
+      border: 1px solid var(--bdr); border-radius: 4px; font-size: 14px; font-family: inherit; }
+    .wiz-actions { display: flex; gap: 10px; margin-top: 22px; }
+    .wiz-actions button { padding: 8px 22px; border-radius: 4px; cursor: pointer; font-size: 14px;
+      border: 1px solid var(--bdr); background: var(--white); color: var(--text); }
+    .wiz-actions .save { background: var(--blue); border-color: var(--blue); color: #fff; }
+
     /* 框選面板 */
     .brush-panel {
       position: fixed; z-index: 70; width: 248px;
@@ -354,6 +418,9 @@
     <button class="nav-tab active" data-view="explore">
       <svg class="ic" viewBox="0 0 24 24"><path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/></svg>
       探索分析</button>
+    <button class="nav-tab" data-view="model">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v10"/></svg>
+      模型</button>
     <span class="spacer"></span>
     <button class="nav-tab" id="btn-theme" title="圖表主題色">
       <svg class="ic" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 1 10-10c0 2.2-1.8 4-4 4h-2.5a2 2 0 0 0-1.5 3.3c.3.4.5.9.5 1.4A1.3 1.3 0 0 1 13 22z"/><circle cx="7.5" cy="11.5" r="0.5"/><circle cx="10.5" cy="7.5" r="0.5"/><circle cx="15" cy="7.5" r="0.5"/></svg>
@@ -445,7 +512,67 @@
       <div id="table-wrap"><table id="ds-table"></table></div>
       <div class="pager" id="table-pager"></div>
     </div>
+    <div id="model-view" style="display:none">
+      <div id="model-empty" style="display:none">
+        <h3>目前沒有預測模型</h3>
+        <p>點擊「建立模型」，替你的資料集建立第一個預測模型（以目前篩選後的資料訓練）</p>
+        <button class="ctl-btn" id="btn-model-empty">建立模型</button>
+      </div>
+      <div id="model-main" style="display:none">
+        <div class="model-head">
+          <span>訓練模型比較——所有模型在 5 折交叉驗證下的表現</span>
+          <span class="spacer"></span>
+          <button class="ctl-btn" id="btn-new-model">建立模型</button>
+        </div>
+        <div id="model-table-wrap"><table id="model-table"></table></div>
+        <div id="model-detail" style="display:none"></div>
+      </div>
+    </div>
   </main>
+
+  <!-- 建模精靈 -->
+  <div class="wiz-overlay" id="model-wizard">
+    <div class="wiz-box">
+      <button class="zoom-close" id="wiz-close">×</button>
+      <div id="wiz-step-mode">
+        <h3>請選擇模型建立方式</h3>
+        <div class="wiz-mode on" data-mode="auto">
+          <b>全自動建立</b>
+          <p>一次以九種演算法各建立一個模型，並自動調參，訓練後以交叉驗證排名</p>
+        </div>
+        <div class="wiz-mode" data-mode="manual">
+          <b>手動建立</b>
+          <p>自選演算法，並可自訂超參數（Tukey 不提供的進階控制）</p>
+        </div>
+        <div class="wiz-actions">
+          <button class="save" id="wiz-mode-ok">確定</button>
+          <button id="wiz-mode-cancel">取消</button>
+        </div>
+      </div>
+      <div id="wiz-step-form" style="display:none">
+        <h3 id="wiz-form-title">建立新模型</h3>
+        <label>模型名稱</label>
+        <input class="mini" id="wiz-name" placeholder="留空自動命名" autocomplete="off" />
+        <label>預測目標（應變數）</label>
+        <select class="mini" id="wiz-target"></select>
+        <label>自變數（預設全選）</label>
+        <div id="wiz-features"></div>
+        <div id="wiz-manual-only">
+          <label>演算法</label>
+          <select class="mini" id="wiz-algo"></select>
+          <div class="wiz-params-head">
+            <label style="margin:0">超參數（留空＝預設值）</label>
+            <label class="wiz-tune"><input type="checkbox" id="wiz-tune" /> 自動調參（隨機搜尋覆蓋手動值）</label>
+          </div>
+          <div id="wiz-params" class="wiz-params"></div>
+        </div>
+        <div class="wiz-actions">
+          <button class="save" id="wiz-submit">開始訓練</button>
+          <button id="wiz-back">上一步</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <aside id="drawer">
     <div class="drawer-tabs">

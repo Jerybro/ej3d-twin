@@ -94,12 +94,14 @@ async function refreshState() {
 document.querySelectorAll('.nav-tab[data-view]').forEach((t) => t.addEventListener('click', () => {
   document.querySelectorAll('.nav-tab[data-view]').forEach((x) => x.classList.remove('active'));
   t.classList.add('active');
-  const isExplore = t.dataset.view === 'explore';
-  $('explore-view').style.display = isExplore ? '' : 'none';
-  $('dataset-view').style.display = isExplore ? 'none' : '';
+  const v = t.dataset.view;
+  $('explore-view').style.display = v === 'explore' ? '' : 'none';
+  $('dataset-view').style.display = v === 'dataset' ? '' : 'none';
+  $('model-view').style.display = v === 'model' ? '' : 'none';
   // 次導航依頁切換：探索分析＝二維目標下拉；資料集＝每頁顯示
-  $('target-select').style.display = isExplore ? '' : 'none';
-  $('perpage-wrap').style.display = isExplore ? 'none' : 'flex';
+  $('target-select').style.display = v === 'explore' ? '' : 'none';
+  $('perpage-wrap').style.display = v === 'dataset' ? 'flex' : 'none';
+  if (v === 'model') renderModels();
 }));
 
 $('perpage-select').addEventListener('change', async (e) => {
@@ -793,6 +795,236 @@ function renderColMgr() {
     el.addEventListener('click', () => toggleHide(el.dataset.col)));
 }
 $('col-search').addEventListener('input', renderColMgr);
+
+// ------------------------------------------------------------ 模型（AutoML，對標 Tukey fitting）
+let ALGO_META = null;      // /api/automl/algos
+let modelPollTimer = null;
+const apiML = (path, opts) => fetch(`/api/automl/${sid}${path}`, opts).then((r) => {
+  if (!r.ok) return r.json().then((e) => { throw new Error(e.detail ?? r.status); });
+  return r.json();
+});
+
+async function loadAlgoMeta() {
+  if (!ALGO_META) ALGO_META = (await fetch('/api/automl/algos').then((r) => r.json())).algos;
+  return ALGO_META;
+}
+
+async function renderModels() {
+  if (!sid) return;
+  clearTimeout(modelPollTimer);
+  const models = await apiML('/models');
+  $('model-empty').style.display = models.length ? 'none' : '';
+  $('model-main').style.display = models.length ? '' : 'none';
+  if (models.length) {
+    const fmt = (m, k) => m.metrics_cv ? m.metrics_cv[k] : '—';
+    const stName = { done: '完成', training: '訓練中…', error: '失敗' };
+    $('model-table').innerHTML = `<thead><tr>
+      <th>排名</th><th>模型</th><th>目標</th><th>演算法</th>
+      <th>RMSE</th><th>MAE</th><th>MAAPE</th><th>R²</th>
+      <th>狀態</th><th>建立時間</th><th></th></tr></thead><tbody>${
+      models.map((m, i) => `<tr data-id="${m.id}">
+        <td>${m.status === 'done' ? `#${i + 1}` : ''}</td>
+        <td>${m.name}</td><td>${m.target}</td>
+        <td>${(ALGO_META?.find((a) => a.key === m.algo)?.name) ?? m.algo}${m.auto_tune ? '（自動調參）' : ''}</td>
+        <td>${fmt(m, 'rmse')}</td><td>${fmt(m, 'mae')}</td><td>${fmt(m, 'maape')}</td><td>${fmt(m, 'r2')}</td>
+        <td class="st-${m.status}" title="${m.error ?? ''}">${stName[m.status] ?? m.status}</td>
+        <td>${m.created}</td>
+        <td><span class="del" data-id="${m.id}">刪除</span></td></tr>`).join('')}</tbody>`;
+    $('model-table').querySelectorAll('.del').forEach((el) => el.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await apiML(`/models/${el.dataset.id}`, { method: 'DELETE' });
+      $('model-detail').style.display = 'none';
+      await renderModels();
+    }));
+    $('model-table').querySelectorAll('tbody tr').forEach((tr) => tr.addEventListener('click', () =>
+      openModelDetail(tr.dataset.id)));
+    if (models.some((m) => m.status === 'training')) modelPollTimer = setTimeout(renderModels, 2500);
+  }
+}
+
+async function openModelDetail(mid) {
+  const m = await apiML(`/models/${mid}`);
+  if (m.status !== 'done') { alert(m.status === 'error' ? `訓練失敗：${m.error}` : '訓練中，請稍候'); return; }
+  await loadAlgoMeta();
+  const algoName = ALGO_META.find((a) => a.key === m.algo)?.name ?? m.algo;
+  const row = (label, mt) => `<tr><td>${label}</td><td>${mt.rmse}</td><td>${mt.mae}</td><td>${mt.maape}</td><td>${mt.r2}</td></tr>`;
+  const tuned = m.tuned_params ? `<div class="md-sub">自動調參結果：${
+    Object.entries(m.tuned_params).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : v}`).join('、')}</div>` : '';
+  $('model-detail').innerHTML = `
+    <h3>${m.name}</h3>
+    <div class="md-sub">${algoName}｜訓練資料 ${m.n_rows.toLocaleString()} 筆 ${m.features.length} 特徵｜目標 ${m.target}</div>
+    ${tuned}
+    <table class="md-metrics">
+      <tr><th>模型指標</th><th>RMSE</th><th>MAE</th><th>MAAPE</th><th>R²</th></tr>
+      ${row('交叉驗證集', m.metrics_cv)}${row('訓練資料集', m.metrics_train)}
+    </table>
+    <div class="md-charts">
+      <div class="md-chart"><h4>模型準確度 Actual – Predicted</h4><canvas id="md-pa"></canvas></div>
+      <div class="md-chart"><h4>模型準確度 Actual – Error</h4><canvas id="md-err"></canvas></div>
+      <div class="md-chart wide"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>
+    </div>`;
+  $('model-detail').style.display = '';
+  requestAnimationFrame(() => {
+    drawXY($('md-pa'), m.plots.pa.actual, m.plots.pa.pred, '實際值', '預測值', true);
+    drawXY($('md-err'), m.plots.err.actual, m.plots.err.error, '實際值', '誤差值', false, true);
+    drawFI($('md-fi'), m.plots.fi.names, m.plots.fi.values);
+  });
+  $('model-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// XY 散佈（diag=對角參考線；zero=誤差零線）
+function drawXY(canvas, xs, ys, xLabel, yLabel, diag = false, zero = false) {
+  const dpr = devicePixelRatio;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '11px Inter';
+  const M = { l: 64, r: 16, t: 12, b: 44 };
+  let xlo = Math.min(...xs), xhi = Math.max(...xs);
+  let ylo = Math.min(...ys), yhi = Math.max(...ys);
+  if (diag) { xlo = ylo = Math.min(xlo, ylo); xhi = yhi = Math.max(xhi, yhi); }
+  const px = (v) => M.l + ((v - xlo) / ((xhi - xlo) || 1)) * (w - M.l - M.r);
+  const py = (v) => h - M.b - ((v - ylo) / ((yhi - ylo) || 1)) * (h - M.t - M.b);
+  ctx.textAlign = 'right';
+  niceTicks(ylo, yhi, 5).forEach((tv) => {
+    const y = py(tv);
+    ctx.strokeStyle = C_GRID; ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(w - M.r, y); ctx.stroke();
+    ctx.fillStyle = C_LABEL; ctx.fillText(fmtTick(tv), M.l - 8, y + 3.5);
+  });
+  ctx.textAlign = 'left';
+  niceTicks(xlo, xhi, 6).forEach((tv) => {
+    const x = px(tv);
+    ctx.strokeStyle = C_AXIS; ctx.beginPath(); ctx.moveTo(x, h - M.b); ctx.lineTo(x, h - M.b + 4); ctx.stroke();
+    ctx.fillStyle = C_LABEL;
+    const lb = fmtTick(tv);
+    ctx.fillText(lb, x - ctx.measureText(lb).width / 2, h - M.b + 17);
+  });
+  ctx.strokeStyle = C_AXIS;
+  ctx.beginPath(); ctx.moveTo(M.l, M.t); ctx.lineTo(M.l, h - M.b); ctx.lineTo(w - M.r, h - M.b); ctx.stroke();
+  if (diag) { ctx.strokeStyle = C_LABEL; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(px(xlo), py(xlo)); ctx.lineTo(px(xhi), py(xhi)); ctx.stroke(); ctx.setLineDash([]); }
+  if (zero) { ctx.strokeStyle = C_LABEL; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(M.l, py(0)); ctx.lineTo(w - M.r, py(0)); ctx.stroke(); ctx.setLineDash([]); }
+  ctx.fillStyle = theme().dot;
+  xs.forEach((xv, i) => { ctx.beginPath(); ctx.arc(px(xv), py(ys[i]), 2.2, 0, Math.PI * 2); ctx.fill(); });
+  ctx.fillStyle = C_LABEL;
+  ctx.fillText(xLabel, (w - ctx.measureText(xLabel).width) / 2, h - 6);
+  ctx.save(); ctx.translate(12, (h + ctx.measureText(yLabel).width) / 2); ctx.rotate(-Math.PI / 2);
+  ctx.fillText(yLabel, 0, 0); ctx.restore();
+}
+
+// Feature importance 水平條（依重要度深淺）
+function drawFI(canvas, names, values) {
+  const dpr = devicePixelRatio;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '11.5px Inter';
+  const M = { l: Math.min(280, Math.max(...names.map((n) => ctx.measureText(n).width)) + 20), r: 60, t: 8, b: 8 };
+  const maxV = Math.max(...values, 1e-12);
+  const rowH = Math.min(26, (h - M.t - M.b) / names.length);
+  names.forEach((n, i) => {
+    const y = M.t + i * rowH;
+    const bw = Math.max((values[i] / maxV) * (w - M.l - M.r), 1);
+    ctx.fillStyle = ink(values[i] / maxV);
+    ctx.fillRect(M.l, y + 3, bw, rowH - 7);
+    ctx.fillStyle = C_LABEL;
+    ctx.textAlign = 'right'; ctx.fillText(n, M.l - 8, y + rowH / 2 + 4);
+    ctx.textAlign = 'left'; ctx.fillText(String(values[i]), M.l + bw + 6, y + rowH / 2 + 4);
+  });
+  ctx.textAlign = 'left';
+}
+
+// ------------------------------------------------------------ 建模精靈
+let wizMode = 'auto';
+const openWizard = async () => {
+  await loadAlgoMeta();
+  wizMode = 'auto';
+  $('model-wizard').classList.add('open');
+  $('wiz-step-mode').style.display = '';
+  $('wiz-step-form').style.display = 'none';
+  document.querySelectorAll('.wiz-mode').forEach((c) => c.classList.toggle('on', c.dataset.mode === 'auto'));
+};
+$('btn-new-model').addEventListener('click', openWizard);
+$('btn-model-empty').addEventListener('click', openWizard);
+$('wiz-close').addEventListener('click', () => $('model-wizard').classList.remove('open'));
+$('wiz-mode-cancel').addEventListener('click', () => $('model-wizard').classList.remove('open'));
+document.querySelectorAll('.wiz-mode').forEach((c) => c.addEventListener('click', () => {
+  wizMode = c.dataset.mode;
+  document.querySelectorAll('.wiz-mode').forEach((x) => x.classList.toggle('on', x === c));
+}));
+$('wiz-back').addEventListener('click', () => {
+  $('wiz-step-form').style.display = 'none';
+  $('wiz-step-mode').style.display = '';
+});
+
+$('wiz-mode-ok').addEventListener('click', () => {
+  const numeric = state.columns.filter((c) => !c.hidden && c.name !== '__id__' &&
+    (c.dtype.startsWith('float') || c.dtype.startsWith('int')));
+  $('wiz-form-title').textContent = wizMode === 'auto'
+    ? '全自動建立——九種演算法各建一個模型（自動調參）' : '手動建立模型';
+  $('wiz-target').innerHTML = numeric.map((c) => `<option>${c.name}</option>`).join('');
+  const renderFeatures = () => {
+    const tgt = $('wiz-target').value;
+    $('wiz-features').innerHTML = numeric.filter((c) => c.name !== tgt).map((c) =>
+      `<label><input type="checkbox" checked value="${c.name}">${c.name}</label>`).join('');
+  };
+  $('wiz-target').onchange = renderFeatures;
+  renderFeatures();
+  $('wiz-manual-only').style.display = wizMode === 'manual' ? '' : 'none';
+  if (wizMode === 'manual') {
+    $('wiz-algo').innerHTML = ALGO_META.map((a) => `<option value="${a.key}" ${a.key === 'XGB' ? 'selected' : ''}>${a.name}</option>`).join('');
+    const renderParams = () => {
+      const meta = ALGO_META.find((a) => a.key === $('wiz-algo').value);
+      $('wiz-params').innerHTML = meta.params.length ? meta.params.map((p) => `
+        <div class="wp"><label>${p.label}</label>${
+        p.type === 'choice'
+          ? `<select data-key="${p.key}">${p.choices.map((c) => `<option ${c === p.default ? 'selected' : ''}>${c}</option>`).join('')}</select>`
+          : `<input data-key="${p.key}" type="${p.type === 'str' ? 'text' : 'number'}" step="any"
+               placeholder="預設 ${p.default ?? '自動'}">`}</div>`).join('')
+        : '<p class="hint" style="grid-column:1/-1">此演算法無關鍵超參數（用預設即可）</p>';
+      $('wiz-tune').disabled = !meta.tunable;
+    };
+    $('wiz-algo').onchange = renderParams;
+    renderParams();
+  }
+  $('wiz-step-mode').style.display = 'none';
+  $('wiz-step-form').style.display = '';
+});
+
+$('wiz-submit').addEventListener('click', async () => {
+  const features = [...$('wiz-features').querySelectorAll('input:checked')].map((i) => i.value);
+  if (!features.length) { alert('至少勾選一個自變數'); return; }
+  const body = {
+    mode: wizMode,
+    name: $('wiz-name').value.trim(),
+    target: $('wiz-target').value,
+    features,
+  };
+  if (wizMode === 'manual') {
+    body.algo = $('wiz-algo').value;
+    body.auto_tune = $('wiz-tune').checked;
+    body.params = {};
+    $('wiz-params').querySelectorAll('[data-key]').forEach((el) => {
+      if (el.value !== '') body.params[el.dataset.key] = el.value;
+    });
+  }
+  $('wiz-submit').disabled = true;
+  try {
+    await apiML('/models', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    $('model-wizard').classList.remove('open');
+    await renderModels();
+  } catch (e) {
+    alert(`建立失敗：${e.message}`);
+  } finally {
+    $('wiz-submit').disabled = false;
+  }
+});
 
 // ------------------------------------------------------------ 資料健檢
 $('btn-health').addEventListener('click', async () => {

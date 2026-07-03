@@ -445,9 +445,9 @@ def _anomaly_xt(sid: str, rec: dict):
     if tcol:
         t = (view[tcol] - pd.Timestamp(0)) / pd.Timedelta(seconds=1)
         data = pd.concat([t.rename("__t__"), feats], axis=1).dropna()
-        return data[rec["features"]].to_numpy(dtype=float), data["__t__"].to_numpy(dtype=float)
+        return data[rec["features"]].to_numpy(dtype=float), data["__t__"].to_numpy(dtype=float), True
     data = feats.dropna()
-    return data.to_numpy(dtype=float), np.arange(len(data), dtype=float)
+    return data.to_numpy(dtype=float), np.arange(len(data), dtype=float), False
 
 
 def _fit_anomaly(algo: str, params: dict, Xtr: np.ndarray) -> dict:
@@ -515,6 +515,27 @@ def _health_from_risk(risk: np.ndarray, thr: float) -> np.ndarray:
     return np.clip(100.0 * (1.0 - risk / max(2.0 * thr, 1e-9)), 0, 100)
 
 
+def _health_forecast(t: np.ndarray, health: np.ndarray, has_time: bool):
+    """7 天健康預測（Edge 摘要卡）：日均聚合 → Theil-Sen 穩健趨勢 → 外推 7 天。
+    無時間欄或有效天數 <3 時「天」無定義，回 None。"""
+    if not has_time or len(t) < 20:
+        return None
+    day = 86400.0
+    days = np.floor(np.asarray(t) / day)
+    uniq = np.unique(days)[-30:]  # 最近 30 個有資料的日
+    if len(uniq) < 3:
+        return None
+    ys = np.array([health[days == d].mean() for d in uniq])
+    from scipy.stats import theilslopes
+    slope, intercept, *_ = theilslopes(ys, uniq)
+    fut = uniq[-1] + np.arange(1, 8, dtype=float)
+    pred = np.clip(intercept + slope * fut, 0, 100)
+    return {"t": ((fut + 0.5) * day).tolist(),  # 每日中點時間戳
+            "score": np.round(pred, 1).tolist(),
+            "day7": round(float(pred[-1]), 1),
+            "slope": round(float(slope), 2)}
+
+
 def _anomaly_events(risk: np.ndarray, thr: float, t: np.ndarray,
                     X: np.ndarray, features: list, mu, sd) -> list:
     """連續超標段 → 故障事件列表（起訖、峰值風險、主導感測器）。"""
@@ -553,7 +574,7 @@ def _fdc_charts(X: np.ndarray, t: np.ndarray, features: list, mu, sd) -> dict:
 def _run_anomaly(sid: str, rec: dict):
     """異常偵測訓練：健康基準擬合→風險值→健康分數 0-100＋FDC 管制圖＋故障事件（PHM 呈現）。"""
     import joblib
-    X, t = _anomaly_xt(sid, rec)
+    X, t, has_time = _anomaly_xt(sid, rec)
     if len(X) < 30:
         raise ValueError(f"有效樣本僅 {len(X)} 筆（<30），不足以建立基準")
     meta = _fit_anomaly(rec["algo"], rec.get("params"), X)
@@ -566,9 +587,11 @@ def _run_anomaly(sid: str, rec: dict):
     n_tail = max(5, len(health) // 20)
     health_now = round(float(health[-n_tail:].mean()), 1)
     events = _anomaly_events(risk, thr, t, X, rec["features"], mu, sd)
+    pred = _health_forecast(t, health, has_time)
     rec["metrics_cv"] = {"health_now": health_now, "threshold": round(thr, 5),
                          "exceed_pct": round(float(exceed.mean()) * 100, 3),
-                         "n_events": len(events)}
+                         "n_events": len(events),
+                         "health_7d": pred["day7"] if pred else None}
     rec["metrics_train"] = rec["metrics_cv"]
     rec["val_desc"] = "健康基準＝現行視圖；預設門檻＝P99"
     step = max(1, len(risk) // 900)
@@ -576,6 +599,7 @@ def _run_anomaly(sid: str, rec: dict):
         "risk": {"t": t[::step].tolist(), "risk": np.round(risk[::step], 5).tolist(),
                  "threshold": round(thr, 5)},
         "health": {"t": t[::step].tolist(), "score": np.round(health[::step], 1).tolist()},
+        "health_pred": pred,
         "fdc": _fdc_charts(X, t, rec["features"], mu, sd),
     }
     rec["events"] = events
@@ -886,7 +910,7 @@ def evaluate(sid: str, mid: str) -> dict:
         pack = joblib.load(_pipe_path(sid, mid)) if _pipe_path(sid, mid).exists() else None
         if not pack:
             raise HTTPException(422, "此模型未保存訓練成品——請重新訓練")
-        X, t = _anomaly_xt(sid, rec)
+        X, t, _has_time = _anomaly_xt(sid, rec)
         if len(X) < 5:
             raise HTTPException(422, f"現行視圖有效樣本僅 {len(X)} 筆，無法評估")
         risk = np.asarray(_anomaly_score(rec["algo"], pack["meta"], X), float)
@@ -965,22 +989,24 @@ def threshold(sid: str, mid: str, body: dict) -> dict:
     method = body.get("method", "p99")
     if method not in THRESH_METHODS:
         raise HTTPException(422, f"未知門檻方法 {method}")
-    X, t = _anomaly_xt(sid, rec)
+    X, t, has_time = _anomaly_xt(sid, rec)
     risk = np.asarray(_anomaly_score(rec["algo"], pack["meta"], X), float)
     name, fn = THRESH_METHODS[method]
     thr = fn(risk)
     exceed = risk > thr
-    # 套用：更新模型建議門檻，並重算健康分數/事件（皆依門檻定義）
+    # 套用：更新模型建議門檻，並重算健康分數/事件/7 天預測（皆依門檻定義）
     if body.get("apply"):
         health = _health_from_risk(risk, thr)
         mu = np.asarray(pack.get("mu") or X.mean(axis=0), float)
         sd = np.maximum(np.asarray(pack.get("sd") or X.std(axis=0), float), 1e-9)
         events = _anomaly_events(risk, thr, t, X, rec["features"], mu, sd)
+        pred = _health_forecast(t, health, has_time)
         n_tail = max(5, len(health) // 20)
         rec["metrics_cv"] = {"health_now": round(float(health[-n_tail:].mean()), 1),
                              "threshold": round(thr, 5),
                              "exceed_pct": round(float(exceed.mean()) * 100, 3),
-                             "n_events": len(events)}
+                             "n_events": len(events),
+                             "health_7d": pred["day7"] if pred else None}
         rec["metrics_train"] = rec["metrics_cv"]
         rec["events"] = events
         step = max(1, len(risk) // 900)
@@ -988,6 +1014,7 @@ def threshold(sid: str, mid: str, body: dict) -> dict:
         plots["risk"] = {"t": t[::step].tolist(), "risk": np.round(risk[::step], 5).tolist(),
                          "threshold": round(thr, 5)}
         plots["health"] = {"t": t[::step].tolist(), "score": np.round(health[::step], 1).tolist()}
+        plots["health_pred"] = pred
         rec["plots"] = plots
         rec["val_desc"] = f"健康基準＝現行視圖；門檻＝{name}"
         _save(sid, rec)

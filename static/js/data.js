@@ -917,7 +917,8 @@ async function openModelDetail(mid) {
       <div class="sum-card">
         <div class="sc-label">AI 健康分數（近期）</div>
         <div class="sc-big" style="color:${healthColor(mcv.health_now ?? 0)}">${mcv.health_now ?? '—'}</div>
-        <div class="sc-sub">${(mcv.health_now ?? 0) >= 70 ? '正常' : (mcv.health_now ?? 0) >= 40 ? '注意' : '危急'}｜0–100</div>
+        <div class="sc-sub">${(mcv.health_now ?? 0) >= 70 ? '正常' : (mcv.health_now ?? 0) >= 40 ? '注意' : '危急'}｜0–100${
+          mcv.health_7d != null ? `｜7 天後預測 <span style="color:${healthColor(mcv.health_7d)};font-weight:600">${mcv.health_7d}</span>` : ''}</div>
       </div>
       <div class="sum-card">
         <div class="sc-label">故障事件</div>
@@ -1010,7 +1011,7 @@ async function openModelDetail(mid) {
     if (cls) drawCM($('md-cm'), m.plots.cm.labels, m.plots.cm.matrix);
     else if (isTs) drawTSF($('md-ts'), m.plots.tsf);
     else if (isAn) {
-      if (m.plots.health) drawHealth($('md-health'), m.plots.health);
+      if (m.plots.health) drawHealth($('md-health'), m.plots.health, m.plots.health_pred);
       drawRisk($('md-risk'), m.plots.risk);
       const fdc = m.plots.fdc;
       if (fdc?.cols?.length) {
@@ -1088,11 +1089,12 @@ function _timeAxes(canvas, t, ylo, yhi, yTicks = 5) {
   return { ctx, M, w, h, px, py, isTime };
 }
 
-// 健康分數趨勢（0–100，Tukey PHM Edge 同款：綠正常/黃注意/紅危急區帶）
-function drawHealth(canvas, hd) {
-  const g = _timeAxes(canvas, hd.t, 0, 100, 5);
+// 健康分數趨勢（0–100，Tukey PHM Edge 同款：綠正常/黃注意/紅危急區帶＋7 天預測虛線）
+function drawHealth(canvas, hd, pred) {
+  const tAll = pred?.t?.length ? hd.t.concat(pred.t) : hd.t;
+  const g = _timeAxes(canvas, tAll, 0, 100, 5);
   if (!g) return;
-  const { ctx, M, w, px, py } = g;
+  const { ctx, M, w, h, px, py } = g;
   // 三色狀態區帶（淡）
   const band = (lo, hi, color) => {
     ctx.fillStyle = color;
@@ -1109,6 +1111,27 @@ function drawHealth(canvas, hd) {
     ctx.moveTo(px(hd.t[i - 1]), py(hd.score[i - 1]));
     ctx.lineTo(px(hd.t[i]), py(hd.score[i]));
     ctx.stroke();
+  }
+  // 7 天預測：現在分隔虛線＋預測虛線（從最後實際點接出）
+  if (pred?.t?.length) {
+    const tNow = hd.t[hd.t.length - 1];
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = C_AXIS;
+    ctx.beginPath(); ctx.moveTo(px(tNow), M.t); ctx.lineTo(px(tNow), h - M.b); ctx.stroke();
+    ctx.setLineDash([6, 5]);
+    const pt = [tNow, ...pred.t];
+    const ps = [hd.score[hd.score.length - 1], ...pred.score];
+    for (let i = 1; i < ps.length; i++) {
+      ctx.strokeStyle = healthColor(Math.min(ps[i - 1], ps[i]));
+      ctx.beginPath();
+      ctx.moveTo(px(pt[i - 1]), py(ps[i - 1]));
+      ctx.lineTo(px(pt[i]), py(ps[i]));
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.fillStyle = C_LABEL;
+    const lb = `7 天預測 ${pred.day7 ?? pred.score[pred.score.length - 1]}`;
+    ctx.fillText(lb, Math.min(px(tNow) + 6, w - M.r - ctx.measureText(lb).width), M.t + 12);
   }
   ctx.lineWidth = 1;
   ctx.fillStyle = C_LABEL;

@@ -875,22 +875,20 @@ async function openModelDetail(mid) {
   const tuned = m.tuned_params ? `<div class="md-sub">自動調參結果：${
     Object.entries(m.tuned_params).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : v}`).join('、')}</div>` : '';
   const charts = cls ? `
-      <div class="md-chart"><h4>混淆矩陣 Confusion Matrix（交叉驗證）</h4><canvas id="md-cm"></canvas></div>
+      <div class="md-chart"><h4>混淆矩陣 Confusion Matrix（驗證集）</h4><canvas id="md-cm"></canvas></div>
       <div class="md-chart"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>` : isTs ? `
-      <div class="md-chart wide"><h4>時序預測 Actual vs Predicted（走前驗證）</h4><canvas id="md-ts"></canvas></div>
-      <div class="md-chart"><h4>模型準確度 Actual – Predicted</h4><canvas id="md-pa"></canvas></div>
-      <div class="md-chart"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>` : `
+      <div class="md-chart wide"><h4>時序預測——訓練脈絡＋外推 vs 實際</h4><canvas id="md-ts"></canvas></div>` : `
       <div class="md-chart"><h4>模型準確度 Actual – Predicted</h4><canvas id="md-pa"></canvas></div>
       <div class="md-chart"><h4>模型準確度 Actual – Error</h4><canvas id="md-err"></canvas></div>
       <div class="md-chart wide"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>`;
-  const taskName = cls ? '分類' : isTs ? `時序預測（往後 ${m.ts?.horizon ?? 1} 筆、落遲 ${m.ts?.lags ?? 8} 期）` : '迴歸';
+  const taskName = cls ? '分類' : isTs ? '時序預測（單變量）' : '迴歸';
   $('model-detail').innerHTML = `
     <h3>${m.name}</h3>
     <div class="md-sub">${algoName}｜${taskName}｜訓練資料 ${m.n_rows.toLocaleString()} 筆｜目標 ${m.target}</div>
     ${tuned}
     <table class="md-metrics">
       <tr><th>模型指標</th>${heads.map((h) => `<th>${h}</th>`).join('')}</tr>
-      ${metricRow(isTs ? '走前驗證（時序切分）' : '交叉驗證集', m.metrics_cv, cls)}${metricRow('訓練資料集', m.metrics_train, cls)}
+      ${metricRow(m.val_desc ?? '交叉驗證集', m.metrics_cv, cls)}${metricRow('訓練資料集', m.metrics_train, cls)}
       <tbody id="ev-metric-row"></tbody>
     </table>
     <div class="md-charts">${charts}</div>
@@ -928,14 +926,12 @@ async function openModelDetail(mid) {
   $('model-detail').style.display = '';
   requestAnimationFrame(() => {
     if (cls) drawCM($('md-cm'), m.plots.cm.labels, m.plots.cm.matrix);
-    else if (isTs) {
-      drawTS($('md-ts'), m.plots.ts.t, m.plots.ts.actual, m.plots.ts.pred);
-      drawXY($('md-pa'), m.plots.pa.actual, m.plots.pa.pred, '實際值', '預測值', true);
-    } else {
+    else if (isTs) drawTSF($('md-ts'), m.plots.tsf);
+    else {
       drawXY($('md-pa'), m.plots.pa.actual, m.plots.pa.pred, '實際值', '預測值', true);
       drawXY($('md-err'), m.plots.err.actual, m.plots.err.error, '實際值', '誤差值', false, true);
     }
-    drawFI($('md-fi'), m.plots.fi.names, m.plots.fi.values);
+    if (m.plots.fi && $('md-fi')) drawFI($('md-fi'), m.plots.fi.names, m.plots.fi.values);
     if (m.evaluation) renderEvaluation(m, m.evaluation);
   });
   bindModelApps(m);
@@ -958,8 +954,63 @@ function renderEvaluation(m, ev) {
       <canvas id="ev-chart"></canvas></div>`;
   requestAnimationFrame(() => {
     if (cls) drawCM($('ev-chart'), ev.cm.labels, ev.cm.matrix);
-    else if (isTs) drawTS($('ev-chart'), ev.ts.t, ev.ts.actual, ev.ts.pred);
+    else if (isTs) drawTSF($('ev-chart'), ev.tsf);
     else drawXY($('ev-chart'), ev.pa.actual, ev.pa.pred, '實際值', '預測值', true);
+  });
+}
+
+// 時序預測疊圖：訓練脈絡（淺灰）＋測試實際（深灰）＋外推預測（主題色）＋切分虛線
+function drawTSF(canvas, tsf) {
+  const dpr = devicePixelRatio;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '11px Inter';
+  const M = { l: 64, r: 16, t: 14, b: 44 };
+  const tAll = tsf.t_hist.concat(tsf.t_test);
+  const yAll = tsf.y_hist.concat(tsf.y_test, tsf.pred);
+  const xlo = Math.min(...tAll), xhi = Math.max(...tAll);
+  const ylo = Math.min(...yAll), yhi = Math.max(...yAll);
+  const px = (v) => M.l + ((v - xlo) / ((xhi - xlo) || 1)) * (w - M.l - M.r);
+  const py = (v) => h - M.b - ((v - ylo) / ((yhi - ylo) || 1)) * (h - M.t - M.b);
+  ctx.textAlign = 'right';
+  niceTicks(ylo, yhi, 5).forEach((tv) => {
+    const y = py(tv);
+    ctx.strokeStyle = C_GRID; ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(w - M.r, y); ctx.stroke();
+    ctx.fillStyle = C_LABEL; ctx.fillText(fmtTick(tv), M.l - 8, y + 3.5);
+  });
+  ctx.textAlign = 'left';
+  Array.from({ length: 6 }, (_, i) => xlo + ((xhi - xlo) * i) / 5).forEach((tv) => {
+    const x = px(tv);
+    ctx.strokeStyle = C_AXIS; ctx.beginPath(); ctx.moveTo(x, h - M.b); ctx.lineTo(x, h - M.b + 4); ctx.stroke();
+    ctx.fillStyle = C_LABEL;
+    const lb = fmtTime(tv);
+    ctx.fillText(lb, x - ctx.measureText(lb).width / 2, h - M.b + 18);
+  });
+  ctx.strokeStyle = C_AXIS;
+  ctx.beginPath(); ctx.moveTo(M.l, M.t); ctx.lineTo(M.l, h - M.b); ctx.lineTo(w - M.r, h - M.b); ctx.stroke();
+  const line = (ts, ys, color, width) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width;
+    ctx.beginPath();
+    ys.forEach((v, i) => { const x = px(ts[i]), y = py(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke(); ctx.lineWidth = 1;
+  };
+  line(tsf.t_hist, tsf.y_hist, '#C3C8D0', 1.2);
+  line(tsf.t_test, tsf.y_test, '#6B7280', 1.4);
+  line(tsf.t_test, tsf.pred, theme().selL, 1.8);
+  // 訓練／測試切分虛線
+  const xSplit = px(tsf.t_test[0]);
+  ctx.strokeStyle = C_LABEL; ctx.setLineDash([5, 4]);
+  ctx.beginPath(); ctx.moveTo(xSplit, M.t); ctx.lineTo(xSplit, h - M.b); ctx.stroke();
+  ctx.setLineDash([]);
+  // 圖例
+  const legend = [['訓練段', '#C3C8D0'], ['實際', '#6B7280'], ['外推預測', theme().selL]];
+  let lx = w - 250;
+  legend.forEach(([txt, color]) => {
+    ctx.fillStyle = color; ctx.fillRect(lx, M.t, 16, 3);
+    ctx.fillStyle = C_LABEL; ctx.fillText(txt, lx + 20, M.t + 5);
+    lx += 30 + ctx.measureText(txt).width + 20;
   });
 }
 
@@ -1222,7 +1273,7 @@ $('wiz-mode-ok').addEventListener('click', () => {
   const stringCols = state.columns.filter((c) => !c.hidden && c.name !== '__id__' &&
     !c.dtype.startsWith('float') && !c.dtype.startsWith('int') && !c.dtype.startsWith('datetime'));
   $('wiz-form-title').textContent = wizMode === 'auto'
-    ? '全自動建立——九種演算法各建一個模型（自動調參）' : '手動建立模型';
+    ? '全自動建立——全部適用演算法各建一個模型（自動調參）' : '手動建立模型';
   $('wiz-target').innerHTML = numeric.map((c) => `<option>${c.name}</option>`).join('')
     + stringCols.map((c) => `<option value="${c.name}">${c.name}（分類）</option>`).join('');
   const renderFeatures = () => {
@@ -1230,35 +1281,67 @@ $('wiz-mode-ok').addEventListener('click', () => {
     $('wiz-features').innerHTML = numeric.filter((c) => c.name !== tgt).map((c) =>
       `<label><input type="checkbox" checked value="${c.name}">${c.name}</label>`).join('');
   };
-  $('wiz-target').onchange = renderFeatures;
+  $('wiz-target').onchange = () => { renderFeatures(); renderAlgos(); };
   renderFeatures();
-  // 任務型態：時序預測需要時間欄；外生變數可留空
+  // 任務型態：時序預測需要時間欄；時序＝單變量（特徵工程請於上傳前完成）
   const hasTime = state.columns.some((c) => !c.hidden && c.dtype.startsWith('datetime'));
   $('wiz-task').value = 'auto';
   $('wiz-task').querySelector('[value="timeseries"]').disabled = !hasTime;
-  $('wiz-ts-cfg').style.display = 'none';
-  $('wiz-task').onchange = () => {
+  const taskKey = () => {
+    if ($('wiz-task').value === 'timeseries') return 'timeseries';
+    const tgt = state.columns.find((c) => c.name === $('wiz-target').value);
+    const isNum = tgt && (tgt.dtype.startsWith('float') || tgt.dtype.startsWith('int'));
+    return isNum ? 'regression' : 'classification';
+  };
+  const syncTask = () => {
     const isTs = $('wiz-task').value === 'timeseries';
-    $('wiz-ts-cfg').style.display = isTs ? 'flex' : 'none';
-    $('wiz-feat-label').textContent = isTs ? '外生變數（可留空——僅用目標自身落遲）' : '自變數（預設全選）';
+    $('wiz-ts-cfg').style.display = isTs ? '' : 'none';
+    $('wiz-val-cfg').style.display = isTs ? 'none' : '';
+    $('wiz-feat-label').style.display = isTs ? 'none' : '';
+    $('wiz-features').style.display = isTs ? 'none' : '';
+    renderAlgos();
+  };
+  $('wiz-task').onchange = syncTask;
+  // 驗證方法動態參數
+  const VAL_HINTS = {
+    kfold: 'K 折：資料分 K 份輪流當驗證集；不洗牌＝依資料順序切。',
+    holdout: '保留法：切出一段當測試集；勾洗牌＝隨機抽樣、不勾＝取資料末端（時間排序資料建議不勾）。',
+    timesplit: '時序切分：只用過去預測未來的走前驗證，永不洗牌；折數＝輸入框數字。',
+  };
+  const syncVal = () => {
+    const m = $('wiz-val-method').value;
+    $('wiz-val-k-wrap').style.display = m === 'holdout' ? 'none' : '';
+    $('wiz-val-ts-wrap').style.display = m === 'holdout' ? '' : 'none';
+    $('wiz-val-shuffle-wrap').style.display = m === 'timesplit' ? 'none' : '';
+    $('wiz-val-hint').textContent = VAL_HINTS[m];
+  };
+  $('wiz-val-method').onchange = syncVal;
+  syncVal();
+
+  const renderAlgos = () => {
+    if (wizMode !== 'manual') return;
+    const tk = taskKey();
+    const list = ALGO_META.filter((a) => a.tasks.includes(tk));
+    const def = tk === 'timeseries' ? 'ARIMA' : 'XGB';
+    $('wiz-algo').innerHTML = list.map((a) =>
+      `<option value="${a.key}" ${a.key === def ? 'selected' : ''}>${a.name}</option>`).join('');
+    renderParams();
+  };
+  const renderParams = () => {
+    const meta = ALGO_META.find((a) => a.key === $('wiz-algo').value);
+    if (!meta) { $('wiz-params').innerHTML = ''; return; }
+    $('wiz-params').innerHTML = meta.params.length ? meta.params.map((p) => `
+      <div class="wp"><label>${p.label}</label>${
+      p.type === 'choice'
+        ? `<select data-key="${p.key}">${p.choices.map((c) => `<option ${c === p.default ? 'selected' : ''}>${c}</option>`).join('')}</select>`
+        : `<input data-key="${p.key}" type="${p.type === 'str' ? 'text' : 'number'}" step="any"
+             placeholder="預設 ${p.default ?? '自動'}">`}</div>`).join('')
+      : '<p class="hint" style="grid-column:1/-1">此演算法無關鍵超參數（用預設即可）</p>';
+    $('wiz-tune').disabled = !meta.tunable || taskKey() === 'timeseries';
   };
   $('wiz-manual-only').style.display = wizMode === 'manual' ? '' : 'none';
-  if (wizMode === 'manual') {
-    $('wiz-algo').innerHTML = ALGO_META.map((a) => `<option value="${a.key}" ${a.key === 'XGB' ? 'selected' : ''}>${a.name}</option>`).join('');
-    const renderParams = () => {
-      const meta = ALGO_META.find((a) => a.key === $('wiz-algo').value);
-      $('wiz-params').innerHTML = meta.params.length ? meta.params.map((p) => `
-        <div class="wp"><label>${p.label}</label>${
-        p.type === 'choice'
-          ? `<select data-key="${p.key}">${p.choices.map((c) => `<option ${c === p.default ? 'selected' : ''}>${c}</option>`).join('')}</select>`
-          : `<input data-key="${p.key}" type="${p.type === 'str' ? 'text' : 'number'}" step="any"
-               placeholder="預設 ${p.default ?? '自動'}">`}</div>`).join('')
-        : '<p class="hint" style="grid-column:1/-1">此演算法無關鍵超參數（用預設即可）</p>';
-      $('wiz-tune').disabled = !meta.tunable;
-    };
-    $('wiz-algo').onchange = renderParams;
-    renderParams();
-  }
+  if (wizMode === 'manual') $('wiz-algo').onchange = renderParams;
+  syncTask();
   $('wiz-step-mode').style.display = 'none';
   $('wiz-step-form').style.display = '';
 });
@@ -1275,8 +1358,16 @@ $('wiz-submit').addEventListener('click', async () => {
   };
   if (isTs) {
     body.task_type = 'timeseries';
-    body.horizon = +$('wiz-horizon').value || 1;
-    body.lags = +$('wiz-lags').value || 8;
+    body.test_size = (+$('wiz-ts-test').value || 20) / 100;
+    body.features = [];
+  } else {
+    body.validation = {
+      method: $('wiz-val-method').value,
+      k: +$('wiz-val-k').value || 5,
+      test_size: (+$('wiz-val-test').value || 20) / 100,
+      n_splits: +$('wiz-val-k').value || 5,
+      shuffle: $('wiz-val-shuffle').checked,
+    };
   }
   if (wizMode === 'manual') {
     body.algo = $('wiz-algo').value;

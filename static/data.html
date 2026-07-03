@@ -545,7 +545,7 @@
         <h3>請選擇模型建立方式</h3>
         <div class="wiz-mode on" data-mode="auto">
           <b>全自動建立</b>
-          <p>一次以九種演算法各建立一個模型，並自動調參，訓練後以交叉驗證排名</p>
+          <p>一次以全部適用演算法各建立一個模型並自動調參，訓練後依驗證表現排名</p>
         </div>
         <div class="wiz-mode" data-mode="manual">
           <b>手動建立</b>
@@ -565,13 +565,27 @@
         <label>任務型態</label>
         <select class="mini" id="wiz-task">
           <option value="auto">自動判定（數值目標＝迴歸、類別目標＝分類）</option>
-          <option value="timeseries">時序預測（以目標自身落遲＋外生變數預測未來）</option>
+          <option value="timeseries">時序預測（ARIMA 等時序演算法，單變量）</option>
         </select>
-        <div id="wiz-ts-cfg" style="display:none" class="opt-row">
-          <div class="wp" style="flex:1"><label style="margin:0 0 4px;font-size:13px;color:var(--text2)">預測步數 horizon（往後幾筆）</label>
-            <input class="mini" id="wiz-horizon" type="number" min="1" max="96" value="1" style="margin:0"></div>
-          <div class="wp" style="flex:1"><label style="margin:0 0 4px;font-size:13px;color:var(--text2)">落遲期數 lags（回看幾筆）</label>
-            <input class="mini" id="wiz-lags" type="number" min="1" max="48" value="8" style="margin:0"></div>
+        <div id="wiz-ts-cfg" style="display:none">
+          <p class="hint" style="margin:2px 0 8px">時序模型以時間排序的目標序列訓練；
+            衍生特徵（落遲、移動平均等）請於上傳前在資料中準備好，改用迴歸任務。</p>
+          <div class="wp" style="max-width:280px"><label style="margin:0 0 4px;font-size:13px;color:var(--text2)">驗證：保留末端比例（%）</label>
+            <input class="mini" id="wiz-ts-test" type="number" min="5" max="50" value="20" style="margin:0"></div>
+        </div>
+        <div id="wiz-val-cfg">
+          <label>驗證方法</label>
+          <div class="opt-row" style="margin-top:0">
+            <select class="mini" id="wiz-val-method" style="width:auto;margin:0">
+              <option value="kfold">K 折交叉驗證</option>
+              <option value="holdout">保留法（訓練／測試切分）</option>
+              <option value="timesplit">時序切分（走前驗證，不洗牌）</option>
+            </select>
+            <div class="wp" id="wiz-val-k-wrap"><input class="mini" id="wiz-val-k" type="number" min="2" max="10" value="5" style="margin:0;width:90px" title="折數 K"></div>
+            <div class="wp" id="wiz-val-ts-wrap" style="display:none"><input class="mini" id="wiz-val-test" type="number" min="5" max="50" value="20" style="margin:0;width:110px" title="測試比例 %"></div>
+            <label class="wiz-tune" id="wiz-val-shuffle-wrap" style="align-self:center"><input type="checkbox" id="wiz-val-shuffle" checked> 洗牌</label>
+          </div>
+          <p class="hint" id="wiz-val-hint" style="margin-top:4px">K 折：資料分 K 份輪流當驗證集；不洗牌＝依資料順序切。</p>
         </div>
         <label id="wiz-feat-label">自變數（預設全選）</label>
         <div id="wiz-features"></div>

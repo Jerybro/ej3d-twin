@@ -368,6 +368,17 @@ from .aiassist import router as aiassist_router  # noqa: E402
 
 app.include_router(aiassist_router)
 
+# --------------------------------------------------------- 登入與權限（Google OAuth）
+from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
+
+from .auth import auth_guard, secret_key  # noqa: E402
+from .auth import router as auth_router  # noqa: E402
+
+app.include_router(auth_router)
+app.middleware("http")(auth_guard)                      # 內層：登入守衛
+app.add_middleware(SessionMiddleware, secret_key=secret_key(),
+                   same_site="lax", https_only=False)   # 外層：簽名 cookie session
+
 # --------------------------------------------------------- P&ID 圖面管理
 UPLOADS_DIR = BASE_DIR / "uploads"
 PID_DIR = UPLOADS_DIR / "pid"

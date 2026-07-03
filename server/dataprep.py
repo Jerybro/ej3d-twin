@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -180,7 +180,7 @@ FORMAT_SPEC = ("上傳格式規定：CSV（UTF-8）或 Excel，第一列為欄�
 
 
 @router.post("/upload")
-async def upload(file: UploadFile = File(...)) -> dict:
+async def upload(request: Request, file: UploadFile = File(...)) -> dict:
     name = (file.filename or "").lower()
     raw = await file.read()
     if len(raw) > 50 * 1024 * 1024:
@@ -222,8 +222,14 @@ async def upload(file: UploadFile = File(...)) -> dict:
     sid = uuid.uuid4().hex[:8]
     df.to_parquet(DATA_DIR / f"{sid}.parquet")
     _save_steps(sid, [])
+    # 原始上傳檔完整保存（可自「我的資料集」重新下載）
+    ext = Path(name).suffix or ".csv"
+    (DATA_DIR / f"{sid}.source{ext}").write_bytes(raw)
+    from .auth import current_user
+    u = current_user(request)
     meta = {"filename": file.filename, "time_col": str(time_col),
-            "uploaded_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")}
+            "uploaded_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "owner": (u or {}).get("email"), "n_rows": int(len(df))}
     (DATA_DIR / f"{sid}.meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     return {"sid": sid, **meta, **_summary(df),
             "preview": json.loads(df.head(MAX_PREVIEW).to_json(orient="records", date_format="iso", force_ascii=False))}
@@ -232,6 +238,63 @@ async def upload(file: UploadFile = File(...)) -> dict:
 def _load_meta(sid: str) -> dict:
     p = DATA_DIR / f"{sid}.meta.json"
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+
+
+# ------------------------------------------------------ 我的資料集（儲存管理）
+def _visible(meta: dict, user: dict | None) -> bool:
+    """可見性：無 owner 的舊資料＝公共；有 owner＝本人或 admin。"""
+    owner = meta.get("owner")
+    if not owner:
+        return True
+    if not user:
+        return False
+    return user.get("role") == "admin" or user.get("email") == owner
+
+
+@router.get("/sessions")
+def list_sessions(request: Request) -> list:
+    from .auth import current_user
+    u = current_user(request)
+    out = []
+    for p in sorted(DATA_DIR.glob("*.meta.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+        sid = p.name.split(".")[0]
+        meta = json.loads(p.read_text(encoding="utf-8"))
+        if not _visible(meta, u):
+            continue
+        n_models = len(list((DATA_DIR / "automl" / sid).glob("*.json"))) if (DATA_DIR / "automl" / sid).exists() else 0
+        has_src = bool(list(DATA_DIR.glob(f"{sid}.source.*")))
+        out.append({"sid": sid, "filename": meta.get("filename"), "owner": meta.get("owner"),
+                    "uploaded_at": meta.get("uploaded_at"), "n_rows": meta.get("n_rows"),
+                    "n_models": n_models, "has_source": has_src})
+    return out
+
+
+@router.delete("/{sid}")
+def delete_session(sid: str, request: Request) -> dict:
+    from .auth import current_user
+    meta = _load_meta(sid)
+    if not meta:
+        raise HTTPException(404, "資料集不存在")
+    u = current_user(request)
+    if meta.get("owner") and not (u and (u.get("role") == "admin" or u.get("email") == meta.get("owner"))):
+        raise HTTPException(403, "只有上傳者或管理員可以刪除這個資料集")
+    for p in DATA_DIR.glob(f"{sid}.*"):
+        p.unlink(missing_ok=True)
+    ml = DATA_DIR / "automl" / sid
+    if ml.exists():
+        import shutil
+        shutil.rmtree(ml, ignore_errors=True)
+    return {"ok": True}
+
+
+@router.get("/{sid}/source")
+def download_source(sid: str):
+    from fastapi.responses import FileResponse
+    hits = list(DATA_DIR.glob(f"{sid}.source.*"))
+    if not hits:
+        raise HTTPException(404, "此資料集未保存原始檔（登入儲存功能上線前上傳的舊資料）")
+    meta = _load_meta(sid)
+    return FileResponse(hits[0], filename=meta.get("filename") or hits[0].name)
 
 
 @router.get("/{sid}/state")

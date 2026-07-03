@@ -75,8 +75,48 @@ async function enterSession(newSid, filename) {
 const urlSid = new URLSearchParams(location.search).get('sid');
 if (urlSid) {
   sid = urlSid;
-  api('/state').then(() => enterSession(urlSid)).catch(() => { sid = null; });
+  api('/state').then(() => enterSession(urlSid)).catch(() => { sid = null; loadMySets(); });
+} else {
+  loadMySets();
 }
+
+// ------------------------------------------------------------ 我的資料集（儲存管理）
+async function loadMySets() {
+  let sets;
+  try { sets = await fetch('/api/data/sessions').then((r) => (r.ok ? r.json() : [])); } catch { return; }
+  if (!sets.length) { $('mysets-card').style.display = 'none'; return; }
+  $('mysets-card').style.display = '';
+  $('mysets-table').innerHTML = `
+    <tr><th>檔名</th><th>筆數</th><th>模型</th><th>上傳時間</th><th>擁有者</th><th></th><th></th><th></th></tr>
+    ${sets.map((s) => `<tr data-sid="${s.sid}">
+      <td>${s.filename ?? s.sid}</td><td>${s.n_rows?.toLocaleString() ?? '—'}</td>
+      <td>${s.n_models || '—'}</td><td>${s.uploaded_at ?? '—'}</td><td>${s.owner ?? '共用'}</td>
+      <td><a href="/data?sid=${s.sid}">開啟</a></td>
+      <td>${s.has_source ? `<a href="/api/data/${s.sid}/source">下載原檔</a>` : ''}</td>
+      <td><span class="del ms-del" data-sid="${s.sid}" style="color:var(--danger);cursor:pointer">刪除</span></td>
+    </tr>`).join('')}`;
+  // 刪除採兩段式確認（不用原生 confirm——會凍住 renderer）
+  $('mysets-table').querySelectorAll('.ms-del').forEach((el) => el.addEventListener('click', async () => {
+    if (el.dataset.armed !== '1') {
+      el.dataset.armed = '1';
+      el.textContent = '確認刪除？';
+      setTimeout(() => { el.dataset.armed = '0'; el.textContent = '刪除'; }, 3000);
+      return;
+    }
+    const res = await fetch(`/api/data/${el.dataset.sid}`, { method: 'DELETE' });
+    if (res.ok) await loadMySets();
+    else el.textContent = (await res.json()).detail ?? '刪除失敗';
+  }));
+}
+
+// 登入身分顯示與登出（AUTH_DISABLED 時顯示未啟用）
+fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((me) => {
+  if (!me) return;
+  $('mm-user').textContent = me.auth_disabled ? '帳號：未啟用登入' : `帳號：${me.email}（${me.role}）`;
+  if (!me.auth_disabled) $('mm-logout').style.display = '';
+}).catch(() => {});
+$('mm-logout').addEventListener('click', () => { location.href = '/logout'; });
+$('mm-mysets').addEventListener('click', () => { location.href = '/data'; });
 
 // ------------------------------------------------------------ 狀態
 async function refreshState() {

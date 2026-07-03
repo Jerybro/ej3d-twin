@@ -495,6 +495,10 @@
       <button id="mm-report">下載分析報表</button>
       <hr>
       <button id="mm-new">上傳新資料集</button>
+      <button id="mm-mysets">我的資料集</button>
+      <hr>
+      <div class="mh" id="mm-user">帳號：—</div>
+      <button id="mm-logout" style="display:none">登出</button>
     </div>
   </aside>
 
@@ -526,6 +530,10 @@
       <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.xlsm" />
     </label>
     <div id="upload-err"></div>
+    <div class="format-card" id="mysets-card" style="display:none">
+      <h3>我的資料集——之前上傳的檔案都保存在這，點「開啟」繼續工作</h3>
+      <div style="overflow-x:auto"><table style="width:100%" id="mysets-table"></table></div>
+    </div>
     <div class="format-card">
       <h3>上傳格式規定</h3>
       <ul>

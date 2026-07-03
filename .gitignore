@@ -12,6 +12,7 @@ quality_daily*.csv
 uploads/
 # P&ID 解析衍生場景含客戶位號，不進版控
 data/scenes/pid-*.json
+data/pid_batch_status.json
 
 # 產出物（可由程式重新生成）
 exports/*.usda

@@ -405,6 +405,21 @@ def pid_parse_endpoint(filename: str) -> dict:
     return {"scene_id": slug, **result["stats"]}
 
 
+@app.post("/api/pid/parse_all")
+def pid_parse_all() -> dict:
+    """批次解析全部圖面 → 單圖草稿 ×N + TA32 整廠合併場景（背景執行）。"""
+    from .pid_batch import start_batch_thread
+
+    return start_batch_thread()
+
+
+@app.get("/api/pid/parse_all/status")
+def pid_parse_all_status() -> dict:
+    from .pid_batch import read_status
+
+    return read_status()
+
+
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 app.mount("/scans", StaticFiles(directory=SCANS_DIR), name="scans")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

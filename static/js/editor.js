@@ -43,9 +43,34 @@ const ground = new THREE.Mesh(
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
-const grid = new THREE.GridHelper(80, 40, 0x2a3844, 0x1f2a33);
+let grid = new THREE.GridHelper(80, 40, 0x2a3844, 0x1f2a33);
 grid.position.y = 0.02;
 scene.add(grid);
+
+// 地坪自適應：場景範圍超出預設 80×60 時放大（P&ID 整廠合併場景會很大）
+function fitGround(equipList) {
+  let w = 80, d = 60;
+  for (const eq of equipList) {
+    w = Math.max(w, Math.abs(eq.pos[0]) * 2 + 20);
+    d = Math.max(d, Math.abs(eq.pos[2]) * 2 + 20);
+  }
+  w = Math.ceil(w / 20) * 20; d = Math.ceil(d / 20) * 20;
+  if (ground.geometry.parameters.width === w && ground.geometry.parameters.height === d) return;
+  ground.geometry.dispose();
+  ground.geometry = new THREE.PlaneGeometry(w, d);
+  scene.remove(grid);
+  grid.geometry.dispose();
+  grid = new THREE.GridHelper(Math.max(w, d), Math.max(w, d) / 2, 0x2a3844, 0x1f2a33);
+  grid.position.y = 0.02;
+  scene.add(grid);
+  camera.far = Math.max(300, Math.max(w, d) * 2.5);
+  camera.updateProjectionMatrix();
+  if (w > 80 || d > 60) {  // 大場景：把鏡頭拉到能看到全場的高度
+    const span = Math.max(w, d);
+    camera.position.set(span * 0.3, span * 0.35, span * 0.45);
+    controls.target.set(0, 0, 0);
+  }
+}
 
 const transform = new TransformControls(camera, renderer.domElement);
 transform.addEventListener('dragging-changed', (e) => {
@@ -188,6 +213,7 @@ function loadSceneData(data, id) {
   sceneId = id;
   for (const eq of allEquipment()) buildEquipment(eq);
   sceneData.pipes.forEach((pipe, i) => buildPipe(pipe, i));
+  fitGround([...allEquipment()]);
   updateTopbar();
   selectNone();
 }

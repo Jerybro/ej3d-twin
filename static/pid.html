@@ -79,6 +79,12 @@
         <input type="file" id="file-input" accept=".pdf" multiple />
       </label>
 
+      <div class="section-title">整廠場景</div>
+      <button class="mini-btn primary" id="parse-all-btn" style="width:100%;padding:8px 10px">
+        全部解析建模（批次 OCR → 整廠場景）</button>
+      <div id="batch-progress" style="display:none;margin-top:8px;font-size:12px;color:var(--dim);line-height:1.6"></div>
+      <div id="merged-links" style="display:none;margin-top:8px;gap:6px"></div>
+
       <div class="section-title">圖面清單</div>
       <div id="file-list"><span style="color:var(--dim);font-size:12px">尚無圖面</span></div>
 
@@ -178,6 +184,51 @@
           草稿哲學：寧可多抓給你刪。低信心項多為誤抓，開編輯器點選後 Delete 即可；
           位置佈局按圖面相對位置自動排開，可拖曳調整。</p>`;
     }
+
+    // ------------------------------------------------ 批次解析 → 整廠場景
+    const allBtn = document.getElementById('parse-all-btn');
+    const progEl = document.getElementById('batch-progress');
+    const mergedEl = document.getElementById('merged-links');
+    let pollTimer = null;
+
+    function renderBatchStatus(st) {
+      if (st.state === 'running') {
+        allBtn.disabled = true;
+        progEl.style.display = '';
+        progEl.textContent = `批次解析中 ${st.done}/${st.total}｜${st.current || ''}（已 ${st.elapsed || 0} 秒）`;
+        if (!pollTimer) pollTimer = setInterval(pollBatch, 3000);
+      } else {
+        allBtn.disabled = false;
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        if (st.state === 'done') {
+          progEl.style.display = '';
+          progEl.textContent = `批次完成：${st.sheets} 張圖｜整廠 ${st.equipment} 台設備、${st.instruments} 個儀錶`
+            + (Object.keys(st.errors || {}).length ? `｜失敗 ${Object.keys(st.errors).length} 張` : '');
+          if (st.merged_scene_id) {
+            mergedEl.style.display = 'flex';
+            mergedEl.innerHTML =
+              `<a class="mini-btn primary" href="/twin/editor?scene=${st.merged_scene_id}">整廠場景：編輯器開啟</a>
+               <a class="mini-btn" href="/twin?scene=${st.merged_scene_id}" target="_blank">孿生檢視</a>`;
+          }
+        } else {
+          progEl.style.display = 'none';
+        }
+      }
+    }
+
+    async function pollBatch() {
+      const st = await fetch('/api/pid/parse_all/status').then(r => r.json()).catch(() => null);
+      if (st) { renderBatchStatus(st); if (st.state === 'done' && !pollTimer) refresh(); }
+    }
+
+    allBtn.addEventListener('click', async () => {
+      allBtn.disabled = true;
+      progEl.style.display = '';
+      progEl.textContent = '啟動批次解析…（每張約 20-60 秒，可離開此頁）';
+      await fetch('/api/pid/parse_all', { method: 'POST' }).catch(() => null);
+      if (!pollTimer) pollTimer = setInterval(pollBatch, 3000);
+    });
+    pollBatch();  // 頁面載入時還原批次狀態（進行中/已完成的整廠場景入口）
 
     const drop = document.getElementById('drop');
     const input = document.getElementById('file-input');

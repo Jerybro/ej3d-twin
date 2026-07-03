@@ -24,8 +24,15 @@ INST_RE = re.compile(
     r"AI|AT|AR|HV|XV|VS|GD|SD|SFS|FSL|FAL|FALL|LSH|LSL|LAH|LAL|PAH|PAL|PDAH|STR|HS|ZS)"
     r"-?\d{3,5}[A-Z]?$"
 )
-# 設備位號：1-2 個字母 + 3 碼數字（可帶字尾 A/B/AB 或 -1）
-EQUIP_RE = re.compile(r"^[A-Z]{1,2}-?\d{3}(?:[A-Z]{1,2}|-\d)?$")
+# 設備位號：單字母（限已知設備類型）+ 3 碼數字 + 白名單字尾。
+# TA32 全 30 張實測的三條硬規則（各擋一族系統性誤抓）：
+# 1. 前綴限單字母且在 TYPE_MAP 內——雙字母前綴全是管線配件（BV 閥/SG 視鏡/
+#    SC 取樣/RD 破裂盤/RO 限流孔板），不值得出現在 3D 場景；I/N/X/Y/J 等
+#    非設備字母則多為線號/雜訊誤讀
+# 2. 字尾白名單 A/B/AB/S/SA/SB/-n——開放任意兩字母會收進管徑誤讀
+#    （3/4"P → 374P → B374P）與 RS485MO 這類通訊標註
+# 3. 數字不得以 0 開頭——真位號無 0xx，PFD 小字誤讀常見 099/009
+EQUIP_RE = re.compile(r"^[A-Z]-?[1-9]\d{2}(?:A|B|AB|S|SA|SB|-\d)?$")
 
 # 首字母 → 編輯器素材類型
 TYPE_MAP = {
@@ -239,29 +246,14 @@ def _classify(hits):
         if INST_RE.match(t):
             if t not in insts or conf > insts[t][2]:
                 insts[t] = (cx, cy, conf)
-        elif EQUIP_RE.match(t) and conf >= EQUIP_MIN_CONF:
+        elif EQUIP_RE.match(t) and conf >= EQUIP_MIN_CONF and t[0] in TYPE_MAP:
             if t not in equips or conf > equips[t][2]:
                 equips[t] = (cx, cy, conf)
     return equips, insts
 
 
-def _layout(equips: dict, width: float, height: float, span_x=56.0, span_z=36.0, min_gap=3.5):
-    """圖面像素座標 → 場景 (x, z)，正規化置中＋最小間距推開。"""
-    if not equips:
-        return {}
-    xs = [v[0] for v in equips.values()]
-    ys = [v[1] for v in equips.values()]
-    x0, x1 = min(xs), max(xs)
-    y0, y1 = min(ys), max(ys)
-    sx = span_x / max(x1 - x0, 1)
-    sz = span_z / max(y1 - y0, 1)
-    s = min(sx, sz)
-    pos = {}
-    for tag, (cx, cy, conf) in equips.items():
-        x = (cx - (x0 + x1) / 2) * s
-        z = (cy - (y0 + y1) / 2) * s  # PDF y 向下 = 場景 +z（俯視）
-        pos[tag] = [round(x, 2), 0, round(z, 2)]
-    # 最小間距推開（簡單迭代）
+def _push_apart(pos: dict, min_gap: float = 3.5):
+    """就地把 {tag: [x,0,z]} 推到彼此最小間距外（簡單迭代）。"""
     tags = list(pos)
     for _ in range(30):
         moved = False
@@ -284,6 +276,25 @@ def _layout(equips: dict, width: float, height: float, span_x=56.0, span_z=36.0,
     for t in tags:
         pos[t] = [round(pos[t][0], 2), 0, round(pos[t][2], 2)]
     return pos
+
+
+def _layout(equips: dict, width: float, height: float, span_x=56.0, span_z=36.0, min_gap=3.5):
+    """圖面像素座標 → 場景 (x, z)，正規化置中＋最小間距推開。"""
+    if not equips:
+        return {}
+    xs = [v[0] for v in equips.values()]
+    ys = [v[1] for v in equips.values()]
+    x0, x1 = min(xs), max(xs)
+    y0, y1 = min(ys), max(ys)
+    sx = span_x / max(x1 - x0, 1)
+    sz = span_z / max(y1 - y0, 1)
+    s = min(sx, sz)
+    pos = {}
+    for tag, (cx, cy, conf) in equips.items():
+        x = (cx - (x0 + x1) / 2) * s
+        z = (cy - (y0 + y1) / 2) * s  # PDF y 向下 = 場景 +z（俯視）
+        pos[tag] = [round(x, 2), 0, round(z, 2)]
+    return _push_apart(pos, min_gap)
 
 
 def parse_pid(filename: str) -> dict:

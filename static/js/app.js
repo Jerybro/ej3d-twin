@@ -244,14 +244,34 @@ function autoAdaptQuality() {
 const plantGroup = new THREE.Group();
 scene.add(plantGroup);
 
+// 地坪自適應：預設 70×45，場景（如 P&ID 整廠合併）超出時放大
+let GROUND_W = 70, GROUND_D = 45;
+for (const unit of plantData.plant.units) {
+  for (const eq of unit.equipment) {
+    GROUND_W = Math.max(GROUND_W, Math.abs(eq.pos[0]) * 2 + 20);
+    GROUND_D = Math.max(GROUND_D, Math.abs(eq.pos[2]) * 2 + 20);
+  }
+}
+GROUND_W = Math.ceil(GROUND_W / 10) * 10;
+GROUND_D = Math.ceil(GROUND_D / 10) * 10;
+if (GROUND_W > 70 || GROUND_D > 45) {  // 大場景：視距/霧/遠平面一起放大
+  const span = Math.max(GROUND_W, GROUND_D);
+  camera.far = Math.max(300, span * 2.5);
+  camera.position.set(span * 0.35, span * 0.3, span * 0.5);
+  camera.updateProjectionMatrix();
+  controls.maxDistance = span * 1.2;
+  // 就地改霧參數（DARK_FOG 持有同一實例，深色/實景切換才不會還原成小場景霧）
+  scene.fog.near = span * 0.9;
+  scene.fog.far = span * 2.2;
+}
 const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(70, 45),
+  new THREE.PlaneGeometry(GROUND_W, GROUND_D),
   new THREE.MeshStandardMaterial({ color: 0x1c232b, roughness: 1 })
 );
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 plantGroup.add(ground);
-const grid = new THREE.GridHelper(70, 35, 0x2a3844, 0x1f2a33);
+const grid = new THREE.GridHelper(Math.max(GROUND_W, GROUND_D), Math.max(GROUND_W, GROUND_D) / 2, 0x2a3844, 0x1f2a33);
 grid.position.y = 0.02;
 plantGroup.add(grid);
 

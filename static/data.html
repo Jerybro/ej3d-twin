@@ -13,6 +13,7 @@
       --blue: #046AFB; --bg: #F6F7FA; --white: #ffffff;
       --bdr: #DBDDE0; --text: #061027; --text2: #555555;
       --danger: #d03050; --ok: #18a058;
+      --green: #059669; --green-deep: #052E22;   /* 資料/AI 識別色（圖表同系） */
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; background: var(--bg); color: var(--text);
@@ -33,6 +34,12 @@
       text-decoration: none;
     }
     .nav-back:hover { background: var(--bg); }
+    .brand {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px; border-radius: 7px; margin-right: 4px;
+      background: var(--green-deep); color: #fff;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.5px; user-select: none;
+    }
     #ds-name {
       font-size: 15px; color: var(--text); max-width: 220px; padding: 6px 12px;
       border: 1px solid var(--bdr); border-radius: 4px;
@@ -45,7 +52,7 @@
       font-size: 15px; color: var(--text); border-radius: 4px;
     }
     .nav-tab:hover { background: var(--bg); }
-    .nav-tab.active { color: var(--blue); }
+    .nav-tab.active { color: var(--blue); background: rgba(4, 106, 251, 0.07); }
     .spacer { flex: 1; }
     #btn-more {
       display: inline-flex; align-items: center; gap: 7px;
@@ -67,9 +74,19 @@
       padding: 7px 20px; border-radius: 4px; border: 1px solid var(--bdr);
       background: var(--white); color: var(--text); font-size: 15px; cursor: pointer;
     }
-    .ctl-btn:hover { border-color: var(--blue); color: var(--blue); }
+    .ctl-btn:hover { border-color: var(--blue); color: var(--blue); background: #F5F9FF; }
     #perpage-wrap { display: none; align-items: center; gap: 8px; font-size: 15px; color: var(--text2); }
     #perpage-wrap select { max-width: none; }
+    .uicon {
+      width: 34px; height: 34px; border: 1px solid var(--bdr); border-radius: 4px;
+      background: var(--white); color: var(--text2); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .uicon:hover { border-color: var(--blue); color: var(--blue); }
+    .uicon:disabled { opacity: 0.35; pointer-events: none; }
+    button:focus-visible, select:focus-visible, input:focus-visible {
+      outline: 2px solid rgba(4, 106, 251, 0.35); outline-offset: 1px;
+    }
 
     /* ---------- 上傳頁 ---------- */
     #upload-view { max-width: 680px; margin: 56px auto; padding: 0 20px; }
@@ -78,11 +95,11 @@
       text-align: center; color: var(--text2); font-size: 15px; cursor: pointer;
       background: var(--white); display: block;
     }
-    .drop:hover, .drop.over { border-color: var(--blue); color: var(--blue); }
+    .drop:hover, .drop.over { border-color: var(--green); color: var(--green); background: #F4FBF8; }
     .drop input { display: none; }
     .format-card {
       margin-top: 20px; background: var(--white); border: 1px solid var(--bdr);
-      border-radius: 5px; padding: 20px 24px;
+      border-radius: 8px; padding: 20px 24px;
     }
     .format-card h3 { font-size: 15px; font-weight: 500; color: var(--text); margin-bottom: 12px; }
     .format-card ul { margin: 0 0 14px 18px; color: var(--text2); font-size: 14px; line-height: 2; }
@@ -96,9 +113,11 @@
     #card-wall { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
     @media (max-width: 1100px) { #card-wall { grid-template-columns: repeat(2, 1fr); } }
     .card {
-      background: var(--white); border: 1px solid var(--bdr); border-radius: 5px;
+      background: var(--white); border: 1px solid var(--bdr); border-radius: 8px;
       overflow: hidden; display: flex; flex-direction: column;
+      transition: border-color 0.15s, box-shadow 0.15s;
     }
+    .card:hover { border-color: #C9CFD6; box-shadow: 0 4px 16px rgba(6, 16, 39, 0.06); }
     .card-head {
       background: var(--bg); border-bottom: 1px solid var(--bdr);
       padding: 12px 14px; position: relative;
@@ -123,7 +142,7 @@
     /* 卡片 popover */
     .popover {
       position: absolute; top: 40px; right: 8px; z-index: 40; width: 268px;
-      background: var(--white); border: 1px solid var(--bdr); border-radius: 5px;
+      background: var(--white); border: 1px solid var(--bdr); border-radius: 6px;
       box-shadow: 0 6px 24px rgba(6, 16, 39, 0.12); padding: 14px; text-align: left;
     }
     .pop-tabs { display: flex; border-bottom: 1px solid var(--bdr); margin-bottom: 10px; }
@@ -181,7 +200,7 @@
       padding: 6px 12px; border-radius: 4px; border: 1px solid var(--bdr);
       background: var(--white); color: var(--text); cursor: pointer; font-size: 14px;
     }
-    .pager button:hover { border-color: var(--blue); color: var(--blue); }
+    .pager button:hover { border-color: var(--blue); color: var(--blue); background: #F5F9FF; }
     .pager button:disabled { opacity: 0.4; pointer-events: none; }
     .pager .pinfo { font-size: 14px; color: var(--text2); margin: 0 8px; }
 
@@ -248,8 +267,8 @@
 
     /* 框選面板 */
     .brush-panel {
-      position: fixed; z-index: 70; width: 232px;
-      background: var(--white); border: 1px solid var(--bdr); border-radius: 5px;
+      position: fixed; z-index: 70; width: 248px;
+      background: var(--white); border: 1px solid var(--bdr); border-radius: 6px;
       box-shadow: 0 6px 24px rgba(6, 16, 39, 0.14); padding: 12px;
     }
     .brush-panel .bp-range { font-size: 13.5px; color: var(--text); line-height: 1.7;
@@ -259,7 +278,7 @@
       flex: 1; padding: 6px 0; border-radius: 4px; cursor: pointer; font-size: 13.5px;
       border: 1px solid var(--bdr); background: var(--white); color: var(--text);
     }
-    .brush-panel [data-a="exclude"] { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .brush-panel [data-a="exclude"] { background: var(--green); border-color: var(--green); color: #fff; }
     .brush-panel .bp-actions button:hover { filter: brightness(0.96); }
 
     /* 更多選單 */
@@ -297,6 +316,7 @@
     <a class="nav-back" href="/" title="回平台首頁">
       <svg class="ic" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
     </a>
+    <span class="brand" title="EJ Process Intelligence">EJ</span>
     <span id="ds-name">資料前處理</span>
     <span class="nav-sep"></span>
     <button class="nav-tab" data-view="dataset">
@@ -337,6 +357,12 @@
         <option>15</option><option>30</option><option>50</option>
       </select> 筆
     </span>
+    <button class="uicon" id="btn-undo" disabled title="復原（Ctrl+Z）">
+      <svg class="ic sm" viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></svg>
+    </button>
+    <button class="uicon" id="btn-redo" disabled title="還原（Ctrl+Y）">
+      <svg class="ic sm" viewBox="0 0 24 24"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 15-6.7L21 13"/></svg>
+    </button>
     <button class="ctl-btn" id="btn-drawer">
       <svg class="ic sm" viewBox="0 0 24 24"><path d="M22 4H2l8 9.2V19l4 2v-7.8z"/></svg>
       資料預處理</button>

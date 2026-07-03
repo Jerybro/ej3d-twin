@@ -154,6 +154,7 @@ $('template-input').addEventListener('change', async () => {
   const f = $('template-input').files[0];
   if (!f || !sid) return;
   const steps = JSON.parse(await f.text());
+  snapshotSteps();
   await api('/apply_template', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ steps }),
@@ -164,6 +165,7 @@ $('template-input').addEventListener('change', async () => {
 // ------------------------------------------------------------ 卡片牆
 async function renderWall() {
   const res = await api(`/cards?target=${encodeURIComponent(target)}&page=${wallPage}&per_page=${PER_WALL}`);
+  res.cards.forEach((c) => { c.target = res.target; });   // 矩形框選 Y 欄
   const wall = $('card-wall');
   wall.innerHTML = res.cards.map((c, i) => `
     <div class="card" data-col="${c.col}">
@@ -210,12 +212,15 @@ function renderPager(el, page, pages, go) {
   el.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => go(+b.dataset.p)));
 }
 
-// 卡片繪圖 — 墨色系（使用者指定：圖表不用藍，黑灰依密度深淺）＋完整軸刻度＋框選
+// 卡片繪圖 — 綠黑 AI 風（使用者指定：預設綠色、依密度深淺）＋完整軸刻度＋框選
 const C_AXIS = '#061027';
 const C_LABEL = '#555555';
 const C_GRID = '#ECEEF2';
-const INK_LO = [182, 188, 198];  // #B6BCC6 低柱
-const INK_HI = [6, 16, 39];      // #061027 高柱
+const INK_LO = [183, 212, 196];  // #B7D4C4 淺灰綠（低柱）
+const INK_HI = [4, 46, 34];      // #042E22 墨綠（高柱）
+const C_DOT = 'rgba(5, 95, 70, 0.5)';          // 散佈點 翡翠綠
+const C_SEL_FILL = 'rgba(16, 185, 129, 0.12)'; // 框選帶
+const C_SEL_LINE = 'rgba(5, 150, 105, 0.65)';
 const ink = (t) => `rgb(${INK_LO.map((lo, i) => Math.round(lo + (INK_HI[i] - lo) * t)).join(',')})`;
 const GEOM = new WeakMap();      // canvas → 幾何映射（框選 px→值）
 
@@ -261,7 +266,7 @@ function drawCard(canvas, card, big = false, selPx = null) {
     xlo = Math.min(...xn); xhi = Math.max(...xn);
     ylo = Math.min(...card.y); yhi = Math.max(...card.y);
   }
-  GEOM.set(canvas, { card, big, M, w, h, plotW, xlo, xhi });
+  GEOM.set(canvas, { card, big, M, w, h, plotW, plotH, xlo, xhi, ylo, yhi });
   const px = (v) => M.l + ((v - xlo) / ((xhi - xlo) || 1)) * plotW;
   const py = (v) => h - M.b - ((v - ylo) / ((yhi - ylo) || 1)) * plotH;
 
@@ -318,15 +323,24 @@ function drawCard(canvas, card, big = false, selPx = null) {
     ctx.fillStyle = C_LABEL;
     ctx.fillText(txt, (w - ctx.measureText(txt).width) / 2, h - 6);
   };
-  // 框選選取帶（互動元素，用主藍）
+  // 框選選取帶/矩形：selPx = [x0,x1]（X 帶）或 [x0,y0,x1,y1]（矩形）
   const selBand = () => {
     if (!selPx) return;
-    const a = Math.max(Math.min(selPx[0], selPx[1]), M.l);
-    const b = Math.min(Math.max(selPx[0], selPx[1]), w - M.r);
-    ctx.fillStyle = 'rgba(4, 106, 251, 0.10)';
-    ctx.fillRect(a, M.t, b - a, plotH);
-    ctx.strokeStyle = 'rgba(4, 106, 251, 0.6)';
-    ctx.strokeRect(a + 0.5, M.t + 0.5, b - a - 1, plotH - 1);
+    let a, b, t, btm;
+    if (selPx.length === 4) {
+      a = Math.max(Math.min(selPx[0], selPx[2]), M.l);
+      b = Math.min(Math.max(selPx[0], selPx[2]), w - M.r);
+      t = Math.max(Math.min(selPx[1], selPx[3]), M.t);
+      btm = Math.min(Math.max(selPx[1], selPx[3]), h - M.b);
+    } else {
+      a = Math.max(Math.min(selPx[0], selPx[1]), M.l);
+      b = Math.min(Math.max(selPx[0], selPx[1]), w - M.r);
+      t = M.t; btm = h - M.b;
+    }
+    ctx.fillStyle = C_SEL_FILL;
+    ctx.fillRect(a, t, b - a, btm - t);
+    ctx.strokeStyle = C_SEL_LINE;
+    ctx.strokeRect(a + 0.5, t + 0.5, b - a - 1, btm - t - 1);
   };
 
   if (card.mode === 'hist') {
@@ -358,7 +372,7 @@ function drawCard(canvas, card, big = false, selPx = null) {
     if (!card.x.length) return;
     yAxis(niceTicks(ylo, yhi, 5));
     axes();
-    ctx.fillStyle = 'rgba(6, 16, 39, 0.45)';
+    ctx.fillStyle = C_DOT;
     card.x.forEach((xv, i) => {
       ctx.beginPath();
       ctx.arc(px(typeof xv === 'number' ? xv : 0), py(card.y[i]), big ? 2.5 : 1.8, 0, Math.PI * 2);
@@ -383,18 +397,21 @@ function closeBrushPanel(redraw = true) {
   if (redraw && ref) drawCard(ref.canvas, ref.g.card, ref.g.big);
 }
 
-function openBrushPanel(cx, cy, canvas, g, lo, hi) {
+// ranges = { x: {col, lo, hi, isTime}|null, y: {col, lo, hi}|null }
+const fmtRangeV = (v, isTime) => isTime
+  ? new Date(v * 1000).toLocaleString('sv').slice(0, 16)
+  : String(Math.round(v * 1000) / 1000);
+
+function openBrushPanel(cx, cy, canvas, g, ranges) {
   closeBrushPanel(false);
-  const isTime = !!g.card.x_is_time || g.card.kind === 'time';
-  const fmtV = (v) => isTime
-    ? new Date(v * 1000).toLocaleString('sv').slice(0, 16)
-    : String(Math.round(v * 1000) / 1000);
-  const col = g.card.col;
+  const lines = [];
+  if (ranges.x) lines.push(`${ranges.x.col}：${fmtRangeV(ranges.x.lo, ranges.x.isTime)} ～ ${fmtRangeV(ranges.x.hi, ranges.x.isTime)}`);
+  if (ranges.y) lines.push(`${ranges.y.col}：${fmtRangeV(ranges.y.lo)} ～ ${fmtRangeV(ranges.y.hi)}`);
   brushPanel = document.createElement('div');
   brushPanel.className = 'brush-panel';
   brushPanel._ref = { canvas, g };
   brushPanel.innerHTML = `
-    <div class="bp-range">${col}<br>${fmtV(lo)} ～ ${fmtV(hi)}</div>
+    <div class="bp-range">${lines.join('<br>')}</div>
     <div class="bp-actions">
       <button data-a="exclude">排除</button>
       <button data-a="extract">萃取</button>
@@ -408,23 +425,42 @@ function openBrushPanel(cx, cy, canvas, g, lo, hi) {
     if (act === 'cancel') { closeBrushPanel(); return; }
     closeBrushPanel(false);
     const r3 = (v) => Math.round(v * 1000) / 1000;
-    const disp = isTime ? `${fmtV(lo)}～${fmtV(hi)}` : `[${r3(lo)}, ${r3(hi)}]`;
-    const desc = `${act === 'exclude' ? 'exclude' : 'extract'} ${col} ∈ ${disp}`;
-    await addStep(act === 'exclude' ? 'exclude_range' : 'extract', desc,
-      { col, lo: isTime ? lo : r3(lo), hi: isTime ? hi : r3(hi) });
+    const verb = act === 'exclude' ? 'exclude' : 'extract';
+    const dispOf = (r, isTime) => isTime
+      ? `${fmtRangeV(r.lo, true)}～${fmtRangeV(r.hi, true)}`
+      : `[${r3(r.lo)}, ${r3(r.hi)}]`;
+    if (ranges.x && ranges.y) {
+      // 矩形框選（散佈圖）：X、Y 兩欄同時條件
+      const desc = `${verb} ${ranges.x.col} ∈ ${dispOf(ranges.x, ranges.x.isTime)} 且 ${ranges.y.col} ∈ ${dispOf(ranges.y)}`;
+      await addStep(act === 'exclude' ? 'exclude_box' : 'extract_box', desc, {
+        x_col: ranges.x.col, x_lo: ranges.x.isTime ? ranges.x.lo : r3(ranges.x.lo),
+        x_hi: ranges.x.isTime ? ranges.x.hi : r3(ranges.x.hi),
+        y_col: ranges.y.col, y_lo: r3(ranges.y.lo), y_hi: r3(ranges.y.hi),
+      });
+    } else {
+      const r = ranges.x ?? ranges.y;
+      const isTime = ranges.x ? ranges.x.isTime : false;
+      const desc = `${verb} ${r.col} ∈ ${dispOf(r, isTime)}`;
+      await addStep(act === 'exclude' ? 'exclude_range' : 'extract', desc,
+        { col: r.col, lo: isTime ? r.lo : r3(r.lo), hi: isTime ? r.hi : r3(r.hi) });
+    }
   }));
 }
 
 function bindBrush(canvas) {
   let x0 = null;
+  let y0 = null;
   let dragging = false;
-  const posX = (e) => e.clientX - canvas.getBoundingClientRect().left;
+  const pos = (e) => {
+    const r = canvas.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  };
   canvas.style.cursor = 'crosshair';
   canvas.addEventListener('pointerdown', (e) => {
     const g = GEOM.get(canvas);
     if (!g || g.xlo == null || !(g.xhi > g.xlo)) return;   // bar/空卡不支援
     closeBrushPanel();
-    x0 = posX(e);
+    [x0, y0] = pos(e);
     dragging = true;
     canvas.setPointerCapture(e.pointerId);
     e.preventDefault();
@@ -432,19 +468,36 @@ function bindBrush(canvas) {
   canvas.addEventListener('pointermove', (e) => {
     if (!dragging) return;
     const g = GEOM.get(canvas);
-    drawCard(canvas, g.card, g.big, [x0, posX(e)]);
+    const [x1, y1] = pos(e);
+    // 散佈圖＝自由矩形；直方圖＝X 值域帶（Y 軸是筆數，無資料語意）
+    drawCard(canvas, g.card, g.big, g.card.mode === 'scatter' ? [x0, y0, x1, y1] : [x0, x1]);
   });
   canvas.addEventListener('pointerup', (e) => {
     if (!dragging) return;
     dragging = false;
     const g = GEOM.get(canvas);
-    const x1 = posX(e);
-    if (Math.abs(x1 - x0) < 5) { drawCard(canvas, g.card, g.big); return; }  // 誤觸
-    const clamp = (v) => Math.min(Math.max(v, g.M.l), g.w - g.M.r);
-    const toVal = (pv) => g.xlo + ((clamp(pv) - g.M.l) / (g.plotW || 1)) * (g.xhi - g.xlo);
-    const lo = Math.min(toVal(x0), toVal(x1));
-    const hi = Math.max(toVal(x0), toVal(x1));
-    openBrushPanel(e.clientX, e.clientY, canvas, g, lo, hi);
+    const [x1, y1] = pos(e);
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const clampX = (v) => Math.min(Math.max(v, g.M.l), g.w - g.M.r);
+    const clampY = (v) => Math.min(Math.max(v, g.M.t), g.h - g.M.b);
+    const toX = (pv) => g.xlo + ((clampX(pv) - g.M.l) / (g.plotW || 1)) * (g.xhi - g.xlo);
+    const toY = (pv) => g.ylo + ((g.h - g.M.b - clampY(pv)) / (g.plotH || 1)) * (g.yhi - g.ylo);
+    const isTime = !!g.card.x_is_time || g.card.kind === 'time';
+    if (g.card.mode === 'scatter') {
+      // 橫拖=X 篩選、直拖=Y 篩選、斜拖=矩形（兩欄同時）
+      const xr = dx >= 5 ? { col: g.card.col, lo: Math.min(toX(x0), toX(x1)), hi: Math.max(toX(x0), toX(x1)), isTime } : null;
+      const yr = dy >= 5 && g.card.target
+        ? { col: g.card.target, lo: Math.min(toY(y0), toY(y1)), hi: Math.max(toY(y0), toY(y1)) } : null;
+      if (!xr && !yr) { drawCard(canvas, g.card, g.big); return; }  // 誤觸
+      openBrushPanel(e.clientX, e.clientY, canvas, g, { x: xr, y: yr });
+    } else {
+      if (dx < 5) { drawCard(canvas, g.card, g.big); return; }      // 誤觸
+      openBrushPanel(e.clientX, e.clientY, canvas, g, {
+        x: { col: g.card.col, lo: Math.min(toX(x0), toX(x1)), hi: Math.max(toX(x0), toX(x1)), isTime },
+        y: null,
+      });
+    }
   });
 }
 
@@ -525,6 +578,7 @@ function openPopover(anchorEl, col) {
 }
 
 async function addStep(kind, label, params) {
+  snapshotSteps();
   await api('/steps', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ kind, label, params }),
@@ -532,8 +586,57 @@ async function addStep(kind, label, params) {
   await refreshState();
 }
 
+// ------------------------------------------------------------ 復原/還原（歷程快照制 20 步）
+const undoStack = [];
+const redoStack = [];
+const UNDO_MAX = 20;
+
+function snapshotSteps() {
+  undoStack.push(JSON.stringify(state?.steps ?? []));
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  redoStack.length = 0;
+  updateUndoBtns();
+}
+
+async function restoreSteps(json) {
+  await api('/apply_template', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ steps: JSON.parse(json) }),
+  });
+  await refreshState();
+}
+
+async function undoSteps() {
+  if (!undoStack.length) return;
+  redoStack.push(JSON.stringify(state?.steps ?? []));
+  await restoreSteps(undoStack.pop());
+  updateUndoBtns();
+}
+
+async function redoSteps() {
+  if (!redoStack.length) return;
+  undoStack.push(JSON.stringify(state?.steps ?? []));
+  await restoreSteps(redoStack.pop());
+  updateUndoBtns();
+}
+
+function updateUndoBtns() {
+  $('btn-undo').disabled = !undoStack.length;
+  $('btn-redo').disabled = !redoStack.length;
+}
+
+$('btn-undo').addEventListener('click', undoSteps);
+$('btn-redo').addEventListener('click', redoSteps);
+document.addEventListener('keydown', (e) => {
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
+  const k = e.key.toLowerCase();
+  if (e.ctrlKey && !e.shiftKey && k === 'z') { e.preventDefault(); undoSteps(); }
+  else if ((e.ctrlKey && k === 'y') || (e.ctrlKey && e.shiftKey && k === 'z')) { e.preventDefault(); redoSteps(); }
+});
+
 // ------------------------------------------------------------ 隱藏欄位
 async function toggleHide(col) {
+  snapshotSteps();
   const existing = state.steps.find((s) => s.kind === 'hide_columns');
   const cur = new Set(existing?.params?.cols ?? []);
   cur.has(col) ? cur.delete(col) : cur.add(col);
@@ -552,6 +655,7 @@ async function openZoom(col) {
   const res = await api(`/cards?target=${encodeURIComponent(target)}&page=1&per_page=999`);
   const card = res.cards.find((c) => c.col === col);
   if (!card) return;
+  card.target = res.target;
   $('zoom-title').textContent = `${col}${res.target && col !== res.target ? `｜vs ${res.target}` : ''}`;
   $('zoom-modal').classList.add('open');
   requestAnimationFrame(() => drawCard($('zoom-canvas'), card, true));
@@ -616,6 +720,7 @@ function renderHistory() {
     ${stepsHtml || '<p class="hint" style="margin-top:8px">卡片上的排除／萃取／聚合操作會記錄於此，可個別停用還原。</p>'}`;
   $('d-history').querySelectorAll('input[type="checkbox"]').forEach((inp) =>
     inp.addEventListener('change', async () => {
+      snapshotSteps();
       await api(`/steps/${inp.dataset.id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: inp.checked }),
@@ -624,6 +729,7 @@ function renderHistory() {
     }));
   $('d-history').querySelectorAll('.del').forEach((el) =>
     el.addEventListener('click', async () => {
+      snapshotSteps();
       await api(`/steps/${el.dataset.id}`, { method: 'DELETE' });
       await refreshState();
     }));
@@ -675,6 +781,7 @@ $('btn-scan').addEventListener('click', async () => {
   $('btn-scan-apply').addEventListener('click', async () => {
     const checked = [...$('scan-out').querySelectorAll('input:checked')];
     if (!checked.length) { alert('請先勾選要加入的規則'); return; }
+    snapshotSteps();
     for (const inp of checked) {
       const kind = inp.dataset.kind;
       const col = inp.dataset.col;
@@ -708,6 +815,7 @@ function propsBody(mark = false) {
 $('btn-props-check').addEventListener('click', async () => {
   if (!$('props-fluid').value) { alert('請先搜尋並選定製程流體'); return; }
   if (!$('props-tcol').value) { alert('請選溫度欄位'); return; }
+  snapshotSteps();
   const res = await api('/props/check', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(propsBody(true)),

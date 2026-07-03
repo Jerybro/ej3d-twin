@@ -56,21 +56,33 @@ def _save_steps(sid: str, steps: list) -> None:
 
 
 # ------------------------------------------------------ steps pipeline 重放
+def _series_num(df: pd.DataFrame, col: str) -> pd.Series:
+    """欄位轉數值序列；時間欄轉 epoch 秒。
+    不能用 astype("int64")——單位隨 dtype 變（[us] 給微秒）；Timedelta 除法單位無關。"""
+    if pd.api.types.is_datetime64_any_dtype(df[col]):
+        return (df[col] - pd.Timestamp(0)) / pd.Timedelta(seconds=1)
+    return pd.to_numeric(df[col], errors="coerce")
+
+
 def _step_mask(df: pd.DataFrame, step: dict) -> pd.Series:
     """回傳該步驟要「剔除」的布林遮罩（True=剔除）。"""
     kind = step["kind"]
     p = step.get("params", {})
     if kind == "manual_exclude":
         return pd.Series(df.index.isin(p.get("rows", [])), index=df.index)
+    if kind in ("exclude_box", "extract_box"):
+        # 矩形框選：X、Y 兩欄同時落在範圍內 = 框內
+        xc, yc = p.get("x_col"), p.get("y_col")
+        if xc not in df.columns or yc not in df.columns:
+            return pd.Series(False, index=df.index)
+        sx, sy = _series_num(df, xc), _series_num(df, yc)
+        inside = ((sx >= p.get("x_lo", -np.inf)) & (sx <= p.get("x_hi", np.inf))
+                  & (sy >= p.get("y_lo", -np.inf)) & (sy <= p.get("y_hi", np.inf))).fillna(False)
+        return inside if kind == "exclude_box" else ~inside
     col = p.get("col")
     if col not in df.columns:
         return pd.Series(False, index=df.index)
-    if pd.api.types.is_datetime64_any_dtype(df[col]):
-        # 時間欄：以 epoch 秒比對（前端框選時間範圍送秒）。
-        # 不能用 astype("int64")——單位隨 dtype 變（[us] 給微秒）；Timedelta 除法單位無關
-        s = (df[col] - pd.Timestamp(0)) / pd.Timedelta(seconds=1)
-    else:
-        s = pd.to_numeric(df[col], errors="coerce")
+    s = _series_num(df, col)
     if kind == "extract":
         # 萃取：僅保留條件內 → 條件外剔除（Tukey 四操作之一）
         keep = ((s >= p.get("lo", -np.inf)) & (s <= p.get("hi", np.inf))).fillna(False)
@@ -256,7 +268,7 @@ def cards(sid: str, target: str = "", page: int = 1, per_page: int = 9, bins: in
             sub = pd.DataFrame({"x": s, "y": tgt}).dropna()
             if len(sub) > 500:
                 sub = sub.sample(500, random_state=0).sort_index()
-            xs = (sub["x"].astype("int64") // 10**6).tolist() if is_time else \
+            xs = ((sub["x"] - pd.Timestamp(0)) // pd.Timedelta(seconds=1)).tolist() if is_time else \
                  [_f(v) for v in sub["x"]] if is_num else sub["x"].astype(str).tolist()
             card.update({"mode": "scatter", "x": xs, "y": [_f(v) for v in sub["y"]],
                          "x_is_time": is_time})
@@ -269,7 +281,7 @@ def cards(sid: str, target: str = "", page: int = 1, per_page: int = 9, bins: in
             else:
                 card.update({"mode": "empty"})
         elif is_time:
-            vals = s.dropna().astype("int64") // 10**6
+            vals = (s.dropna() - pd.Timestamp(0)) // pd.Timedelta(seconds=1)
             if len(vals):
                 counts, edges = np.histogram(vals, bins=bins)
                 card.update({"mode": "hist", "counts": counts.tolist(),

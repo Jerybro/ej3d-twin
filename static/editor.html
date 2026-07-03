@@ -71,7 +71,11 @@
       background: none; border: 1px solid transparent; color: var(--text); font-size: 11.5px; font-family: inherit;
       display: flex; flex-direction: column; align-items: center; gap: 1px; line-height: 1.25;
     }
-    .rbtn .ric { font-size: 15px; line-height: 1; color: var(--accent); font-weight: 700; }
+    .rbtn .ric { line-height: 0; }
+    .ric svg { width: 17px; height: 17px; stroke: var(--accent); fill: none;
+      stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; display: block; }
+    .ric.sm svg { width: 13px; height: 13px; }
+    .qbtn .ric { line-height: 0; display: inline-block; }
     .rbtn:hover { background: var(--panel3); border-color: var(--bdr); }
     .rbtn.active { background: var(--accent-deep); border-color: var(--accent); }
     .rbtn.warn.active { background: rgba(255, 170, 60, 0.22); border-color: var(--warn); }
@@ -262,10 +266,10 @@
     <div id="ribbon">
       <div id="qat">
         <a class="brand-home" href="/" title="回平台首頁">J.S</a>
-        <button class="qbtn" id="qat-save" title="儲存（Ctrl+S）">💾</button>
-        <button class="qbtn" id="qat-saveas" title="另存">⧉</button>
-        <button class="qbtn" id="qat-undo" disabled title="復原（Ctrl+Z）">↶</button>
-        <button class="qbtn" id="qat-redo" disabled title="還原（Ctrl+Y）">↷</button>
+        <button class="qbtn" id="qat-save" title="儲存（Ctrl+S）"><span class="ric sm" data-ic="save"></span></button>
+        <button class="qbtn" id="qat-saveas" title="另存"><span class="ric sm" data-ic="saveas"></span></button>
+        <button class="qbtn" id="qat-undo" disabled title="復原（Ctrl+Z）"><span class="ric sm" data-ic="undo"></span></button>
+        <button class="qbtn" id="qat-redo" disabled title="還原（Ctrl+Y）"><span class="ric sm" data-ic="redo"></span></button>
         <select class="rsel" id="qat-discipline" title="專業領域（Discipline）——切換情境功能頁籤">
           <option value="pipe" selected>管線 PIPING</option>
           <option value="equip">設備 EQUIPMENT</option>
@@ -287,16 +291,16 @@
         <div class="rpage" data-page="project">
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" id="btn-save" title="儲存（Ctrl+S）"><span class="ric">💾</span>儲存</button>
-              <button class="rbtn" id="btn-saveas" title="另存新場景"><span class="ric">⧉</span>另存</button>
-              <button class="rbtn" id="btn-open" title="開啟既有場景"><span class="ric">📂</span>開啟</button>
-              <button class="rbtn" id="btn-new" title="清空建立新場景"><span class="ric">✚</span>新增</button>
+              <button class="rbtn" id="btn-save" title="儲存（Ctrl+S）"><span class="ric" data-ic="save"></span>儲存</button>
+              <button class="rbtn" id="btn-saveas" title="另存新場景"><span class="ric" data-ic="saveas"></span>另存</button>
+              <button class="rbtn" id="btn-open" title="開啟既有場景"><span class="ric" data-ic="open"></span>開啟</button>
+              <button class="rbtn" id="btn-new" title="清空建立新場景"><span class="ric" data-ic="new"></span>新增</button>
             </div>
             <div class="rgroup-label">場景</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <a class="rbtn" id="btn-view-twin" href="#" target="_blank" style="display:none"><span class="ric">👁</span>孿生檢視</a>
+              <a class="rbtn" id="btn-view-twin" href="#" target="_blank" style="display:none"><span class="ric" data-ic="eye"></span>孿生檢視</a>
             </div>
             <div class="rgroup-label">交付</div>
           </div>
@@ -305,38 +309,38 @@
         <div class="rpage active" data-page="home">
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" id="btn-undo" disabled title="復原（Ctrl+Z）"><span class="ric">↶</span>復原</button>
-              <button class="rbtn" id="btn-redo" disabled title="還原（Ctrl+Y）"><span class="ric">↷</span>還原</button>
-              <button class="rbtn" id="btn-del" title="刪除選取（Delete）"><span class="ric">🗑</span>刪除</button>
+              <button class="rbtn" id="btn-undo" disabled title="復原（Ctrl+Z）"><span class="ric" data-ic="undo"></span>復原</button>
+              <button class="rbtn" id="btn-redo" disabled title="還原（Ctrl+Y）"><span class="ric" data-ic="redo"></span>還原</button>
+              <button class="rbtn" id="btn-del" title="刪除選取（Delete）"><span class="ric" data-ic="del"></span>刪除</button>
             </div>
             <div class="rgroup-label">共用</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" id="btn-fit-sel" title="縮放至選取（F）"><span class="ric">◎</span>至選取</button>
-              <button class="rbtn" id="btn-fit" title="縮放至全場景（Home）"><span class="ric">⛶</span>全場</button>
+              <button class="rbtn" id="btn-fit-sel" title="縮放至選取（F）"><span class="ric" data-ic="fitsel"></span>至選取</button>
+              <button class="rbtn" id="btn-fit" title="縮放至全場景（Home）"><span class="ric" data-ic="fitall"></span>全場</button>
             </div>
             <div class="rgroup-label">巡覽</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn warn" id="btn-measure" title="點兩點量距離（可連續；空白鍵重複上次量測）；Esc 結束"><span class="ric">📐</span>距離</button>
-              <button class="rbtn warn" id="btn-measure-angle" title="點三點量角度（第一點＝頂點）；Esc 結束"><span class="ric">∠</span>角度</button>
+              <button class="rbtn warn" id="btn-measure" title="點兩點量距離（可連續；空白鍵重複上次量測）；Esc 結束"><span class="ric" data-ic="measure"></span>距離</button>
+              <button class="rbtn warn" id="btn-measure-angle" title="點三點量角度（第一點＝頂點）；Esc 結束"><span class="ric" data-ic="angle"></span>角度</button>
             </div>
             <div class="rgroup-label">量測</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn xf-btn active" data-m="translate" title="移動（W）"><span class="ric">⇄</span>移動</button>
-              <button class="rbtn xf-btn" data-m="rotate" title="旋轉（E）"><span class="ric">⟳</span>旋轉</button>
-              <button class="rbtn xf-btn" data-m="scale" title="縮放（R）"><span class="ric">⤢</span>縮放</button>
+              <button class="rbtn xf-btn active" data-m="translate" title="移動（W）"><span class="ric" data-ic="move"></span>移動</button>
+              <button class="rbtn xf-btn" data-m="rotate" title="旋轉（E）"><span class="ric" data-ic="rotate"></span>旋轉</button>
+              <button class="rbtn xf-btn" data-m="scale" title="縮放（R）"><span class="ric" data-ic="scale"></span>縮放</button>
             </div>
             <div class="rgroup-label">修改</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" id="btn-win-tree" title="模型瀏覽器開關"><span class="ric">☰</span>模型樹</button>
-              <button class="rbtn" id="btn-win-prop" title="屬性面板開關"><span class="ric">🗔</span>屬性</button>
+              <button class="rbtn" id="btn-win-tree" title="模型瀏覽器開關"><span class="ric" data-ic="tree"></span>模型樹</button>
+              <button class="rbtn" id="btn-win-prop" title="屬性面板開關"><span class="ric" data-ic="panel"></span>屬性</button>
             </div>
             <div class="rgroup-label">視窗</div>
           </div>
@@ -347,7 +351,7 @@
         <div class="rpage" data-page="pipe">
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn warn" id="pipe-btn" title="依序點擊路徑點；Enter 完成"><span class="ric">╱</span>繪製管線</button>
+              <button class="rbtn warn" id="pipe-btn" title="依序點擊路徑點；Enter 完成"><span class="ric" data-ic="pipe"></span>繪製管線</button>
               <label style="display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--dim)">管徑
                 <input class="rsel" id="pipe-r" type="number" step="0.02" value="0.12" style="width:64px"> m
               </label>
@@ -356,7 +360,7 @@
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn warn" id="pipe-node-btn" title="選中管線後編輯節點：拖曳移動、Delete 刪節點"><span class="ric">◉</span>節點編輯</button>
+              <button class="rbtn warn" id="pipe-node-btn" title="選中管線後編輯節點：拖曳移動、Delete 刪節點"><span class="ric" data-ic="node"></span>節點編輯</button>
             </div>
             <div class="rgroup-label">修改</div>
           </div>
@@ -365,9 +369,9 @@
         <div class="rpage" data-page="view">
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" id="btn-underlay" title="P&ID 圖紙底圖顯示切換"><span class="ric">🗺</span>底圖</button>
-              <button class="rbtn" id="btn-grid" title="地面網格顯示切換"><span class="ric">▦</span>網格</button>
-              <button class="rbtn" id="btn-labels" title="設備位號標籤顯示切換"><span class="ric">🏷</span>標籤</button>
+              <button class="rbtn" id="btn-underlay" title="P&ID 圖紙底圖顯示切換"><span class="ric" data-ic="map"></span>底圖</button>
+              <button class="rbtn" id="btn-grid" title="地面網格顯示切換"><span class="ric" data-ic="grid"></span>網格</button>
+              <button class="rbtn" id="btn-labels" title="設備位號標籤顯示切換"><span class="ric" data-ic="label"></span>標籤</button>
             </div>
             <div class="rgroup-label">內容</div>
           </div>
@@ -384,18 +388,18 @@
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" id="btn-view-save" title="儲存目前視角（含隱藏清單與縮圖）"><span class="ric">📌</span>存視角</button>
-              <button class="rbtn" id="btn-view-restore" title="視角書籤清單（屬性面板開啟）"><span class="ric">🔖</span>回視角</button>
-              <button class="rbtn warn" id="btn-walk" title="第一人稱漫遊：WASD 移動、Shift 加速、Esc 離開"><span class="ric">🚶</span>漫遊</button>
+              <button class="rbtn" id="btn-view-save" title="儲存目前視角（含隱藏清單與縮圖）"><span class="ric" data-ic="pin"></span>存視角</button>
+              <button class="rbtn" id="btn-view-restore" title="視角書籤清單（屬性面板開啟）"><span class="ric" data-ic="bookmark"></span>回視角</button>
+              <button class="rbtn warn" id="btn-walk" title="第一人稱漫遊：WASD 移動、Shift 加速、Esc 離開"><span class="ric" data-ic="walk"></span>漫遊</button>
             </div>
             <div class="rgroup-label">操縱</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" id="btn-clipbox" title="剖切盒：全場範圍生成，拖面手柄調整"><span class="ric">▣</span>剖切盒</button>
-              <button class="rbtn" id="btn-clipbox-sel" title="以目前選取生成剖切盒（±1m）"><span class="ric">◱</span>從選取</button>
-              <button class="rbtn" id="btn-clipsix" title="六平面剖切：屬性面板逐面調整"><span class="ric">▤</span>六平面</button>
-              <button class="rbtn" id="btn-clipclear" title="清除剖切"><span class="ric">✕</span>清除</button>
+              <button class="rbtn" id="btn-clipbox" title="剖切盒：全場範圍生成，拖面手柄調整"><span class="ric" data-ic="clipbox"></span>剖切盒</button>
+              <button class="rbtn" id="btn-clipbox-sel" title="以目前選取生成剖切盒（±1m）"><span class="ric" data-ic="clipsel"></span>從選取</button>
+              <button class="rbtn" id="btn-clipsix" title="六平面剖切：屬性面板逐面調整"><span class="ric" data-ic="clipsix"></span>六平面</button>
+              <button class="rbtn" id="btn-clipclear" title="清除剖切"><span class="ric" data-ic="clear"></span>清除</button>
             </div>
             <div class="rgroup-label">剖切</div>
           </div>
@@ -404,7 +408,7 @@
         <div class="rpage" data-page="tools">
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn warn" id="btn-clash-run" title="全場景碰撞檢查：設備硬碰撞/淨距不足/管線干涉"><span class="ric">⚠</span>檢查全部</button>
+              <button class="rbtn warn" id="btn-clash-run" title="全場景碰撞檢查：設備硬碰撞/淨距不足/管線干涉"><span class="ric" data-ic="alert"></span>檢查全部</button>
               <span id="clash-summary" style="font-size:11.5px;color:var(--dim);align-self:center"></span>
             </div>
             <div class="rgroup-label">碰撞</div>

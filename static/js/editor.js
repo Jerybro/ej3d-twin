@@ -12,6 +12,45 @@ import { runClash } from './clash.js';
 
 const viewport = document.getElementById('viewport');
 
+// ---------------------------------------------------------------- 圖示系統
+// 品味鐵則：零 emoji 裝飾——ribbon 圖示全部 24x24 stroke SVG（與首頁同語彙）
+const ICONS = {
+  save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/>',
+  saveas: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 4H6a2 2 0 0 0-2 2v10"/>',
+  open: '<path d="M3 7v11a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-8l-2-3H5a2 2 0 0 0-2 2z"/>',
+  new: '<path d="M12 5v14M5 12h14"/>',
+  del: '<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/>',
+  undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>',
+  redo: '<path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 15-6.7L21 13"/>',
+  move: '<path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/>',
+  rotate: '<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>',
+  scale: '<path d="M21 3l-7 7M21 3h-6M21 3v6M3 21l7-7M3 21h6M3 21v-6"/>',
+  fitsel: '<circle cx="12" cy="12" r="3"/><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/>',
+  fitall: '<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"/>',
+  measure: '<path d="M2 15l13-13 7 7-13 13-7-7z"/><path d="M7 10l2 2M10 7l2 2M13 4l2 2"/>',
+  angle: '<path d="M4 20L16 4"/><path d="M4 20h16"/><path d="M11.5 20a8 8 0 0 0-2.4-5.7"/>',
+  tree: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+  map: '<path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/>',
+  grid: '<rect x="3" y="3" width="18" height="18" rx="1"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>',
+  label: '<path d="M12 3H5a2 2 0 0 0-2 2v7l9 9 9-9-9-9z"/><circle cx="8" cy="8" r="1.4"/>',
+  pin: '<path d="M12 3a5 5 0 0 1 5 5c0 4-5 10-5 10S7 12 7 8a5 5 0 0 1 5-5z"/><circle cx="12" cy="8" r="1.6"/>',
+  bookmark: '<path d="M6 3h12v18l-6-4-6 4V3z"/>',
+  walk: '<circle cx="13" cy="4.5" r="1.8"/><path d="M10 21l2.5-6M14.5 21l-1.5-5-2-2 1-5"/><path d="M9 9l3-1.5 2.5 2 2.5 1"/>',
+  clipbox: '<rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M4 12h16" stroke-dasharray="3 2.4"/>',
+  clipsel: '<rect x="7" y="7" width="13" height="13" rx="1.5"/><path d="M4 14V5a1 1 0 0 1 1-1h9"/>',
+  clipsix: '<path d="M12 2l8 4.5v11L12 22l-8-4.5v-11L12 2z"/><path d="M4 6.5l8 4.5 8-4.5M12 11v11"/>',
+  clear: '<path d="M5 5l14 14M19 5L5 19"/>',
+  alert: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5M12 18v.5"/>',
+  pipe: '<path d="M4 20V9a2 2 0 0 1 2-2h9"/><path d="M11 3l4 4-4 4"/><path d="M20 4v11a2 2 0 0 1-2 2h-2"/>',
+  node: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>',
+};
+document.querySelectorAll('.ric[data-ic]').forEach((el) => {
+  const d = ICONS[el.dataset.ic];
+  if (d) el.innerHTML = `<svg viewBox="0 0 24 24">${d}</svg>`;
+});
+
 // ---------------------------------------------------------------- 三維基礎
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0e141b);

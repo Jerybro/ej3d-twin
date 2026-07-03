@@ -249,21 +249,23 @@ function renderPager(el, page, pages, go) {
 }
 
 // 卡片繪圖 — 可選主題色（預設綠黑 AI 風，深淺=資料密度）＋完整軸刻度＋框選
-const C_AXIS = '#061027';
-const C_LABEL = '#555555';
-const C_GRID = '#ECEEF2';
-// 深淺語意：柱越高（筆數越多）顏色越深；散佈點半透明重疊越密越深
+// 暗色畫布（全平台統一建模風深色主題）
+const C_AXIS = '#44586c';
+const C_LABEL = '#8ba0b3';
+const C_GRID = '#1d2936';
+// 深淺語意不變（柱越高越飽和深、散佈重疊越密越深）；暗底下「淺端」提亮、
+// 「深端」抬高下限避免沉進背景
 const THEMES = {
-  green:  { name: '綠', lo: [183, 212, 196], hi: [4, 46, 34],
-            dot: 'rgba(5, 95, 70, 0.5)', selF: 'rgba(16, 185, 129, 0.12)', selL: 'rgba(5, 150, 105, 0.65)' },
-  blue:   { name: '藍', lo: [186, 206, 233], hi: [5, 34, 84],
-            dot: 'rgba(4, 106, 251, 0.45)', selF: 'rgba(4, 106, 251, 0.10)', selL: 'rgba(4, 106, 251, 0.6)' },
-  purple: { name: '紫', lo: [211, 199, 227], hi: [51, 18, 84],
-            dot: 'rgba(126, 58, 242, 0.45)', selF: 'rgba(126, 58, 242, 0.10)', selL: 'rgba(126, 58, 242, 0.6)' },
-  amber:  { name: '琥珀', lo: [233, 216, 183], hi: [102, 54, 4],
-            dot: 'rgba(217, 119, 6, 0.5)', selF: 'rgba(217, 119, 6, 0.10)', selL: 'rgba(217, 119, 6, 0.6)' },
-  ink:    { name: '墨', lo: [182, 188, 198], hi: [6, 16, 39],
-            dot: 'rgba(6, 16, 39, 0.45)', selF: 'rgba(6, 16, 39, 0.08)', selL: 'rgba(6, 16, 39, 0.55)' },
+  green:  { name: '綠', lo: [196, 226, 210], hi: [18, 92, 68],
+            dot: 'rgba(53, 212, 154, 0.55)', selF: 'rgba(53, 212, 154, 0.10)', selL: 'rgba(53, 212, 154, 0.65)' },
+  blue:   { name: '藍', lo: [196, 216, 240], hi: [24, 84, 158],
+            dot: 'rgba(96, 165, 250, 0.5)', selF: 'rgba(96, 165, 250, 0.10)', selL: 'rgba(96, 165, 250, 0.6)' },
+  purple: { name: '紫', lo: [219, 208, 235], hi: [96, 58, 158],
+            dot: 'rgba(167, 122, 250, 0.5)', selF: 'rgba(167, 122, 250, 0.10)', selL: 'rgba(167, 122, 250, 0.6)' },
+  amber:  { name: '琥珀', lo: [240, 224, 192], hi: [158, 96, 24],
+            dot: 'rgba(232, 165, 75, 0.55)', selF: 'rgba(232, 165, 75, 0.10)', selL: 'rgba(232, 165, 75, 0.6)' },
+  ink:    { name: '墨', lo: [200, 208, 218], hi: [70, 88, 108],
+            dot: 'rgba(139, 160, 179, 0.5)', selF: 'rgba(139, 160, 179, 0.08)', selL: 'rgba(139, 160, 179, 0.55)' },
 };
 let themeKey = localStorage.getItem('ej-chart-theme') ?? 'green';
 if (!THEMES[themeKey]) themeKey = 'green';
@@ -1250,8 +1252,8 @@ function drawTSF(canvas, tsf) {
     ys.forEach((v, i) => { const x = px(ts[i]), y = py(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.stroke(); ctx.lineWidth = 1;
   };
-  line(tsf.t_hist, tsf.y_hist, '#C3C8D0', 1.2);
-  line(tsf.t_test, tsf.y_test, '#6B7280', 1.4);
+  line(tsf.t_hist, tsf.y_hist, '#4d6172', 1.2);
+  line(tsf.t_test, tsf.y_test, '#9fb2c2', 1.4);
   line(tsf.t_test, tsf.pred, theme().selL, 1.8);
   // 訓練／測試切分虛線
   const xSplit = px(tsf.t_test[0]);
@@ -1259,7 +1261,7 @@ function drawTSF(canvas, tsf) {
   ctx.beginPath(); ctx.moveTo(xSplit, M.t); ctx.lineTo(xSplit, h - M.b); ctx.stroke();
   ctx.setLineDash([]);
   // 圖例
-  const legend = [['訓練段', '#C3C8D0'], ['實際', '#6B7280'], ['外推預測', theme().selL]];
+  const legend = [['訓練段', '#4d6172'], ['實際', '#9fb2c2'], ['外推預測', theme().selL]];
   let lx = w - 250;
   legend.forEach(([txt, color]) => {
     ctx.fillStyle = color; ctx.fillRect(lx, M.t, 16, 3);
@@ -1304,10 +1306,10 @@ function drawTS(canvas, t, actual, pred) {
     ys.forEach((v, i) => { const x = px(t[i]), y = py(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.stroke(); ctx.lineWidth = 1;
   };
-  line(actual, '#9AA1AC', 1.2);
+  line(actual, '#9fb2c2', 1.2);
   line(pred, theme().selL, 1.6);
   // 圖例
-  ctx.fillStyle = '#9AA1AC'; ctx.fillRect(w - 150, M.t, 16, 3);
+  ctx.fillStyle = '#9fb2c2'; ctx.fillRect(w - 150, M.t, 16, 3);
   ctx.fillStyle = C_LABEL; ctx.fillText('實際', w - 128, M.t + 5);
   ctx.fillStyle = theme().selL; ctx.fillRect(w - 90, M.t, 16, 3);
   ctx.fillStyle = C_LABEL; ctx.fillText('預測', w - 68, M.t + 5);
@@ -1438,7 +1440,7 @@ function drawCM(canvas, labels, matrix) {
   const maxV = Math.max(...matrix.flat(), 1);
   matrix.forEach((rowArr, i) => rowArr.forEach((v, j) => {
     const x = M.l + j * cw, y = M.t + i * ch;
-    ctx.fillStyle = v ? ink(v / maxV) : '#F6F7FA';
+    ctx.fillStyle = v ? ink(v / maxV) : '#17212c';
     ctx.fillRect(x + 1, y + 1, cw - 2, ch - 2);
     ctx.fillStyle = v / maxV > 0.55 ? '#fff' : C_LABEL;
     const t = String(v);

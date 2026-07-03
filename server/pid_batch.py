@@ -21,7 +21,7 @@ from pathlib import Path
 
 from .pid_parse import PID_DIR, PIPE_Y, _push_apart, _uv_to_scene_pipes, parse_pid
 
-MERGED_PIPES_PER_SHEET = 80  # 整廠模式每張圖取最長 N 條（30 張全收會塞爆）
+MERGED_PIPES_PER_SHEET = None  # None=全收（渲染端已合併幾何，扛得住）
 BRIDGE_Y = 8.0     # 橋接管線高度（跨圖島，飛越一般管線與多數設備）
 BRIDGE_R = 0.16
 
@@ -159,46 +159,19 @@ def merge_results(results: dict[str, dict]) -> dict:
     """{圖檔 stem: parse_pid 結果} → 整廠合併場景。
 
     佈局＝「圖紙地毯」：每張圖的 P&ID 渲染圖鋪在群聚底下，設備以像素
-    保真映射站在圖面自己的位置上（可直接對圖清草稿）；群聚依製程流向
-    排序（總覽→進料→加熱→反應→分離→汽提→分餾→公用）。
+    保真映射站在圖面自己的位置上（可直接對圖清草稿）。
+
+    完成度原則：**圖上有什麼就放什麼**——同一設備繪於多張圖時每張都放
+    （位號重複以「·2」後綴唯一化），不做跨圖去重；圖面去重會讓地毯上
+    明明有符號的位置空著，直接被讀成「缺漏」。
     """
-    # tag → 各圖的候選 (stem, equipment_entry, conf, 掛載儀錶數)
-    candidates: dict[str, list] = {}
-    for stem, res in results.items():
-        conf_of = {it["tag"]: it["conf"] for it in res["stats"]["items"]}
-        for eq in res["scene"]["plant"]["units"][0]["equipment"]:
-            candidates.setdefault(eq["tag"], []).append(
-                (stem, eq, conf_of.get(eq["tag"], 0), len(eq.get("instruments", [])))
-            )
-
-    # 每個位號選出「實際繪製」的那張圖：儀錶數 → 信心
-    winner_stem: dict[str, str] = {}
-    winner_eq: dict[str, dict] = {}
-    for tag, cands in candidates.items():
-        cands.sort(key=lambda c: (-c[3], -c[2]))
-        winner_stem[tag] = cands[0][0]
-        winner_eq[tag] = cands[0][1]
-
-    # 儀錶合併：同 tag 掛載到勝出設備（跨圖 union，重複儀錶取先見）
-    instruments: dict[str, dict] = {}
-    inst_of_eq: dict[str, list] = {t: [] for t in winner_eq}
-    for stem, res in results.items():
-        for itag, inst in res["scene"].get("instruments", {}).items():
-            if itag in instruments:
-                continue
-            eq_tag = inst.get("equipment", "")
-            if eq_tag not in winner_eq:  # 掛載目標整廠去重後不存在 → 略過掛載
-                inst = {**inst, "equipment": ""}
-            instruments[itag] = inst
-            if inst.get("equipment"):
-                inst_of_eq[inst["equipment"]].append(itag)
-
     # 圖紙地毯群聚：整張圖按頁面比例縮成 tile，設備像素座標仿射映射
     TILE_W = 44.0  # 整廠模式單張圖紙寬（比單圖 56 略小，30 張才排得開）
-    sheet_tags: dict[str, list] = {}
-    for tag, stem in winner_stem.items():
-        sheet_tags.setdefault(stem, []).append(tag)
-    sheets = sorted(sheet_tags)
+    sheets = sorted(results)
+    sheet_tags: dict[str, list] = {
+        stem: [eq["tag"] for eq in results[stem]["scene"]["plant"]["units"][0]["equipment"]]
+        for stem in sheets
+    }
 
     clusters: dict[str, dict] = {}   # stem → {tag: [x,0,z]}（tile 內局部座標）
     spans: dict[str, tuple] = {}     # stem → (tile_w, tile_h)
@@ -240,22 +213,43 @@ def merge_results(results: dict[str, dict]) -> dict:
     units = []
     underlays = []
     pipes = []
+    instruments: dict[str, dict] = {}
+    seen_tags: dict[str, int] = {}   # 位號唯一化（同設備多圖繪製）
     for stem in order:
         ox, oz = origins[stem][0] + off_x, origins[stem][1] + off_z
         stage = STAGES[_sheet_stage(stem, sheet_tags[stem])]
+        geom = results[stem]["geom"]
+        sheet_scene = results[stem]["scene"]
+        eq_by_tag = {e["tag"]: e for e in sheet_scene["plant"]["units"][0]["equipment"]}
+        rename: dict[str, str] = {}
         equipment = []
         for tag in sorted(clusters[stem]):
-            eq = dict(winner_eq[tag])
+            eq = dict(eq_by_tag[tag])
+            n = seen_tags.get(tag, 0) + 1
+            seen_tags[tag] = n
+            uniq = tag if n == 1 else f"{tag}·{n}"
+            rename[tag] = uniq
             x, _, z = clusters[stem][tag]
+            eq["tag"] = uniq
             eq["pos"] = [round(x + ox, 2), 0, round(z + oz, 2)]
-            eq["instruments"] = inst_of_eq.get(tag, [])
             eq["pid_ref"] = stem
             equipment.append(eq)
+        # 儀錶：本圖掛載、世界座標標記位置；跨圖同位號取先見（同一迴路重繪）
+        for itag, inst in sheet_scene.get("instruments", {}).items():
+            if itag in instruments:
+                continue
+            u, v = geom["inst_uv"].get(itag, (0.5, 0.5))
+            instruments[itag] = {
+                **inst,
+                "equipment": rename.get(inst.get("equipment", ""), inst.get("equipment", "")),
+                "pos": [round((u - 0.5) * spans[stem][0] + ox, 2),
+                        round((v - 0.5) * spans[stem][1] + oz, 2)],
+            }
         units.append({"id": stem.upper(),
                       "name": f"{stage}｜{stem.upper()}", "equipment": equipment})
         underlays.append({"image": tiles[stem], "x": round(ox, 2), "z": round(oz, 2),
                           "w": spans[stem][0], "h": spans[stem][1]})
-        # 管線 3D 化（extract_pipes 已按長度降冪，取前 N=保主幹）
+        # 管線 3D 化（extract_pipes 已按長度降冪；None=全收）
         pipes += _uv_to_scene_pipes(
             results[stem]["geom"].get("pipes_uv", []),
             spans[stem][0], spans[stem][1], ox, oz,

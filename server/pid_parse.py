@@ -478,7 +478,8 @@ def parse_pid(filename: str) -> dict:
     pipe_polys, page_w, page_h = extract_pipes(pdf_path)
     pipes_uv = _pipes_to_uv(pipe_polys, page_w, page_h)
 
-    # 儀錶掛最近設備
+    # 儀錶掛最近設備＋圖面位置（3D 標記用，與地毯對位）
+    W, H = img.width, img.height
     inst_of_eq: dict[str, list] = {t: [] for t in equips}
     instruments = {}
     for itag, (icx, icy, iconf) in insts.items():
@@ -491,6 +492,8 @@ def parse_pid(filename: str) -> dict:
         instruments[itag] = {
             "name": itag, "unit": INST_UNIT.get(prefix, ""), "base": 0,
             "equipment": best or "",
+            "pos": [round((icx / W - 0.5) * TILE_W, 2),
+                    round((icy / H - 0.5) * (TILE_W * H / W), 2)],
         }
         if best:
             inst_of_eq[best].append(itag)
@@ -534,6 +537,8 @@ def parse_pid(filename: str) -> dict:
         "geom": {
             "page_w": img.width, "page_h": img.height,
             "px": {tag: [round(c[0], 1), round(c[1], 1)] for tag, c in equips.items()},
+            "inst_uv": {itag: [round(c[0] / img.width, 4), round(c[1] / img.height, 4)]
+                        for itag, c in insts.items()},
             "tile_lo": tile_url.replace(".jpg", "_lo.jpg"),
             "pipes_uv": pipes_uv,
             # 跨圖接續標記（縫合用；cx/cy 為轉正後圖像像素）

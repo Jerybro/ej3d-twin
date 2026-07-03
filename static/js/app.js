@@ -280,6 +280,28 @@ const grid = new THREE.GridHelper(Math.max(GROUND_W, GROUND_D), Math.max(GROUND_
 grid.position.y = 0.02;
 plantGroup.add(grid);
 
+// 儀錶 3D 標記：琥珀色小指針柱，立在圖面儀錶圈的位置（有 pos 的儀錶才畫；
+// 示範廠手建場景的儀錶無座標，自然跳過）
+{
+  const geos = [];
+  for (const inst of Object.values(plantData.instruments ?? {})) {
+    if (!inst.pos) continue;
+    const [ix, iz] = inst.pos;
+    const stem = new THREE.CylinderGeometry(0.05, 0.05, 1.0, 5);
+    stem.translate(ix, 0.5, iz);
+    geos.push(stem);
+    const head = new THREE.SphereGeometry(0.16, 8, 6);
+    head.translate(ix, 1.05, iz);
+    geos.push(head);
+  }
+  if (geos.length) {
+    const instMat = std(0xd9a441);
+    const m = new THREE.Mesh(BufferGeometryUtils.mergeGeometries(geos, false), instMat);
+    m.castShadow = false;
+    plantGroup.add(m);
+  }
+}
+
 // 圖紙底圖（P&ID 地毯）：設備站在圖面自己的位置上，可直接對圖
 const texLoader = new THREE.TextureLoader();
 for (const u of plantData.underlays ?? []) {

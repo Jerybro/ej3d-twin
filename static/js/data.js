@@ -124,6 +124,7 @@ $('target-select').addEventListener('change', async (e) => {
 });
 
 $('btn-drawer').addEventListener('click', () => $('drawer').classList.toggle('open'));
+$('drawer-close').addEventListener('click', () => $('drawer').classList.remove('open'));
 document.querySelectorAll('.dtab').forEach((t) => t.addEventListener('click', () => {
   document.querySelectorAll('.dtab').forEach((x) => x.classList.remove('active'));
   document.querySelectorAll('.dbody').forEach((x) => x.classList.remove('show'));
@@ -840,29 +841,43 @@ async function renderModels() {
       if (m.task === 'anomaly') return [c.threshold, `${c.exceed_pct}%`, c.mean_risk, c.max_risk];
       return [c.rmse, c.mae, c.maape, c.r2];
     };
-    $('model-table').innerHTML = `<thead><tr>
-      <th>排名${qi(METRIC_TIPS['排名'])}</th><th>模型</th><th>目標</th><th>任務</th><th>演算法</th>
+    // 按目標分組：排名只在「同一個預測目標」內比才有意義（不同 Y 的分數不可比）
+    const groups = new Map();
+    models.forEach((m) => {
+      const g = m.task === 'anomaly' ? '__anomaly__' : m.target;
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(m);
+    });
+    const thead = `<thead><tr>
+      <th>排名${qi(METRIC_TIPS['排名'])}</th><th>模型</th><th>任務</th><th>演算法</th>
       <th>RMSE｜Acc${qi(`依任務顯示不同指標——迴歸：${METRIC_TIPS.RMSE}｜分類：${METRIC_TIPS.Accuracy}｜異常偵測：${METRIC_TIPS['風險門檻']}`)}</th>
       <th>MAE｜F1${qi(`迴歸：${METRIC_TIPS.MAE}｜分類：${METRIC_TIPS.F1}｜異常偵測：${METRIC_TIPS['超標 %']}`)}</th>
       <th>MAAPE｜Prec${qi(`迴歸：${METRIC_TIPS.MAAPE}｜分類：${METRIC_TIPS.Precision}`)}</th>
       <th>R²｜Recall${qi(`迴歸：${METRIC_TIPS['R²']}｜分類：${METRIC_TIPS.Recall}`)}</th>
-      <th>狀態</th><th>建立時間</th><th></th></tr></thead><tbody>${
-      models.map((m, i) => `<tr data-id="${m.id}">
-        <td>${m.status === 'done' ? `#${i + 1}` : ''}</td>
-        <td>${m.name}</td><td>${m.target}</td>
-        <td>${m.task === 'classification' ? '分類' : m.task === 'timeseries' ? '時序' : m.task === 'anomaly' ? '異常偵測' : '迴歸'}</td>
-        <td>${(ALGO_META?.find((a) => a.key === m.algo)?.name) ?? m.algo}${m.auto_tune ? '（自動調參）' : ''}</td>
-        ${mv(m).map((v) => `<td>${v}</td>`).join('')}
-        <td class="st-${m.status}" title="${m.error ?? ''}">${stName[m.status] ?? m.status}</td>
-        <td>${m.created}</td>
-        <td><span class="del" data-id="${m.id}">刪除</span></td></tr>`).join('')}</tbody>`;
-    $('model-table').querySelectorAll('.del').forEach((el) => el.addEventListener('click', async (e) => {
+      <th>狀態</th><th>建立時間</th><th></th></tr></thead>`;
+    $('model-table-wrap').innerHTML = [...groups.entries()].map(([g, ms]) => `
+      <div class="mgroup">
+        <div class="mg-title">${g === '__anomaly__'
+          ? `設備異常偵測（無監督）${qi('無目標欄：以訓練資料為健康基準，監控偏離程度——與預測模型的排名邏輯不同，故獨立一組。')}`
+          : `目標 ${g}${qi('同一個預測目標的模型才能互相比較排名——不同目標的分數單位與難度都不同，放在一起比沒有意義。')}`}</div>
+        <table class="model-table">${thead}<tbody>${
+        ms.map((m, i) => `<tr data-id="${m.id}">
+          <td>${m.status === 'done' ? `#${i + 1}` : ''}</td>
+          <td>${m.name}</td>
+          <td>${m.task === 'classification' ? '分類' : m.task === 'timeseries' ? '時序' : m.task === 'anomaly' ? '異常偵測' : '迴歸'}</td>
+          <td>${(ALGO_META?.find((a) => a.key === m.algo)?.name) ?? m.algo}${m.auto_tune ? '（自動調參）' : ''}</td>
+          ${mv(m).map((v) => `<td>${v}</td>`).join('')}
+          <td class="st-${m.status}" title="${m.error ?? ''}">${stName[m.status] ?? m.status}</td>
+          <td>${m.created}</td>
+          <td><span class="del" data-id="${m.id}">刪除</span></td></tr>`).join('')}</tbody></table>
+      </div>`).join('');
+    $('model-table-wrap').querySelectorAll('.del').forEach((el) => el.addEventListener('click', async (e) => {
       e.stopPropagation();
       await apiML(`/models/${el.dataset.id}`, { method: 'DELETE' });
       $('model-detail').style.display = 'none';
       await renderModels();
     }));
-    $('model-table').querySelectorAll('tbody tr').forEach((tr) => tr.addEventListener('click', () =>
+    $('model-table-wrap').querySelectorAll('tbody tr').forEach((tr) => tr.addEventListener('click', () =>
       openModelDetail(tr.dataset.id)));
     if (models.some((m) => m.status === 'training')) modelPollTimer = setTimeout(renderModels, 2500);
   }
@@ -965,7 +980,9 @@ async function openModelDetail(mid) {
           <td>${e.n}</td><td>${e.peak_risk}</td>
           <td style="color:${healthColor(e.min_health)}">${e.min_health}</td><td>${e.top_sensor}</td></tr>`).join('')}
       </table></div>` : '';
-  const taskName = cls ? '分類' : isTs ? '時序預測（單變量）' : isAn ? '設備異常偵測（無監督）' : '迴歸';
+  const taskName = cls ? '分類' : isTs ? '時序預測（單變量）' : isAn
+    ? `設備異常偵測（無監督）${qi('設備健康度的完整定義：模型以你提供的訓練資料為「健康運轉基準」，對每個時間點計算風險值（偏離基準的程度），再換算 0–100 健康分數——100＝完全貼合基準、50＝偏離達門檻、0＝偏離達門檻兩倍。重要前提：這是非監督式——訓練時沒有故障資料可參照，健康度代表『偏離平常運轉的程度』，不保證每次偏離都是故障；訓練資料若混入異常段，基準被汙染、分數會失準。對照：手上有標記過的故障資料時（監督式），可把故障標記當分類目標建分類模型，對已知故障型態判定準確度更高——兩種健康度的代表性不同，解讀要分清楚。')}`
+    : '迴歸';
   $('model-detail').innerHTML = `
     <h3 style="display:flex;align-items:center;gap:8px"><span id="md-name">${m.name}</span>
       <button class="mini" id="btn-rename" title="改名"

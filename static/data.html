@@ -281,20 +281,22 @@
     #model-empty p { font-size: 14px; color: var(--text2); margin-bottom: 20px; }
     .model-head { display: flex; align-items: center; gap: 12px; padding: 4px 0 14px;
       font-size: 15px; color: var(--text); }
-    #model-table-wrap { background: var(--white); border: 1px solid var(--bdr);
-      border-radius: 8px; overflow: auto; }
-    #model-table { border-collapse: collapse; font-size: 14px; width: 100%; }
-    #model-table th { text-align: left; padding: 12px 14px; color: var(--text2);
+    .mgroup { background: var(--white); border: 1px solid var(--bdr);
+      border-radius: 8px; overflow: auto; margin-bottom: 16px; }
+    .mg-title { padding: 12px 14px; font-size: 14px; font-weight: 600; color: var(--text);
+      border-bottom: 1px solid var(--bdr); background: var(--bg); display: flex; align-items: center; }
+    .model-table { border-collapse: collapse; font-size: 14px; width: 100%; }
+    .model-table th { text-align: left; padding: 12px 14px; color: var(--text2);
       font-weight: 500; font-size: 13px; border-bottom: 1px solid var(--bdr); white-space: nowrap; }
-    #model-table td { padding: 12px 14px; color: var(--text); border-bottom: 1px solid var(--bdr);
+    .model-table td { padding: 12px 14px; color: var(--text); border-bottom: 1px solid var(--bdr);
       white-space: nowrap; }
-    #model-table tr:last-child td { border-bottom: none; }
-    #model-table tbody tr { cursor: pointer; }
-    #model-table tbody tr:hover td { background: var(--bg); }
-    #model-table .st-done { color: var(--ok); }
-    #model-table .st-training { color: var(--blue); }
-    #model-table .st-error { color: var(--danger); }
-    #model-table .del { color: var(--danger); cursor: pointer; font-size: 13px; }
+    .model-table tr:last-child td { border-bottom: none; }
+    .model-table tbody tr { cursor: pointer; }
+    .model-table tbody tr:hover td { background: var(--bg); }
+    .model-table .st-done { color: var(--ok); }
+    .model-table .st-training { color: var(--blue); }
+    .model-table .st-error { color: var(--danger); }
+    .model-table .del { color: var(--danger); cursor: pointer; font-size: 13px; }
     #model-detail { margin-top: 20px; background: var(--white); border: 1px solid var(--bdr);
       border-radius: 8px; padding: 20px; }
     #model-detail h3 { font-size: 16px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
@@ -549,7 +551,7 @@
           <span class="spacer"></span>
           <button class="ctl-btn" id="btn-new-model">建立模型</button>
         </div>
-        <div id="model-table-wrap"><table id="model-table"></table></div>
+        <div id="model-table-wrap"></div>
         <div id="model-detail" style="display:none"></div>
       </div>
     </div>
@@ -589,6 +591,12 @@
         <div id="wiz-anom-cfg" style="display:none">
           <p class="hint" style="margin:2px 0 8px">以「現行資料視圖」為健康運轉基準建立監控模型——
             請先在探索分析把異常段排除，再來建模；訓練後對新資料計算風險值，超過門檻＝疑似異常。</p>
+          <p class="hint" style="margin:2px 0 8px;padding:10px 12px;background:var(--bg);border:1px solid var(--bdr);border-radius:5px">
+            <b>這是非監督式學習，前提很重要</b>${'' /* 監督 vs 非監督：健康度代表性差異 */}
+            <span class="qi" data-tip="兩種做 PHM 的路線：非監督式（本功能）＝手上只有正常運轉的資料，模型學「健康長什麼樣」，健康度代表的是『偏離平常的程度』——它抓得到異常，但無法保證每次偏離都等於故障，訓練資料裡若混入壞資料，基準被汙染、代表性會下降。監督式＝手上有標記過的故障資料可參照，模型直接學「壞掉長什麼樣」，對已知故障型態的判定準確度高——但需要足夠的故障案例，多數現場拿不到。沒有故障資料時，非監督是務實起點；累積到足夠故障紀錄後可轉監督式提升準確度。">?</span><br>
+            此模型<b>假設你選的訓練資料段全部是健康運轉</b>。訓練資料越乾淨，健康分數的代表性越高；
+            若混入異常段，基準被汙染，之後的健康分數會失準。手上若有「已確認故障」的歷史資料，
+            不要餵進來——留著用「模型評估」對照驗證，或改走監督式（把故障標記當分類目標建分類模型）。</p>
         </div>
         <div id="wiz-ts-cfg" style="display:none">
           <p class="hint" style="margin:2px 0 8px">時序模型以時間排序的目標序列訓練；
@@ -638,6 +646,8 @@
       <button class="dtab active" data-d="history">專案編輯歷程</button>
       <button class="dtab" data-d="editor">資料編輯器</button>
       <button class="dtab" data-d="check">資料健檢</button>
+      <button id="drawer-close" title="收合側邊欄"
+        style="margin-left:auto;border:none;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--text2);padding:0 6px">&times;</button>
     </div>
     <div class="dbody show" id="d-history"></div>
     <div class="dbody" id="d-editor">

@@ -127,7 +127,9 @@ $('btn-more').addEventListener('click', (e) => {
 });
 document.addEventListener('click', (e) => {
   if (!e.target.closest('#more-menu') && !e.target.closest('#btn-more')) $('more-menu').classList.remove('open');
-  if (!e.target.closest('.popover') && !e.target.closest('.cicon')) closePopovers();
+  if (!e.target.closest('.popover') && !e.target.closest('.cicon') && !e.target.closest('.thops')) closePopovers();
+  // 框選面板：點 canvas 是拖曳流程的一部分，不在此收合
+  if (!e.target.closest('.brush-panel') && e.target.tagName !== 'CANVAS') closeBrushPanel();
 });
 $('mm-export').addEventListener('click', () => { if (sid) location.href = `/api/data/${sid}/export`; });
 $('mm-export-raw').addEventListener('click', async () => {
@@ -178,7 +180,11 @@ async function renderWall() {
       </div>
       <div class="card-body"><canvas id="cv-${i}"></canvas></div>
     </div>`).join('');
-  res.cards.forEach((c, i) => drawCard($(`cv-${i}`), c));
+  res.cards.forEach((c, i) => {
+    const cv = $(`cv-${i}`);
+    drawCard(cv, c);
+    bindBrush(cv);
+  });
   wall.querySelectorAll('.cicon').forEach((btn) => btn.addEventListener('click', (e) => {
     e.stopPropagation();
     const col = btn.closest('.card').dataset.col;
@@ -204,11 +210,34 @@ function renderPager(el, page, pages, go) {
   el.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => go(+b.dataset.p)));
 }
 
-// 卡片繪圖（直方圖/柱狀/散佈）— Tukey 藍白：主藍 #046AFB、細軸線、欄名置底
-const C_BLUE = '#046AFB';
+// 卡片繪圖 — 墨色系（使用者指定：圖表不用藍，黑灰依密度深淺）＋完整軸刻度＋框選
 const C_AXIS = '#061027';
 const C_LABEL = '#555555';
-function drawCard(canvas, card, big = false) {
+const C_GRID = '#ECEEF2';
+const INK_LO = [182, 188, 198];  // #B6BCC6 低柱
+const INK_HI = [6, 16, 39];      // #061027 高柱
+const ink = (t) => `rgb(${INK_LO.map((lo, i) => Math.round(lo + (INK_HI[i] - lo) * t)).join(',')})`;
+const GEOM = new WeakMap();      // canvas → 幾何映射（框選 px→值）
+
+function niceTicks(lo, hi, n = 6) {
+  if (!(hi > lo)) return [lo];
+  const step0 = (hi - lo) / n;
+  const mag = 10 ** Math.floor(Math.log10(step0));
+  const norm = step0 / mag;
+  const step = (norm >= 5 ? 5 : norm >= 2 ? 2 : 1) * mag;
+  const out = [];
+  for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + step * 1e-6; v += step) out.push(v);
+  return out;
+}
+const fmtTick = (v) => {
+  const a = Math.abs(v);
+  if (a !== 0 && (a >= 100000 || a < 0.01)) return v.toExponential(1);
+  if (a >= 100) return String(Math.round(v));
+  return String(Math.round(v * 100) / 100);
+};
+const fmtTime = (sec) => new Date(sec * 1000).toLocaleDateString('en', { month: 'short', day: 'numeric' });
+
+function drawCard(canvas, card, big = false, selPx = null) {
   const dpr = devicePixelRatio;
   const w = canvas.clientWidth || canvas.parentElement.clientWidth;
   const h = canvas.clientHeight || canvas.parentElement.clientHeight;
@@ -217,81 +246,206 @@ function drawCard(canvas, card, big = false) {
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  const M = { l: big ? 64 : 52, r: 18, t: 12, b: big ? 46 : 38 };
+  const M = { l: big ? 66 : 56, r: 16, t: 12, b: big ? 62 : 54 };
   ctx.font = big ? '12px Inter' : '11px Inter';
+  const plotW = w - M.l - M.r;
+  const plotH = h - M.t - M.b;
 
-  // 軸線（左＋下，Tukey 同款細黑軸）
+  // 值域（也是框選幾何）
+  let xlo = null, xhi = null, yhi = 1, ylo = 0;
+  if (card.mode === 'hist') {
+    xlo = card.edges[0]; xhi = card.edges.at(-1);
+    yhi = Math.max(...card.counts, 1);
+  } else if (card.mode === 'scatter' && card.x.length) {
+    const xn = card.x.map((v) => (typeof v === 'number' ? v : 0));
+    xlo = Math.min(...xn); xhi = Math.max(...xn);
+    ylo = Math.min(...card.y); yhi = Math.max(...card.y);
+  }
+  GEOM.set(canvas, { card, big, M, w, h, plotW, xlo, xhi });
+  const px = (v) => M.l + ((v - xlo) / ((xhi - xlo) || 1)) * plotW;
+  const py = (v) => h - M.b - ((v - ylo) / ((yhi - ylo) || 1)) * plotH;
+
+  // Y 軸刻度＋淺灰橫格線（Tukey 同款）
+  const yAxis = (ticks) => {
+    ctx.lineWidth = 1;
+    ctx.textAlign = 'right';
+    ticks.forEach((tv) => {
+      const y = py(tv);
+      ctx.strokeStyle = C_GRID;
+      ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(w - M.r, y); ctx.stroke();
+      ctx.fillStyle = C_LABEL;
+      ctx.fillText(fmtTick(tv), M.l - 8, y + 3.5);
+    });
+    ctx.textAlign = 'left';
+  };
+  // X 軸多刻度；時間/擁擠標籤 45° 斜排（Tukey 同款）
+  const xAxis = (isTime) => {
+    if (xlo == null || !(xhi > xlo)) return;
+    const ticks = isTime
+      ? Array.from({ length: 6 }, (_, i) => xlo + ((xhi - xlo) * i) / 5)
+      : niceTicks(xlo, xhi, big ? 7 : 5);
+    const fmt = isTime ? fmtTime : fmtTick;
+    const rotate = isTime || ticks.some((t) => ctx.measureText(fmt(t)).width > plotW / ticks.length - 10);
+    ticks.forEach((tv) => {
+      const x = px(tv);
+      ctx.strokeStyle = C_AXIS;
+      ctx.beginPath(); ctx.moveTo(x, h - M.b); ctx.lineTo(x, h - M.b + 4); ctx.stroke();
+      ctx.fillStyle = C_LABEL;
+      const lb = fmt(tv);
+      if (rotate) {
+        ctx.save();
+        ctx.translate(x, h - M.b + 7);
+        ctx.rotate(-Math.PI / 4);
+        ctx.textAlign = 'right';
+        ctx.fillText(lb, 0, 9);
+        ctx.restore();
+        ctx.textAlign = 'left';
+      } else {
+        ctx.fillText(lb, x - ctx.measureText(lb).width / 2, h - M.b + 18);
+      }
+    });
+  };
   const axes = () => {
     ctx.strokeStyle = C_AXIS;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(M.l - 6, M.t);
-    ctx.lineTo(M.l - 6, h - M.b + 6);
-    ctx.lineTo(w - M.r, h - M.b + 6);
+    ctx.moveTo(M.l, M.t);
+    ctx.lineTo(M.l, h - M.b);
+    ctx.lineTo(w - M.r, h - M.b);
     ctx.stroke();
   };
-  // 欄名置底置中（Tukey 卡片 x 軸標籤）
   const xlabel = (txt) => {
     ctx.fillStyle = C_LABEL;
     ctx.fillText(txt, (w - ctx.measureText(txt).width) / 2, h - 6);
   };
+  // 框選選取帶（互動元素，用主藍）
+  const selBand = () => {
+    if (!selPx) return;
+    const a = Math.max(Math.min(selPx[0], selPx[1]), M.l);
+    const b = Math.min(Math.max(selPx[0], selPx[1]), w - M.r);
+    ctx.fillStyle = 'rgba(4, 106, 251, 0.10)';
+    ctx.fillRect(a, M.t, b - a, plotH);
+    ctx.strokeStyle = 'rgba(4, 106, 251, 0.6)';
+    ctx.strokeRect(a + 0.5, M.t + 0.5, b - a - 1, plotH - 1);
+  };
 
   if (card.mode === 'hist') {
+    yAxis(niceTicks(0, yhi, 4).filter(Number.isInteger));
     axes();
-    const maxC = Math.max(...card.counts, 1);
-    const bw = (w - M.l - M.r) / card.counts.length;
-    ctx.fillStyle = C_BLUE;
     card.counts.forEach((cnt, i) => {
-      const bh = (cnt / maxC) * (h - M.t - M.b);
-      ctx.fillRect(M.l + i * bw + 0.5, h - M.b - bh, Math.max(bw - 1.5, 1), bh);
+      const x0 = px(card.edges[i]);
+      const x1 = px(card.edges[i + 1]);
+      const bh = (cnt / yhi) * plotH;
+      ctx.fillStyle = ink(cnt / yhi);
+      ctx.fillRect(x0 + 0.5, h - M.b - bh, Math.max(x1 - x0 - 1.5, 1), bh);
     });
-    ctx.fillStyle = C_LABEL;
-    // x_is_time：後端 edges 為 epoch 秒
-    const fmt = (v) => card.x_is_time ? new Date(v * 1000).toLocaleDateString('en', { month: 'short', day: 'numeric' }) : String(v);
-    ctx.fillText(fmt(card.edges[0]), M.l, h - M.b + 20);
-    const last = fmt(card.edges.at(-1));
-    ctx.fillText(last, w - M.r - ctx.measureText(last).width, h - M.b + 20);
-    ctx.fillText(String(maxC), 8, M.t + 9);
+    xAxis(!!card.x_is_time);
     xlabel(card.col);
   } else if (card.mode === 'bar') {
-    axes();
     const maxC = Math.max(...card.counts, 1);
-    const bw = (w - M.l - M.r) / card.labels.length;
+    yAxis(niceTicks(0, maxC, 4).filter(Number.isInteger));
+    axes();
+    const bw = plotW / card.labels.length;
     card.labels.forEach((lb, i) => {
-      const bh = (card.counts[i] / maxC) * (h - M.t - M.b);
-      ctx.fillStyle = C_BLUE;
+      const bh = (card.counts[i] / maxC) * plotH;
+      ctx.fillStyle = ink(card.counts[i] / maxC);
       ctx.fillRect(M.l + i * bw + 1, h - M.b - bh, bw - 2, bh);
       ctx.fillStyle = C_LABEL;
-      ctx.fillText(lb.slice(0, 7), M.l + i * bw + 2, h - M.b + 20);
+      ctx.fillText(lb.slice(0, 7), M.l + i * bw + 2, h - M.b + 18);
     });
     xlabel(card.col);
   } else if (card.mode === 'scatter') {
+    if (!card.x.length) return;
+    yAxis(niceTicks(ylo, yhi, 5));
     axes();
-    const xs = card.x, ys = card.y;
-    if (!xs.length) return;
-    const xnum = xs.map((v) => typeof v === 'number' ? v : 0);
-    const xlo = Math.min(...xnum), xhi = Math.max(...xnum);
-    const ylo = Math.min(...ys), yhi = Math.max(...ys);
-    const px = (v) => M.l + ((v - xlo) / ((xhi - xlo) || 1)) * (w - M.l - M.r);
-    const py = (v) => h - M.b - ((v - ylo) / ((yhi - ylo) || 1)) * (h - M.t - M.b);
-    ctx.fillStyle = 'rgba(4, 106, 251, 0.5)';
-    xnum.forEach((xv, i) => {
+    ctx.fillStyle = 'rgba(6, 16, 39, 0.45)';
+    card.x.forEach((xv, i) => {
       ctx.beginPath();
-      ctx.arc(px(xv), py(ys[i]), big ? 2.5 : 1.8, 0, Math.PI * 2);
+      ctx.arc(px(typeof xv === 'number' ? xv : 0), py(card.y[i]), big ? 2.5 : 1.8, 0, Math.PI * 2);
       ctx.fill();
     });
-    ctx.fillStyle = C_LABEL;
-    const fmtX = (v) => card.x_is_time ? new Date(v * 1000).toLocaleDateString('en', { month: 'short', day: 'numeric' }) : String(Math.round(v * 100) / 100);
-    ctx.fillText(fmtX(xlo), M.l, h - M.b + 20);
-    const lastX = fmtX(xhi);
-    ctx.fillText(lastX, w - M.r - ctx.measureText(lastX).width, h - M.b + 20);
-    ctx.fillText(String(Math.round(yhi * 10) / 10), 8, M.t + 9);
-    ctx.fillText(String(Math.round(ylo * 10) / 10), 8, h - M.b);
+    xAxis(!!card.x_is_time);
     xlabel(card.col);
   } else {
     ctx.fillStyle = C_LABEL;
     ctx.fillText('（無資料）', M.l, h / 2);
   }
+  selBand();
+}
+
+// ------------------------------------------------------------ 圖表框選 → 排除/萃取
+let brushPanel = null;
+function closeBrushPanel(redraw = true) {
+  if (!brushPanel) return;
+  const ref = brushPanel._ref;
+  brushPanel.remove();
+  brushPanel = null;
+  if (redraw && ref) drawCard(ref.canvas, ref.g.card, ref.g.big);
+}
+
+function openBrushPanel(cx, cy, canvas, g, lo, hi) {
+  closeBrushPanel(false);
+  const isTime = !!g.card.x_is_time || g.card.kind === 'time';
+  const fmtV = (v) => isTime
+    ? new Date(v * 1000).toLocaleString('sv').slice(0, 16)
+    : String(Math.round(v * 1000) / 1000);
+  const col = g.card.col;
+  brushPanel = document.createElement('div');
+  brushPanel.className = 'brush-panel';
+  brushPanel._ref = { canvas, g };
+  brushPanel.innerHTML = `
+    <div class="bp-range">${col}<br>${fmtV(lo)} ～ ${fmtV(hi)}</div>
+    <div class="bp-actions">
+      <button data-a="exclude">排除</button>
+      <button data-a="extract">萃取</button>
+      <button data-a="cancel">取消</button>
+    </div>`;
+  document.body.appendChild(brushPanel);
+  brushPanel.style.left = `${Math.min(cx, innerWidth - brushPanel.offsetWidth - 12)}px`;
+  brushPanel.style.top = `${Math.min(cy + 10, innerHeight - brushPanel.offsetHeight - 12)}px`;
+  brushPanel.querySelectorAll('button').forEach((b) => b.addEventListener('click', async () => {
+    const act = b.dataset.a;
+    if (act === 'cancel') { closeBrushPanel(); return; }
+    closeBrushPanel(false);
+    const r3 = (v) => Math.round(v * 1000) / 1000;
+    const disp = isTime ? `${fmtV(lo)}～${fmtV(hi)}` : `[${r3(lo)}, ${r3(hi)}]`;
+    const desc = `${act === 'exclude' ? 'exclude' : 'extract'} ${col} ∈ ${disp}`;
+    await addStep(act === 'exclude' ? 'exclude_range' : 'extract', desc,
+      { col, lo: isTime ? lo : r3(lo), hi: isTime ? hi : r3(hi) });
+  }));
+}
+
+function bindBrush(canvas) {
+  let x0 = null;
+  let dragging = false;
+  const posX = (e) => e.clientX - canvas.getBoundingClientRect().left;
+  canvas.style.cursor = 'crosshair';
+  canvas.addEventListener('pointerdown', (e) => {
+    const g = GEOM.get(canvas);
+    if (!g || g.xlo == null || !(g.xhi > g.xlo)) return;   // bar/空卡不支援
+    closeBrushPanel();
+    x0 = posX(e);
+    dragging = true;
+    canvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const g = GEOM.get(canvas);
+    drawCard(canvas, g.card, g.big, [x0, posX(e)]);
+  });
+  canvas.addEventListener('pointerup', (e) => {
+    if (!dragging) return;
+    dragging = false;
+    const g = GEOM.get(canvas);
+    const x1 = posX(e);
+    if (Math.abs(x1 - x0) < 5) { drawCard(canvas, g.card, g.big); return; }  // 誤觸
+    const clamp = (v) => Math.min(Math.max(v, g.M.l), g.w - g.M.r);
+    const toVal = (pv) => g.xlo + ((clamp(pv) - g.M.l) / (g.plotW || 1)) * (g.xhi - g.xlo);
+    const lo = Math.min(toVal(x0), toVal(x1));
+    const hi = Math.max(toVal(x0), toVal(x1));
+    openBrushPanel(e.clientX, e.clientY, canvas, g, lo, hi);
+  });
 }
 
 // ------------------------------------------------------------ 卡片操作 popover
@@ -402,6 +556,7 @@ async function openZoom(col) {
   $('zoom-modal').classList.add('open');
   requestAnimationFrame(() => drawCard($('zoom-canvas'), card, true));
 }
+bindBrush($('zoom-canvas'));
 $('zoom-close').addEventListener('click', () => $('zoom-modal').classList.remove('open'));
 $('zoom-modal').addEventListener('click', (e) => { if (e.target === $('zoom-modal')) $('zoom-modal').classList.remove('open'); });
 
@@ -490,10 +645,54 @@ function renderColMgr() {
 }
 $('col-search').addEventListener('input', renderColMgr);
 
-// ------------------------------------------------------------ 物性模組
+// ------------------------------------------------------------ 資料健檢
+$('btn-health').addEventListener('click', async () => {
+  const res = await api('/health');
+  // __id__ 與時間欄本來就是流水號/時戳，ID-ness 警告屬預期，不列出
+  const issues = res.issues.filter((it) => it.col !== '__id__'
+    && !state.columns.find((c) => c.name === it.col)?.dtype.startsWith('datetime'));
+  $('health-out').innerHTML = issues.length
+    ? issues.map((it) => `<div class="props-result"><b>${it.col}</b><br>${it.warnings.join('<br>')}</div>`).join('')
+    : '<div class="props-result"><span class="good">全數欄位通過三判準</span></div>';
+});
+
+$('btn-scan').addEventListener('click', async () => {
+  const res = await api('/scan');
+  if (!res.hits.length) {
+    $('scan-out').innerHTML = '<div class="props-result"><span class="good">未掃出異常（預設參數）</span></div>';
+    return;
+  }
+  const ruleName = Object.fromEntries(res.rules.map((r) => [r.kind, r.name]));
+  const ruleParams = Object.fromEntries(res.rules.map((r) => [r.kind, r.params]));
+  $('scan-out').innerHTML = res.hits.flatMap((row) =>
+    res.rules.filter((r) => row[r.kind] > 0).map((r) => `
+      <label class="scan-row">
+        <input type="checkbox" data-col="${row.col}" data-kind="${r.kind}">
+        ${row.col}｜${ruleName[r.kind]}
+        <span class="cnt">${row[r.kind]} 筆</span>
+      </label>`)).join('')
+    + '<button class="dbtn" id="btn-scan-apply" style="margin-top:8px">將勾選項加入編輯歷程</button>';
+  $('btn-scan-apply').addEventListener('click', async () => {
+    const checked = [...$('scan-out').querySelectorAll('input:checked')];
+    if (!checked.length) { alert('請先勾選要加入的規則'); return; }
+    for (const inp of checked) {
+      const kind = inp.dataset.kind;
+      const col = inp.dataset.col;
+      await api('/steps', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, label: `${ruleName[kind]}（${col}）`,
+          params: { col, ...ruleParams[kind] } }),
+      });
+    }
+    $('scan-out').innerHTML = '';
+    await refreshState();
+  });
+});
+
+// ------------------------------------------------------------ 流體物性（進階，選配）
 async function refreshPropsFluids() {
   const fl = await fetch('/api/data/props/fluids').then((r) => r.json());
-  $('props-fluid').innerHTML = fl.map((f) => `<option>${f}</option>`).join('');
+  $('fluid-list').innerHTML = fl.map((f) => `<option value="${f}">`).join('');
 }
 function fillPropsCols() {
   const numeric = state.columns.filter((c) => !c.hidden && c.name !== '__id__' &&
@@ -507,6 +706,7 @@ function propsBody(mark = false) {
            p_col: $('props-pcol').value || null, p_unit: $('props-punit').value, mark };
 }
 $('btn-props-check').addEventListener('click', async () => {
+  if (!$('props-fluid').value) { alert('請先搜尋並選定製程流體'); return; }
   if (!$('props-tcol').value) { alert('請選溫度欄位'); return; }
   const res = await api('/props/check', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -522,6 +722,7 @@ $('btn-props-check').addEventListener('click', async () => {
   await refreshState();
 });
 $('btn-props-derive').addEventListener('click', async () => {
+  if (!$('props-fluid').value) { alert('請先搜尋並選定製程流體'); return; }
   if (!$('props-tcol').value) { alert('請選溫度欄位'); return; }
   const res = await api('/props/derive', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },

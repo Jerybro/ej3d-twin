@@ -65,7 +65,12 @@ def _step_mask(df: pd.DataFrame, step: dict) -> pd.Series:
     col = p.get("col")
     if col not in df.columns:
         return pd.Series(False, index=df.index)
-    s = pd.to_numeric(df[col], errors="coerce")
+    if pd.api.types.is_datetime64_any_dtype(df[col]):
+        # 時間欄：以 epoch 秒比對（前端框選時間範圍送秒）。
+        # 不能用 astype("int64")——單位隨 dtype 變（[us] 給微秒）；Timedelta 除法單位無關
+        s = (df[col] - pd.Timestamp(0)) / pd.Timedelta(seconds=1)
+    else:
+        s = pd.to_numeric(df[col], errors="coerce")
     if kind == "extract":
         # 萃取：僅保留條件內 → 條件外剔除（Tukey 四操作之一）
         keep = ((s >= p.get("lo", -np.inf)) & (s <= p.get("hi", np.inf))).fillna(False)
@@ -438,6 +443,38 @@ def health(sid: str) -> dict:
             "note": "有警告的欄位不建議作為自變數（Tukey 資料健檢同款判準）"}
 
 
+# ------------------------------------------------------------ 通用異常掃描
+SCAN_RULES = [
+    {"kind": "jump_pct", "params": {"max_pct": 20}, "name": "跳變 >20%"},
+    {"kind": "flatline", "params": {"min_run": 5}, "name": "凍結值 ≥5 點"},
+    {"kind": "quantile", "params": {"lo_q": 0.005, "hi_q": 0.995}, "name": "分位離群 0.5% 尾"},
+]
+
+
+@router.get("/{sid}/scan")
+def scan(sid: str) -> dict:
+    """通用異常掃描（dry-run）：全數值欄試算三種清理規則的新增命中數，不假設流體。
+
+    與 apply_steps 同語意：mask 算在 base df，僅計入未被現行步驟剔除的 fresh 命中。
+    """
+    df = _load_base(sid)
+    _, reason, *_ = apply_steps(df, _load_steps(sid))
+    hits = []
+    num_cols = [c for c in df.columns if c != "__id__" and pd.api.types.is_numeric_dtype(df[c])]
+    for c in num_cols:
+        row = {"col": str(c)}
+        any_hit = False
+        for rule in SCAN_RULES:
+            mask = _step_mask(df, {"kind": rule["kind"], "params": {"col": c, **rule["params"]}})
+            n = int((mask & (reason == "")).sum())
+            row[rule["kind"]] = n
+            any_hit = any_hit or n > 0
+        if any_hit:
+            hits.append(row)
+    return {"rules": [{"kind": r["kind"], "name": r["name"], "params": r["params"]} for r in SCAN_RULES],
+            "hits": hits}
+
+
 # ------------------------------------------------------------ 相關分析
 @router.get("/{sid}/corr")
 def corr(sid: str, cols: str = "", method: str = "pearson") -> dict:
@@ -516,9 +553,17 @@ def export(sid: str) -> PlainTextResponse:
                              headers={"Content-Disposition": f"attachment; filename=cleaned_{sid}.csv"})
 
 
-# ---------------------------------------------------- CoolProp 物性模組
-FLUIDS = ["Water", "Toluene", "Benzene", "p-Xylene", "m-Xylene", "o-Xylene",
-          "Methane", "Hydrogen", "Nitrogen", "Ammonia", "CarbonDioxide", "Propane", "IsoButane"]
+# ---------------------------------------------------- CoolProp 物性模組（選配進階）
+_FLUIDS_CACHE: list[str] = []
+
+
+def _all_fluids() -> list[str]:
+    """CoolProp 全流體庫（~120 種）——不預設任何製程流體，由使用者宣告。"""
+    global _FLUIDS_CACHE
+    if not _FLUIDS_CACHE:
+        import CoolProp.CoolProp as CP
+        _FLUIDS_CACHE = sorted(CP.get_global_param_string("fluids_list").split(","))
+    return _FLUIDS_CACHE
 
 
 def _to_K(v, unit):
@@ -531,7 +576,7 @@ def _to_Pa(v, unit):
 
 @router.get("/props/fluids")
 def fluids() -> list:
-    return FLUIDS
+    return _all_fluids()
 
 
 @router.post("/{sid}/props/check")
@@ -542,7 +587,7 @@ def props_check(sid: str, body: dict) -> dict:
     df = _load_base(sid)
     fluid, t_col = body.get("fluid"), body.get("t_col")
     t_unit, p_col, p_unit = body.get("t_unit", "C"), body.get("p_col"), body.get("p_unit", "kgcm2")
-    if fluid not in FLUIDS or t_col not in df.columns:
+    if fluid not in _all_fluids() or t_col not in df.columns:
         raise HTTPException(422, "需要有效 fluid 與 t_col")
     T = _to_K(pd.to_numeric(df[t_col], errors="coerce"), t_unit)
     Tmin, Tcrit, Pcrit = CP.PropsSI("Tmin", fluid), CP.PropsSI("Tcrit", fluid), CP.PropsSI("Pcrit", fluid)
@@ -575,7 +620,7 @@ def props_derive(sid: str, body: dict) -> dict:
     df = _load_base(sid)
     fluid, t_col = body.get("fluid"), body.get("t_col")
     t_unit, p_col, p_unit = body.get("t_unit", "C"), body.get("p_col"), body.get("p_unit", "kgcm2")
-    if fluid not in FLUIDS or t_col not in df.columns:
+    if fluid not in _all_fluids() or t_col not in df.columns:
         raise HTTPException(422, "需要有效 fluid 與 t_col")
     T = _to_K(pd.to_numeric(df[t_col], errors="coerce"), t_unit)
     Tmin, Tcrit = CP.PropsSI("Tmin", fluid), CP.PropsSI("Tcrit", fluid)

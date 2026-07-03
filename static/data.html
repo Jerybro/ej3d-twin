@@ -235,6 +235,32 @@
     .props-result .bad { color: var(--danger); font-weight: 600; }
     .props-result .good { color: var(--ok); font-weight: 600; }
     .hint { font-size: 13px; color: var(--text2); line-height: 1.8; }
+    .sec-title { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 6px; }
+    #props-adv { margin-top: 18px; border-top: 1px solid var(--bdr); padding-top: 12px; }
+    #props-adv summary { font-size: 14px; font-weight: 500; color: var(--text);
+      cursor: pointer; list-style-position: inside; }
+    #props-adv summary:hover { color: var(--blue); }
+    .scan-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px;
+      font-size: 13.5px; color: var(--text); border-radius: 4px; }
+    .scan-row:hover { background: var(--bg); }
+    .scan-row input[type="checkbox"] { accent-color: var(--blue); }
+    .scan-row .cnt { margin-left: auto; color: var(--text2); font-size: 13px; white-space: nowrap; }
+
+    /* 框選面板 */
+    .brush-panel {
+      position: fixed; z-index: 70; width: 232px;
+      background: var(--white); border: 1px solid var(--bdr); border-radius: 5px;
+      box-shadow: 0 6px 24px rgba(6, 16, 39, 0.14); padding: 12px;
+    }
+    .brush-panel .bp-range { font-size: 13.5px; color: var(--text); line-height: 1.7;
+      margin-bottom: 10px; word-break: break-all; }
+    .brush-panel .bp-actions { display: flex; gap: 6px; }
+    .brush-panel .bp-actions button {
+      flex: 1; padding: 6px 0; border-radius: 4px; cursor: pointer; font-size: 13.5px;
+      border: 1px solid var(--bdr); background: var(--white); color: var(--text);
+    }
+    .brush-panel [data-a="exclude"] { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .brush-panel .bp-actions button:hover { filter: brightness(0.96); }
 
     /* 更多選單 */
     #more-menu {
@@ -352,27 +378,44 @@
     <div class="drawer-tabs">
       <button class="dtab active" data-d="history">專案編輯歷程</button>
       <button class="dtab" data-d="editor">資料編輯器</button>
-      <button class="dtab" data-d="props">物性模組</button>
+      <button class="dtab" data-d="check">資料健檢</button>
     </div>
     <div class="dbody show" id="d-history"></div>
     <div class="dbody" id="d-editor">
       <input class="search" id="col-search" placeholder="搜尋欄位…" />
       <div id="col-mgr"></div>
     </div>
-    <div class="dbody" id="d-props">
-      <p class="hint" style="margin-bottom:10px">CoolProp 物性引擎：物理合理性檢查
-        （超出物性邊界標記為清理步驟＝AI 外插柵欄）與物性欄位推算。</p>
-      <select class="mini" id="props-fluid"></select>
-      <select class="mini" id="props-tcol"><option value="">溫度欄位…</option></select>
-      <select class="mini" id="props-tunit"><option value="C">°C</option><option value="K">K</option></select>
-      <select class="mini" id="props-pcol"><option value="">壓力欄位（選填）…</option></select>
-      <select class="mini" id="props-punit">
-        <option value="kgcm2">kg/cm²g</option><option value="bar">bar</option>
-        <option value="kPa">kPa</option><option value="Pa">Pa</option>
-      </select>
-      <button class="dbtn" id="btn-props-check">物理合理性檢查</button>
-      <button class="dbtn" id="btn-props-derive">推算物性欄位</button>
-      <div id="props-out"></div>
+    <div class="dbody" id="d-check">
+      <div class="sec-title">欄位健檢</div>
+      <p class="hint" style="margin-bottom:8px">ID-ness／大量重複／大量遺失三判準——
+        有警告的欄位不建議作為自變數。</p>
+      <button class="dbtn" id="btn-health">執行欄位健檢</button>
+      <div id="health-out"></div>
+
+      <div class="sec-title" style="margin-top:18px">通用異常掃描</div>
+      <p class="hint" style="margin-bottom:8px">跳變 &gt;20%／連續凍結 ≥5 點／分位離群
+        0.5% 尾端——依數值特性掃描，不假設任何流體。勾選後加入編輯歷程，可停用還原。</p>
+      <button class="dbtn" id="btn-scan">掃描全部數值欄</button>
+      <div id="scan-out"></div>
+
+      <details id="props-adv">
+        <summary>流體物性（進階）</summary>
+        <p class="hint" style="margin:8px 0 10px">選配模組：宣告製程流體後，可用
+          CoolProp 做物性邊界檢查（超界標記為清理步驟＝AI 外插柵欄）與物性欄位推算。</p>
+        <input class="mini" id="props-fluid" list="fluid-list"
+          placeholder="搜尋流體（如 Water、n-Hexane）…" autocomplete="off" />
+        <datalist id="fluid-list"></datalist>
+        <select class="mini" id="props-tcol"><option value="">溫度欄位…</option></select>
+        <select class="mini" id="props-tunit"><option value="C">°C</option><option value="K">K</option></select>
+        <select class="mini" id="props-pcol"><option value="">壓力欄位（選填）…</option></select>
+        <select class="mini" id="props-punit">
+          <option value="kgcm2">kg/cm²g</option><option value="bar">bar</option>
+          <option value="kPa">kPa</option><option value="Pa">Pa</option>
+        </select>
+        <button class="dbtn" id="btn-props-check">物性邊界檢查</button>
+        <button class="dbtn" id="btn-props-derive">推算物性欄位</button>
+        <div id="props-out"></div>
+      </details>
     </div>
   </aside>
 

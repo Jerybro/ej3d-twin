@@ -549,7 +549,7 @@
         </div>
         <div class="wiz-mode" data-mode="manual">
           <b>手動建立</b>
-          <p>自選演算法，並可自訂超參數（Tukey 不提供的進階控制）</p>
+          <p>自選演算法，並可自訂超參數與自動調參</p>
         </div>
         <div class="wiz-actions">
           <button class="save" id="wiz-mode-ok">確定</button>
@@ -562,7 +562,18 @@
         <input class="mini" id="wiz-name" placeholder="留空自動命名" autocomplete="off" />
         <label>預測目標（應變數）</label>
         <select class="mini" id="wiz-target"></select>
-        <label>自變數（預設全選）</label>
+        <label>任務型態</label>
+        <select class="mini" id="wiz-task">
+          <option value="auto">自動判定（數值目標＝迴歸、類別目標＝分類）</option>
+          <option value="timeseries">時序預測（以目標自身落遲＋外生變數預測未來）</option>
+        </select>
+        <div id="wiz-ts-cfg" style="display:none" class="opt-row">
+          <div class="wp" style="flex:1"><label style="margin:0 0 4px;font-size:13px;color:var(--text2)">預測步數 horizon（往後幾筆）</label>
+            <input class="mini" id="wiz-horizon" type="number" min="1" max="96" value="1" style="margin:0"></div>
+          <div class="wp" style="flex:1"><label style="margin:0 0 4px;font-size:13px;color:var(--text2)">落遲期數 lags（回看幾筆）</label>
+            <input class="mini" id="wiz-lags" type="number" min="1" max="48" value="8" style="margin:0"></div>
+        </div>
+        <label id="wiz-feat-label">自變數（預設全選）</label>
         <div id="wiz-features"></div>
         <div id="wiz-manual-only">
           <label>演算法</label>

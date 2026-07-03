@@ -51,7 +51,8 @@ async function upload(file) {
     $('upload-err').style.display = 'block';
     return;
   }
-  history.replaceState(null, '', `?sid=${body.sid}`);
+  const wantView = new URLSearchParams(location.search).get('view');
+  history.replaceState(null, '', `?sid=${body.sid}${wantView ? `&view=${wantView}` : ''}`);
   enterSession(body.sid, body.filename);
 }
 
@@ -63,6 +64,11 @@ async function enterSession(newSid, filename) {
   await refreshState();
   $('ds-name').textContent = filename ?? state.filename ?? '資料集';
   refreshPropsFluids();
+  // 首頁應用入口直達（/data?view=model）
+  const wantView = new URLSearchParams(location.search).get('view');
+  if (wantView) {
+    document.querySelector(`.nav-tab[data-view="${wantView}"]`)?.click();
+  }
 }
 
 // ?sid= 會話還原（重新整理不遺失工作階段）
@@ -832,7 +838,7 @@ async function renderModels() {
       models.map((m, i) => `<tr data-id="${m.id}">
         <td>${m.status === 'done' ? `#${i + 1}` : ''}</td>
         <td>${m.name}</td><td>${m.target}</td>
-        <td>${m.task === 'classification' ? '分類' : '迴歸'}</td>
+        <td>${m.task === 'classification' ? '分類' : m.task === 'timeseries' ? '時序' : '迴歸'}</td>
         <td>${(ALGO_META?.find((a) => a.key === m.algo)?.name) ?? m.algo}${m.auto_tune ? '（自動調參）' : ''}</td>
         ${mv(m).map((v) => `<td>${v}</td>`).join('')}
         <td class="st-${m.status}" title="${m.error ?? ''}">${stName[m.status] ?? m.status}</td>
@@ -863,23 +869,28 @@ async function openModelDetail(mid) {
   if (m.status !== 'done') { alert(m.status === 'error' ? `訓練失敗：${m.error}` : '訓練中，請稍候'); return; }
   await loadAlgoMeta();
   const cls = m.task === 'classification';
+  const isTs = m.task === 'timeseries';
   const heads = METRIC_HEADS[cls ? 'classification' : 'regression'];
   const algoName = ALGO_META.find((a) => a.key === m.algo)?.name ?? m.algo;
   const tuned = m.tuned_params ? `<div class="md-sub">自動調參結果：${
     Object.entries(m.tuned_params).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : v}`).join('、')}</div>` : '';
   const charts = cls ? `
       <div class="md-chart"><h4>混淆矩陣 Confusion Matrix（交叉驗證）</h4><canvas id="md-cm"></canvas></div>
+      <div class="md-chart"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>` : isTs ? `
+      <div class="md-chart wide"><h4>時序預測 Actual vs Predicted（走前驗證）</h4><canvas id="md-ts"></canvas></div>
+      <div class="md-chart"><h4>模型準確度 Actual – Predicted</h4><canvas id="md-pa"></canvas></div>
       <div class="md-chart"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>` : `
       <div class="md-chart"><h4>模型準確度 Actual – Predicted</h4><canvas id="md-pa"></canvas></div>
       <div class="md-chart"><h4>模型準確度 Actual – Error</h4><canvas id="md-err"></canvas></div>
       <div class="md-chart wide"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>`;
+  const taskName = cls ? '分類' : isTs ? `時序預測（往後 ${m.ts?.horizon ?? 1} 筆、落遲 ${m.ts?.lags ?? 8} 期）` : '迴歸';
   $('model-detail').innerHTML = `
     <h3>${m.name}</h3>
-    <div class="md-sub">${algoName}｜${cls ? '分類' : '迴歸'}｜訓練資料 ${m.n_rows.toLocaleString()} 筆 ${m.features.length} 特徵｜目標 ${m.target}</div>
+    <div class="md-sub">${algoName}｜${taskName}｜訓練資料 ${m.n_rows.toLocaleString()} 筆｜目標 ${m.target}</div>
     ${tuned}
     <table class="md-metrics">
       <tr><th>模型指標</th>${heads.map((h) => `<th>${h}</th>`).join('')}</tr>
-      ${metricRow('交叉驗證集', m.metrics_cv, cls)}${metricRow('訓練資料集', m.metrics_train, cls)}
+      ${metricRow(isTs ? '走前驗證（時序切分）' : '交叉驗證集', m.metrics_cv, cls)}${metricRow('訓練資料集', m.metrics_train, cls)}
       <tbody id="ev-metric-row"></tbody>
     </table>
     <div class="md-charts">${charts}</div>
@@ -890,14 +901,15 @@ async function openModelDetail(mid) {
       <button class="dbtn" style="width:auto;padding:8px 22px" id="btn-eval">建立評估</button>
       <div id="ev-out">${m.evaluation ? '' : '<p class="hint" style="margin-top:8px">尚無評估——點擊「建立評估」開始。</p>'}</div>
     </details>
+    ${isTs ? '' : `
     <details class="md-app" id="app-whatif">
       <summary>操作差異試算——改變輸入條件，看預測怎麼變</summary>
       <p class="hint" style="margin:8px 0">基準值＝現行視圖各特徵中位數；留空＝維持基準。</p>
       <div class="wiz-params" id="wi-grid"></div>
       <button class="dbtn" style="width:auto;padding:8px 22px;margin-top:10px" id="btn-whatif">試算</button>
       <div id="wi-out"></div>
-    </details>
-    ${cls ? '' : `
+    </details>`}
+    ${(cls || isTs) ? '' : `
     <details class="md-app" id="app-opt">
       <summary>配方優化（參數最佳化）——設定目標，輸出最佳參數建議</summary>
       <div class="opt-row">
@@ -916,7 +928,10 @@ async function openModelDetail(mid) {
   $('model-detail').style.display = '';
   requestAnimationFrame(() => {
     if (cls) drawCM($('md-cm'), m.plots.cm.labels, m.plots.cm.matrix);
-    else {
+    else if (isTs) {
+      drawTS($('md-ts'), m.plots.ts.t, m.plots.ts.actual, m.plots.ts.pred);
+      drawXY($('md-pa'), m.plots.pa.actual, m.plots.pa.pred, '實際值', '預測值', true);
+    } else {
       drawXY($('md-pa'), m.plots.pa.actual, m.plots.pa.pred, '實際值', '預測值', true);
       drawXY($('md-err'), m.plots.err.actual, m.plots.err.error, '實際值', '誤差值', false, true);
     }
@@ -930,6 +945,7 @@ async function openModelDetail(mid) {
 // ---------------- 模型應用：評估 / 試算 / 優化
 function renderEvaluation(m, ev) {
   const cls = m.task === 'classification';
+  const isTs = m.task === 'timeseries';
   $('ev-metric-row').innerHTML = metricRow(`現行視圖評估（${ev.n_rows.toLocaleString()} 筆）`, ev.metrics, cls);
   $('ev-out').innerHTML = `
     <div class="md-sub" style="margin-top:10px">評估時間 ${ev.evaluated_at}｜${ev.n_rows.toLocaleString()} 筆</div>
@@ -937,12 +953,59 @@ function renderEvaluation(m, ev) {
       <tr><th>評估指標</th>${METRIC_HEADS[cls ? 'classification' : 'regression'].map((h) => `<th>${h}</th>`).join('')}</tr>
       ${metricRow('現行視圖', ev.metrics, cls)}
     </table>
-    <div class="md-chart" style="max-width:560px"><h4>${cls ? '混淆矩陣（現行視圖）' : 'Actual – Predicted（現行視圖）'}</h4>
+    <div class="md-chart" style="max-width:${isTs ? '100%' : '560px'}"><h4>${
+      cls ? '混淆矩陣（現行視圖）' : isTs ? '時序預測 vs 實際（現行視圖）' : 'Actual – Predicted（現行視圖）'}</h4>
       <canvas id="ev-chart"></canvas></div>`;
   requestAnimationFrame(() => {
     if (cls) drawCM($('ev-chart'), ev.cm.labels, ev.cm.matrix);
+    else if (isTs) drawTS($('ev-chart'), ev.ts.t, ev.ts.actual, ev.ts.pred);
     else drawXY($('ev-chart'), ev.pa.actual, ev.pa.pred, '實際值', '預測值', true);
   });
+}
+
+// 時序線圖：實際（灰）vs 預測（主題色）
+function drawTS(canvas, t, actual, pred) {
+  const dpr = devicePixelRatio;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '11px Inter';
+  const M = { l: 64, r: 16, t: 14, b: 44 };
+  const xlo = Math.min(...t), xhi = Math.max(...t);
+  const all = actual.concat(pred);
+  const ylo = Math.min(...all), yhi = Math.max(...all);
+  const px = (v) => M.l + ((v - xlo) / ((xhi - xlo) || 1)) * (w - M.l - M.r);
+  const py = (v) => h - M.b - ((v - ylo) / ((yhi - ylo) || 1)) * (h - M.t - M.b);
+  ctx.textAlign = 'right';
+  niceTicks(ylo, yhi, 5).forEach((tv) => {
+    const y = py(tv);
+    ctx.strokeStyle = C_GRID; ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(w - M.r, y); ctx.stroke();
+    ctx.fillStyle = C_LABEL; ctx.fillText(fmtTick(tv), M.l - 8, y + 3.5);
+  });
+  ctx.textAlign = 'left';
+  Array.from({ length: 6 }, (_, i) => xlo + ((xhi - xlo) * i) / 5).forEach((tv) => {
+    const x = px(tv);
+    ctx.strokeStyle = C_AXIS; ctx.beginPath(); ctx.moveTo(x, h - M.b); ctx.lineTo(x, h - M.b + 4); ctx.stroke();
+    ctx.fillStyle = C_LABEL;
+    const lb = fmtTime(tv);
+    ctx.fillText(lb, x - ctx.measureText(lb).width / 2, h - M.b + 18);
+  });
+  ctx.strokeStyle = C_AXIS;
+  ctx.beginPath(); ctx.moveTo(M.l, M.t); ctx.lineTo(M.l, h - M.b); ctx.lineTo(w - M.r, h - M.b); ctx.stroke();
+  const line = (ys, color, width) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width;
+    ctx.beginPath();
+    ys.forEach((v, i) => { const x = px(t[i]), y = py(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke(); ctx.lineWidth = 1;
+  };
+  line(actual, '#9AA1AC', 1.2);
+  line(pred, theme().selL, 1.6);
+  // 圖例
+  ctx.fillStyle = '#9AA1AC'; ctx.fillRect(w - 150, M.t, 16, 3);
+  ctx.fillStyle = C_LABEL; ctx.fillText('實際', w - 128, M.t + 5);
+  ctx.fillStyle = theme().selL; ctx.fillRect(w - 90, M.t, 16, 3);
+  ctx.fillStyle = C_LABEL; ctx.fillText('預測', w - 68, M.t + 5);
 }
 
 function bindModelApps(m) {
@@ -955,7 +1018,8 @@ function bindModelApps(m) {
     } catch (e) { alert(`評估失敗：${e.message}`); } finally { $('btn-eval').disabled = false; }
   });
 
-  // what-if：開啟時抓 baseline 填 placeholder
+  // what-if：開啟時抓 baseline 填 placeholder（時序模型無此區）
+  if (!$('app-whatif')) return;
   let wiLoaded = false;
   $('app-whatif').addEventListener('toggle', async () => {
     if (!$('app-whatif').open || wiLoaded) return;
@@ -993,7 +1057,7 @@ function bindModelApps(m) {
     } catch (e) { alert(`試算失敗：${e.message}`); } finally { $('btn-whatif').disabled = false; }
   });
 
-  if (cls) return;
+  if (cls || !$('app-opt')) return;
   // 配方優化
   $('opt-knobs').innerHTML = `<div class="feat-grid" style="max-height:150px">${
     m.features.map((f) => `<label><input type="checkbox" checked value="${f}">${f}</label>`).join('')}</div>`;
@@ -1168,6 +1232,16 @@ $('wiz-mode-ok').addEventListener('click', () => {
   };
   $('wiz-target').onchange = renderFeatures;
   renderFeatures();
+  // 任務型態：時序預測需要時間欄；外生變數可留空
+  const hasTime = state.columns.some((c) => !c.hidden && c.dtype.startsWith('datetime'));
+  $('wiz-task').value = 'auto';
+  $('wiz-task').querySelector('[value="timeseries"]').disabled = !hasTime;
+  $('wiz-ts-cfg').style.display = 'none';
+  $('wiz-task').onchange = () => {
+    const isTs = $('wiz-task').value === 'timeseries';
+    $('wiz-ts-cfg').style.display = isTs ? 'flex' : 'none';
+    $('wiz-feat-label').textContent = isTs ? '外生變數（可留空——僅用目標自身落遲）' : '自變數（預設全選）';
+  };
   $('wiz-manual-only').style.display = wizMode === 'manual' ? '' : 'none';
   if (wizMode === 'manual') {
     $('wiz-algo').innerHTML = ALGO_META.map((a) => `<option value="${a.key}" ${a.key === 'XGB' ? 'selected' : ''}>${a.name}</option>`).join('');
@@ -1190,14 +1264,20 @@ $('wiz-mode-ok').addEventListener('click', () => {
 });
 
 $('wiz-submit').addEventListener('click', async () => {
+  const isTs = $('wiz-task').value === 'timeseries';
   const features = [...$('wiz-features').querySelectorAll('input:checked')].map((i) => i.value);
-  if (!features.length) { alert('至少勾選一個自變數'); return; }
+  if (!features.length && !isTs) { alert('至少勾選一個自變數'); return; }
   const body = {
     mode: wizMode,
     name: $('wiz-name').value.trim(),
     target: $('wiz-target').value,
     features,
   };
+  if (isTs) {
+    body.task_type = 'timeseries';
+    body.horizon = +$('wiz-horizon').value || 1;
+    body.lags = +$('wiz-lags').value || 8;
+  }
   if (wizMode === 'manual') {
     body.algo = $('wiz-algo').value;
     body.auto_tune = $('wiz-tune').checked;

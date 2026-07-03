@@ -461,7 +461,7 @@ def health(sid: str) -> dict:
         if warns:
             out.append({"col": str(c), "warnings": warns})
     return {"n_rows": n, "issues": out,
-            "note": "有警告的欄位不建議作為自變數（Tukey 資料健檢同款判準）"}
+            "note": "有警告的欄位不建議作為自變數"}
 
 
 # ------------------------------------------------------------ 通用異常掃描

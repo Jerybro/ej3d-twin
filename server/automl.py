@@ -225,6 +225,36 @@ def _baseline(sid: str, rec: dict) -> dict:
     return {f: round(float(med[i]), 6) for i, f in enumerate(rec["features"])}
 
 
+def _ts_matrix(sid: str, rec: dict):
+    """時序特徵矩陣：目標自身 L 期落遲＋外生變數當期值 → 預測 t+h 的目標。
+    回 (X, y, t_epoch, feat_names)；t_epoch 為 y 對應時間點（畫時序圖用）。"""
+    ts = rec.get("ts") or {}
+    tcol, lags, horizon = ts.get("time_col"), int(ts.get("lags", 8)), int(ts.get("horizon", 1))
+    df = _load_base(sid)
+    view, *_ = apply_steps(df, _load_steps(sid))
+    if tcol not in view.columns or not pd.api.types.is_datetime64_any_dtype(view[tcol]):
+        raise HTTPException(422, f"時序模型需要時間欄（{tcol} 不存在或非時間型態）")
+    d = view.sort_values(tcol).reset_index(drop=True)
+    tgt = pd.to_numeric(d[rec["target"]], errors="coerce")
+    cols = {}
+    feat_names = []
+    for k in range(lags):
+        name = f"{rec['target']}(t{'' if k == 0 else f'-{k}'})"
+        cols[name] = tgt.shift(k)
+        feat_names.append(name)
+    for f in rec["features"]:
+        cols[f] = pd.to_numeric(d[f], errors="coerce")
+        feat_names.append(f)
+    frame = pd.DataFrame(cols)
+    frame["__y__"] = tgt.shift(-horizon)
+    frame["__t__"] = (d[tcol].shift(-horizon) - pd.Timestamp(0)) // pd.Timedelta(seconds=1)
+    frame = frame.dropna()
+    X = frame[feat_names].to_numpy(dtype=float)
+    y = frame["__y__"].to_numpy(dtype=float)
+    t = frame["__t__"].to_numpy(dtype=float)
+    return X, y, t, feat_names
+
+
 # ------------------------------------------------------ 指標
 def _metrics_cls(y, yhat) -> dict:
     from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
@@ -256,13 +286,19 @@ def _train_job(sid: str, rec: dict):
 
         task = rec.get("task", "regression")
         cls = task == "classification"
-        X, y = _current_xy(sid, rec)
+        ts = task == "timeseries"
+        feat_names = rec["features"]
+        t_epoch = None
+        if ts:
+            X, y, t_epoch, feat_names = _ts_matrix(sid, rec)
+        else:
+            X, y = _current_xy(sid, rec)
         if len(y) < 30:
             raise ValueError(f"有效樣本僅 {len(y)} 筆（<30），不足以訓練")
         if cls and len(set(y)) < 2:
             raise ValueError("分類目標只有一個類別")
 
-        pipe = _build_pipeline(rec["algo"], rec.get("params"), task)
+        pipe = _build_pipeline(rec["algo"], rec.get("params"), "regression" if ts else task)
         if rec.get("auto_tune") and rec["algo"] in TUNE_SPACE:
             scoring = "f1_macro" if cls else "neg_root_mean_squared_error"
             space = {k: v for k, v in TUNE_SPACE[rec["algo"]].items()
@@ -278,6 +314,40 @@ def _train_job(sid: str, rec: dict):
                                        for k, v in search.best_params_.items()}
             except Exception:  # noqa: BLE001 分類器參數名不合時退回預設
                 pipe = _build_pipeline(rec["algo"], rec.get("params"), task)
+
+        if ts:
+            # 走前驗證（TimeSeriesSplit）：不能洗牌，逐折收 out-of-fold 預測
+            from sklearn.model_selection import TimeSeriesSplit
+            oof_idx, oof_pred = [], []
+            for tr, te in TimeSeriesSplit(n_splits=5).split(X):
+                pipe.fit(X[tr], y[tr])
+                oof_idx.extend(te.tolist())
+                oof_pred.extend(pipe.predict(X[te]).tolist())
+            oof_idx = np.array(oof_idx)
+            yhat_cv_ts = np.array(oof_pred)
+            rec["metrics_cv"] = _metrics(y[oof_idx], yhat_cv_ts)
+            pipe.fit(X, y)
+            rec["metrics_train"] = _metrics(y, pipe.predict(X))
+            rec["plots"] = {}
+            # 時序圖：走前驗證區段的 actual vs pred（等距抽樣 ≤800 點，保持時間序）
+            step = max(1, len(oof_idx) // 800)
+            sel = oof_idx[::step]
+            selp = yhat_cv_ts[::step]
+            rec["plots"]["ts"] = {"t": t_epoch[sel].tolist(),
+                                  "actual": np.round(y[sel], 4).tolist(),
+                                  "pred": np.round(selp, 4).tolist()}
+            rec["plots"]["pa"] = {"actual": np.round(y[oof_idx][:600], 4).tolist(),
+                                  "pred": np.round(yhat_cv_ts[:600], 4).tolist()}
+            sub = np.random.RandomState(0).choice(len(y), min(1500, len(y)), replace=False)
+            imp = permutation_importance(pipe, X[sub], y[sub], n_repeats=5, random_state=0, n_jobs=1)
+            order = np.argsort(imp.importances_mean)[::-1][:15]
+            rec["plots"]["fi"] = {"names": [feat_names[i] for i in order],
+                                  "values": np.round(imp.importances_mean[order], 5).tolist()}
+            rec["n_rows"] = int(len(y))
+            joblib.dump(pipe, _pipe_path(sid, rec["id"]))
+            rec["status"] = "done"
+            _save(sid, rec)
+            return
 
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=0) if cls \
             else KFold(n_splits=5, shuffle=True, random_state=0)
@@ -356,13 +426,25 @@ def create_models(sid: str, body: dict) -> dict:
     任務自動判定：目標欄數值＝迴歸、字串/類別＝分類。"""
     target = body.get("target")
     features = [f for f in body.get("features", []) if f != target]
-    if not target or not features:
+    if not target or (not features and body.get("task_type") != "timeseries"):
+        # 時序預測可只用目標自身落遲（外生變數可留空）
         raise HTTPException(422, "需要 target 與至少一個自變數")
     df = _load_base(sid)
     view, *_ = apply_steps(df, _load_steps(sid))
     if target not in view.columns:
         raise HTTPException(422, f"目標欄 {target} 不存在")
     task = "regression" if pd.api.types.is_numeric_dtype(view[target]) else "classification"
+    ts_cfg = None
+    if body.get("task_type") == "timeseries":
+        if task != "regression":
+            raise HTTPException(422, "時序預測的目標必須是數值欄")
+        tcols = [c for c in view.columns if pd.api.types.is_datetime64_any_dtype(view[c])]
+        if not tcols:
+            raise HTTPException(422, "時序預測需要時間欄")
+        task = "timeseries"
+        ts_cfg = {"time_col": body.get("time_col") or tcols[0],
+                  "horizon": max(1, int(body.get("horizon") or 1)),
+                  "lags": min(48, max(1, int(body.get("lags") or 8)))}
     mode = body.get("mode", "manual")
     jobs = []
     if mode == "auto":
@@ -381,6 +463,8 @@ def create_models(sid: str, body: dict) -> dict:
         rec = {"id": uuid.uuid4().hex[:8], "sid": sid, "status": "training",
                "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                "target": target, "features": features, "task": task, **j}
+        if ts_cfg:
+            rec["ts"] = ts_cfg
         _save(sid, rec)
         created.append(rec["id"])
 
@@ -401,11 +485,16 @@ def evaluate(sid: str, mid: str) -> dict:
     if rec.get("status") != "done":
         raise HTTPException(422, "模型尚未完成訓練")
     pipe = _load_pipe(sid, mid)
-    X, y = _current_xy(sid, rec)
+    cls = rec.get("task") == "classification"
+    ts = rec.get("task") == "timeseries"
+    t_epoch = None
+    if ts:
+        X, y, t_epoch, _names = _ts_matrix(sid, rec)
+    else:
+        X, y = _current_xy(sid, rec)
     if len(y) < 5:
         raise HTTPException(422, f"現行視圖有效樣本僅 {len(y)} 筆，無法評估")
     yhat = pipe.predict(X)
-    cls = rec.get("task") == "classification"
     ev = {"evaluated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
           "n_rows": int(len(y)),
           "metrics": _metrics_cls(y, yhat) if cls else _metrics(y, yhat)}
@@ -414,6 +503,11 @@ def evaluate(sid: str, mid: str) -> dict:
         labels = sorted(set(list(y) + list(yhat)))
         ev["cm"] = {"labels": [str(l) for l in labels],
                     "matrix": confusion_matrix(y, yhat, labels=labels).tolist()}
+    elif ts:
+        step = max(1, len(y) // 800)
+        ev["ts"] = {"t": t_epoch[::step].tolist(),
+                    "actual": np.round(y[::step], 4).tolist(),
+                    "pred": np.round(yhat[::step], 4).tolist()}
     else:
         idx = np.random.RandomState(0).choice(len(y), min(600, len(y)), replace=False)
         ev["pa"] = {"actual": np.round(y[idx].astype(float), 4).tolist(),
@@ -427,6 +521,8 @@ def evaluate(sid: str, mid: str) -> dict:
 def whatif(sid: str, mid: str, body: dict) -> dict:
     """操作差異試算：baseline＝現行視圖特徵中位數，body.values 覆蓋部分特徵。"""
     rec = _load(sid, mid)
+    if rec.get("task") == "timeseries":
+        raise HTTPException(422, "時序模型不支援操作差異試算（輸入含自身落遲）")
     pipe = _load_pipe(sid, mid)
     base = _baseline(sid, rec)
     values = body.get("values") or {}
@@ -455,7 +551,7 @@ def optimize(sid: str, mid: str, body: dict) -> dict:
     """配方優化（參數最佳化）：目標值/最大化/最小化，輸出最佳參數建議。
     可調參數邊界＝現行視圖 P1–P99；隨機搜尋＋最佳鄰域細化。僅迴歸。"""
     rec = _load(sid, mid)
-    if rec.get("task") == "classification":
+    if rec.get("task") != "regression":
         raise HTTPException(422, "配方優化僅支援迴歸模型")
     pipe = _load_pipe(sid, mid)
     mode = body.get("mode", "target")

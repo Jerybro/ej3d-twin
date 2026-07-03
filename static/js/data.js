@@ -823,13 +823,13 @@ async function renderModels() {
   $('model-main').style.display = models.length ? '' : 'none';
   if (models.length) {
     const stName = { done: '完成', training: '訓練中…', error: '失敗' };
-    // 指標四欄雙語意：迴歸 RMSE/MAE/MAAPE/R²、分類 Acc/F1/Precision/Recall
+    // 指標四欄多語意：迴歸 RMSE/MAE/MAAPE/R²、分類 Acc/F1/P/R、異常 門檻/超標%/平均/最大
     const mv = (m) => {
       const c = m.metrics_cv;
       if (!c) return ['—', '—', '—', '—'];
-      return m.task === 'classification'
-        ? [c.accuracy, c.f1, c.precision, c.recall]
-        : [c.rmse, c.mae, c.maape, c.r2];
+      if (m.task === 'classification') return [c.accuracy, c.f1, c.precision, c.recall];
+      if (m.task === 'anomaly') return [c.threshold, `${c.exceed_pct}%`, c.mean_risk, c.max_risk];
+      return [c.rmse, c.mae, c.maape, c.r2];
     };
     $('model-table').innerHTML = `<thead><tr>
       <th>排名</th><th>模型</th><th>目標</th><th>任務</th><th>演算法</th>
@@ -838,7 +838,7 @@ async function renderModels() {
       models.map((m, i) => `<tr data-id="${m.id}">
         <td>${m.status === 'done' ? `#${i + 1}` : ''}</td>
         <td>${m.name}</td><td>${m.target}</td>
-        <td>${m.task === 'classification' ? '分類' : m.task === 'timeseries' ? '時序' : '迴歸'}</td>
+        <td>${m.task === 'classification' ? '分類' : m.task === 'timeseries' ? '時序' : m.task === 'anomaly' ? '異常偵測' : '迴歸'}</td>
         <td>${(ALGO_META?.find((a) => a.key === m.algo)?.name) ?? m.algo}${m.auto_tune ? '（自動調參）' : ''}</td>
         ${mv(m).map((v) => `<td>${v}</td>`).join('')}
         <td class="st-${m.status}" title="${m.error ?? ''}">${stName[m.status] ?? m.status}</td>
@@ -859,9 +859,15 @@ async function renderModels() {
 const METRIC_HEADS = {
   regression: ['RMSE', 'MAE', 'MAAPE', 'R²'],
   classification: ['Accuracy', 'F1', 'Precision', 'Recall'],
+  anomaly: ['風險門檻', '超標 %', '平均風險', '最大風險'],
 };
-const metricRow = (label, mt, cls) => `<tr><td>${label}</td>${
-  (cls ? [mt.accuracy, mt.f1, mt.precision, mt.recall] : [mt.rmse, mt.mae, mt.maape, mt.r2])
+const metricVals = (mt, kind) => kind === 'classification'
+  ? [mt.accuracy, mt.f1, mt.precision, mt.recall]
+  : kind === 'anomaly'
+    ? [mt.threshold, `${mt.exceed_pct}%`, mt.mean_risk, mt.max_risk]
+    : [mt.rmse, mt.mae, mt.maape, mt.r2];
+const metricRow = (label, mt, kind) => `<tr><td>${label}</td>${
+  metricVals(mt, kind === true ? 'classification' : kind || 'regression')
     .map((v) => `<td>${v}</td>`).join('')}</tr>`;
 
 async function openModelDetail(mid) {
@@ -870,36 +876,59 @@ async function openModelDetail(mid) {
   await loadAlgoMeta();
   const cls = m.task === 'classification';
   const isTs = m.task === 'timeseries';
-  const heads = METRIC_HEADS[cls ? 'classification' : 'regression'];
+  const isAn = m.task === 'anomaly';
+  const kind = cls ? 'classification' : isAn ? 'anomaly' : 'regression';
+  const heads = METRIC_HEADS[kind];
   const algoName = ALGO_META.find((a) => a.key === m.algo)?.name ?? m.algo;
   const tuned = m.tuned_params ? `<div class="md-sub">自動調參結果：${
     Object.entries(m.tuned_params).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : v}`).join('、')}</div>` : '';
   const charts = cls ? `
       <div class="md-chart"><h4>混淆矩陣 Confusion Matrix（驗證集）</h4><canvas id="md-cm"></canvas></div>
       <div class="md-chart"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>` : isTs ? `
-      <div class="md-chart wide"><h4>時序預測——訓練脈絡＋外推 vs 實際</h4><canvas id="md-ts"></canvas></div>` : `
+      <div class="md-chart wide"><h4>時序預測——訓練脈絡＋外推 vs 實際</h4><canvas id="md-ts"></canvas></div>` : isAn ? `
+      <div class="md-chart wide"><h4>風險值監控——健康基準風險值＋門檻</h4><canvas id="md-risk"></canvas></div>
+      <div class="md-chart wide"><h4>風險貢獻度——超標點各感測器偏離程度</h4><canvas id="md-fi"></canvas></div>` : `
       <div class="md-chart"><h4>模型準確度 Actual – Predicted</h4><canvas id="md-pa"></canvas></div>
       <div class="md-chart"><h4>模型準確度 Actual – Error</h4><canvas id="md-err"></canvas></div>
       <div class="md-chart wide"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>`;
-  const taskName = cls ? '分類' : isTs ? '時序預測（單變量）' : '迴歸';
+  const taskName = cls ? '分類' : isTs ? '時序預測（單變量）' : isAn ? '設備異常偵測（無監督）' : '迴歸';
   $('model-detail').innerHTML = `
     <h3>${m.name}</h3>
     <div class="md-sub">${algoName}｜${taskName}｜訓練資料 ${m.n_rows.toLocaleString()} 筆｜目標 ${m.target}</div>
     ${tuned}
     <table class="md-metrics">
       <tr><th>模型指標</th>${heads.map((h) => `<th>${h}</th>`).join('')}</tr>
-      ${metricRow(m.val_desc ?? '交叉驗證集', m.metrics_cv, cls)}${metricRow('訓練資料集', m.metrics_train, cls)}
+      ${isAn ? metricRow(m.val_desc ?? '健康基準', m.metrics_cv, kind)
+        : metricRow(m.val_desc ?? '交叉驗證集', m.metrics_cv, kind) + metricRow('訓練資料集', m.metrics_train, kind)}
       <tbody id="ev-metric-row"></tbody>
     </table>
     <div class="md-charts">${charts}</div>
+    ${isAn ? `
+    <details class="md-app" id="app-thresh">
+      <summary>風險值門檻試算——為異常偵測模型計算合理門檻</summary>
+      <p class="hint" style="margin:8px 0">以不同統計方法對現行視圖的風險值分佈試算門檻；
+        「套用」會更新此模型的建議門檻與風險圖。</p>
+      <div class="opt-row">
+        <select class="mini" id="th-method" style="width:auto">
+          <option value="p99">風險值 99 百分位</option>
+          <option value="p995">風險值 99.5 百分位</option>
+          <option value="sigma3">平均 + 3 倍標準差</option>
+          <option value="iqr">IQR 上界（Q3 + 1.5×IQR）</option>
+        </select>
+        <button class="dbtn" style="width:auto;padding:8px 22px;margin:0" id="btn-thresh">試算</button>
+        <button class="dbtn" style="width:auto;padding:8px 22px;margin:0" id="btn-thresh-apply">試算並套用</button>
+      </div>
+      <div id="th-out"></div>
+    </details>` : ''}
     <details class="md-app" id="app-eval">
       <summary>模型評估——以「現行資料視圖」重新評估（隨選）</summary>
-      <p class="hint" style="margin:8px 0">資料視圖若已改變（新增篩選步驟、樣板複用到新資料），
-        這裡評的就是模型在現在這份資料上的表現，與上方訓練時指標對照可看外推退化。</p>
+      <p class="hint" style="margin:8px 0">${isAn
+        ? '對現在這份資料（可含新上傳/新篩選段）以已訓練的健康基準計算風險值——監控新資料是否偏離健康狀態。'
+        : '資料視圖若已改變（新增篩選步驟、樣板複用到新資料），這裡評的就是模型在現在這份資料上的表現，與上方訓練時指標對照可看外推退化。'}</p>
       <button class="dbtn" style="width:auto;padding:8px 22px" id="btn-eval">建立評估</button>
       <div id="ev-out">${m.evaluation ? '' : '<p class="hint" style="margin-top:8px">尚無評估——點擊「建立評估」開始。</p>'}</div>
     </details>
-    ${isTs ? '' : `
+    ${(isTs || isAn) ? '' : `
     <details class="md-app" id="app-whatif">
       <summary>操作差異試算——改變輸入條件，看預測怎麼變</summary>
       <p class="hint" style="margin:8px 0">基準值＝現行視圖各特徵中位數；留空＝維持基準。</p>
@@ -907,7 +936,7 @@ async function openModelDetail(mid) {
       <button class="dbtn" style="width:auto;padding:8px 22px;margin-top:10px" id="btn-whatif">試算</button>
       <div id="wi-out"></div>
     </details>`}
-    ${(cls || isTs) ? '' : `
+    ${(cls || isTs || isAn) ? '' : `
     <details class="md-app" id="app-opt">
       <summary>配方優化（參數最佳化）——設定目標，輸出最佳參數建議</summary>
       <div class="opt-row">
@@ -927,6 +956,7 @@ async function openModelDetail(mid) {
   requestAnimationFrame(() => {
     if (cls) drawCM($('md-cm'), m.plots.cm.labels, m.plots.cm.matrix);
     else if (isTs) drawTSF($('md-ts'), m.plots.tsf);
+    else if (isAn) drawRisk($('md-risk'), m.plots.risk);
     else {
       drawXY($('md-pa'), m.plots.pa.actual, m.plots.pa.pred, '實際值', '預測值', true);
       drawXY($('md-err'), m.plots.err.actual, m.plots.err.error, '實際值', '誤差值', false, true);
@@ -942,21 +972,71 @@ async function openModelDetail(mid) {
 function renderEvaluation(m, ev) {
   const cls = m.task === 'classification';
   const isTs = m.task === 'timeseries';
-  $('ev-metric-row').innerHTML = metricRow(`現行視圖評估（${ev.n_rows.toLocaleString()} 筆）`, ev.metrics, cls);
+  const isAn = m.task === 'anomaly';
+  const kind = cls ? 'classification' : isAn ? 'anomaly' : 'regression';
+  $('ev-metric-row').innerHTML = metricRow(`現行視圖評估（${ev.n_rows.toLocaleString()} 筆）`, ev.metrics, kind);
   $('ev-out').innerHTML = `
     <div class="md-sub" style="margin-top:10px">評估時間 ${ev.evaluated_at}｜${ev.n_rows.toLocaleString()} 筆</div>
     <table class="md-metrics">
-      <tr><th>評估指標</th>${METRIC_HEADS[cls ? 'classification' : 'regression'].map((h) => `<th>${h}</th>`).join('')}</tr>
-      ${metricRow('現行視圖', ev.metrics, cls)}
+      <tr><th>評估指標</th>${METRIC_HEADS[kind].map((h) => `<th>${h}</th>`).join('')}</tr>
+      ${metricRow('現行視圖', ev.metrics, kind)}
     </table>
-    <div class="md-chart" style="max-width:${isTs ? '100%' : '560px'}"><h4>${
-      cls ? '混淆矩陣（現行視圖）' : isTs ? '時序預測 vs 實際（現行視圖）' : 'Actual – Predicted（現行視圖）'}</h4>
+    <div class="md-chart" style="max-width:${(isTs || isAn) ? '100%' : '560px'}"><h4>${
+      cls ? '混淆矩陣（現行視圖）' : isTs ? '時序預測 vs 實際（現行視圖）'
+        : isAn ? '風險值監控（現行視圖）' : 'Actual – Predicted（現行視圖）'}</h4>
       <canvas id="ev-chart"></canvas></div>`;
   requestAnimationFrame(() => {
     if (cls) drawCM($('ev-chart'), ev.cm.labels, ev.cm.matrix);
     else if (isTs) drawTSF($('ev-chart'), ev.tsf);
+    else if (isAn) drawRisk($('ev-chart'), ev.risk);
     else drawXY($('ev-chart'), ev.pa.actual, ev.pa.pred, '實際值', '預測值', true);
   });
+}
+
+// 風險值監控圖：風險值線（主題色）＋門檻紅虛線＋超標紅點
+function drawRisk(canvas, rk) {
+  const dpr = devicePixelRatio;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '11px Inter';
+  const M = { l: 64, r: 16, t: 14, b: 44 };
+  const isTime = rk.t.length && rk.t[rk.t.length - 1] > 1e9;   // epoch 秒 vs 流水序
+  const xlo = Math.min(...rk.t), xhi = Math.max(...rk.t);
+  const ylo = 0, yhi = Math.max(...rk.risk, rk.threshold) * 1.05;
+  const px = (v) => M.l + ((v - xlo) / ((xhi - xlo) || 1)) * (w - M.l - M.r);
+  const py = (v) => h - M.b - ((v - ylo) / ((yhi - ylo) || 1)) * (h - M.t - M.b);
+  ctx.textAlign = 'right';
+  niceTicks(ylo, yhi, 5).forEach((tv) => {
+    const y = py(tv);
+    ctx.strokeStyle = C_GRID; ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(w - M.r, y); ctx.stroke();
+    ctx.fillStyle = C_LABEL; ctx.fillText(fmtTick(tv), M.l - 8, y + 3.5);
+  });
+  ctx.textAlign = 'left';
+  Array.from({ length: 6 }, (_, i) => xlo + ((xhi - xlo) * i) / 5).forEach((tv) => {
+    const x = px(tv);
+    ctx.strokeStyle = C_AXIS; ctx.beginPath(); ctx.moveTo(x, h - M.b); ctx.lineTo(x, h - M.b + 4); ctx.stroke();
+    ctx.fillStyle = C_LABEL;
+    const lb = isTime ? fmtTime(tv) : fmtTick(tv);
+    ctx.fillText(lb, x - ctx.measureText(lb).width / 2, h - M.b + 18);
+  });
+  ctx.strokeStyle = C_AXIS;
+  ctx.beginPath(); ctx.moveTo(M.l, M.t); ctx.lineTo(M.l, h - M.b); ctx.lineTo(w - M.r, h - M.b); ctx.stroke();
+  // 風險值線
+  ctx.strokeStyle = theme().selL; ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  rk.risk.forEach((v, i) => { const x = px(rk.t[i]), y = py(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.stroke(); ctx.lineWidth = 1;
+  // 門檻紅虛線＋超標紅點
+  ctx.strokeStyle = '#d03050'; ctx.setLineDash([6, 4]);
+  ctx.beginPath(); ctx.moveTo(M.l, py(rk.threshold)); ctx.lineTo(w - M.r, py(rk.threshold)); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#d03050';
+  rk.risk.forEach((v, i) => {
+    if (v > rk.threshold) { ctx.beginPath(); ctx.arc(px(rk.t[i]), py(v), 2.5, 0, Math.PI * 2); ctx.fill(); }
+  });
+  ctx.fillText(`門檻 ${rk.threshold}`, w - M.r - ctx.measureText(`門檻 ${rk.threshold}`).width, py(rk.threshold) - 6);
 }
 
 // 時序預測疊圖：訓練脈絡（淺灰）＋測試實際（深灰）＋外推預測（主題色）＋切分虛線
@@ -1069,7 +1149,32 @@ function bindModelApps(m) {
     } catch (e) { alert(`評估失敗：${e.message}`); } finally { $('btn-eval').disabled = false; }
   });
 
-  // what-if：開啟時抓 baseline 填 placeholder（時序模型無此區）
+  // 風險值門檻試算（異常偵測）
+  if ($('app-thresh')) {
+    const runThresh = async (apply) => {
+      $('btn-thresh').disabled = $('btn-thresh-apply').disabled = true;
+      try {
+        const r = await apiML(`/models/${m.id}/threshold`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method: $('th-method').value, apply }),
+        });
+        $('th-out').innerHTML = `
+          <table class="md-metrics" style="margin-top:12px">
+            <tr><th>方法</th><th>門檻</th><th>超標筆數</th><th>超標比例</th></tr>
+            <tr><td>${r.method_name}</td><td><b>${r.threshold}</b></td>
+              <td>${r.exceed.toLocaleString()} / ${r.n_rows.toLocaleString()}</td><td>${r.exceed_pct}%</td></tr>
+          </table>${r.applied ? '<p class="hint" style="margin-top:6px">已套用為模型建議門檻。</p>' : ''}`;
+        if (apply) await openModelDetail(m.id);
+      } catch (e) { alert(`門檻試算失敗：${e.message}`); }
+      finally {
+        if ($('btn-thresh')) { $('btn-thresh').disabled = $('btn-thresh-apply').disabled = false; }
+      }
+    };
+    $('btn-thresh').addEventListener('click', () => runThresh(false));
+    $('btn-thresh-apply').addEventListener('click', () => runThresh(true));
+  }
+
+  // what-if：開啟時抓 baseline 填 placeholder（時序/異常模型無此區）
   if (!$('app-whatif')) return;
   let wiLoaded = false;
   $('app-whatif').addEventListener('toggle', async () => {
@@ -1278,7 +1383,8 @@ $('wiz-mode-ok').addEventListener('click', () => {
     + stringCols.map((c) => `<option value="${c.name}">${c.name}（分類）</option>`).join('');
   const renderFeatures = () => {
     const tgt = $('wiz-target').value;
-    $('wiz-features').innerHTML = numeric.filter((c) => c.name !== tgt).map((c) =>
+    const isAn = $('wiz-task').value === 'anomaly';   // 異常偵測無目標，不排除任何欄
+    $('wiz-features').innerHTML = numeric.filter((c) => isAn || c.name !== tgt).map((c) =>
       `<label><input type="checkbox" checked value="${c.name}">${c.name}</label>`).join('');
   };
   $('wiz-target').onchange = () => { renderFeatures(); renderAlgos(); };
@@ -1289,16 +1395,24 @@ $('wiz-mode-ok').addEventListener('click', () => {
   $('wiz-task').querySelector('[value="timeseries"]').disabled = !hasTime;
   const taskKey = () => {
     if ($('wiz-task').value === 'timeseries') return 'timeseries';
+    if ($('wiz-task').value === 'anomaly') return 'anomaly';
     const tgt = state.columns.find((c) => c.name === $('wiz-target').value);
     const isNum = tgt && (tgt.dtype.startsWith('float') || tgt.dtype.startsWith('int'));
     return isNum ? 'regression' : 'classification';
   };
   const syncTask = () => {
-    const isTs = $('wiz-task').value === 'timeseries';
+    const tv = $('wiz-task').value;
+    const isTs = tv === 'timeseries';
+    const isAn = tv === 'anomaly';
     $('wiz-ts-cfg').style.display = isTs ? '' : 'none';
-    $('wiz-val-cfg').style.display = isTs ? 'none' : '';
+    $('wiz-anom-cfg').style.display = isAn ? '' : 'none';
+    $('wiz-val-cfg').style.display = (isTs || isAn) ? 'none' : '';
+    $('wiz-target').style.display = isAn ? 'none' : '';
+    $('wiz-target').previousElementSibling.style.display = isAn ? 'none' : '';
     $('wiz-feat-label').style.display = isTs ? 'none' : '';
     $('wiz-features').style.display = isTs ? 'none' : '';
+    $('wiz-feat-label').textContent = isAn ? '監測欄位（設備感測器，至少兩欄）' : '自變數（預設全選）';
+    renderFeatures();
     renderAlgos();
   };
   $('wiz-task').onchange = syncTask;
@@ -1322,7 +1436,7 @@ $('wiz-mode-ok').addEventListener('click', () => {
     if (wizMode !== 'manual') return;
     const tk = taskKey();
     const list = ALGO_META.filter((a) => a.tasks.includes(tk));
-    const def = tk === 'timeseries' ? 'ARIMA' : 'XGB';
+    const def = tk === 'timeseries' ? 'ARIMA' : tk === 'anomaly' ? 'PCA_T2' : 'XGB';
     $('wiz-algo').innerHTML = list.map((a) =>
       `<option value="${a.key}" ${a.key === def ? 'selected' : ''}>${a.name}</option>`).join('');
     renderParams();
@@ -1348,15 +1462,19 @@ $('wiz-mode-ok').addEventListener('click', () => {
 
 $('wiz-submit').addEventListener('click', async () => {
   const isTs = $('wiz-task').value === 'timeseries';
+  const isAn = $('wiz-task').value === 'anomaly';
   const features = [...$('wiz-features').querySelectorAll('input:checked')].map((i) => i.value);
-  if (!features.length && !isTs) { alert('至少勾選一個自變數'); return; }
+  if (!features.length && !isTs) { alert(isAn ? '至少勾選兩個監測欄位' : '至少勾選一個自變數'); return; }
+  if (isAn && features.length < 2) { alert('異常偵測至少需要兩個監測欄位'); return; }
   const body = {
     mode: wizMode,
     name: $('wiz-name').value.trim(),
     target: $('wiz-target').value,
     features,
   };
-  if (isTs) {
+  if (isAn) {
+    body.task_type = 'anomaly';
+  } else if (isTs) {
     body.task_type = 'timeseries';
     body.test_size = (+$('wiz-ts-test').value || 20) / 100;
     body.features = [];

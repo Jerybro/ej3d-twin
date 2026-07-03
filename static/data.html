@@ -566,7 +566,12 @@
         <select class="mini" id="wiz-task">
           <option value="auto">自動判定（數值目標＝迴歸、類別目標＝分類）</option>
           <option value="timeseries">時序預測（ARIMA 等時序演算法，單變量）</option>
+          <option value="anomaly">設備異常偵測（無監督，健康基準＋風險值）</option>
         </select>
+        <div id="wiz-anom-cfg" style="display:none">
+          <p class="hint" style="margin:2px 0 8px">以「現行資料視圖」為健康運轉基準建立監控模型——
+            請先在探索分析把異常段排除，再來建模；訓練後對新資料計算風險值，超過門檻＝疑似異常。</p>
+        </div>
         <div id="wiz-ts-cfg" style="display:none">
           <p class="hint" style="margin:2px 0 8px">時序模型以時間排序的目標序列訓練；
             衍生特徵（落遲、移動平均等）請於上傳前在資料中準備好，改用迴歸任務。</p>

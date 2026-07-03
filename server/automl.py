@@ -131,6 +131,26 @@ ALGOS = {
             {"key": "alpha", "label": "L2 正則化 alpha", "type": "float", "default": 0.0001, "min": 1e-6, "max": 1.0},
         ],
     },
+    # ---- 異常偵測（設備健康度：以健康運轉段為基準，無監督）----
+    "PCA_T2": {
+        "name": "PCA 多變量監控 (T²+SPE)", "tasks": ["anomaly"],
+        "params": [{"key": "var_keep", "label": "保留變異比例", "type": "float", "default": 0.9, "min": 0.5, "max": 0.99}],
+    },
+    "IFOREST": {
+        "name": "隔離森林 (Isolation Forest)", "tasks": ["anomaly"],
+        "params": [{"key": "n_estimators", "label": "樹數", "type": "int", "default": 200, "min": 50, "max": 1000}],
+    },
+    "OCSVM": {
+        "name": "單類支持向量機 (One-Class SVM)", "tasks": ["anomaly"],
+        "params": [{"key": "nu", "label": "異常比例上界 nu", "type": "float", "default": 0.05, "min": 0.001, "max": 0.5}],
+    },
+    "LOF": {
+        "name": "局部離群因子 (LOF)", "tasks": ["anomaly"],
+        "params": [{"key": "n_neighbors", "label": "鄰居數", "type": "int", "default": 20, "min": 5, "max": 100}],
+    },
+    "MAHAL": {
+        "name": "穩健共變異 (Mahalanobis)", "tasks": ["anomaly"], "params": [],
+    },
     # ---- 時序演算法（statsmodels 單變量預測；特徵工程請於上傳前完成）----
     "NAIVE": {
         "name": "Naive（最後值基準）", "tasks": ["timeseries"], "params": [],
@@ -412,6 +432,113 @@ def _ts_forecast(algo: str, params: dict, ytr: np.ndarray, steps: int):
     raise HTTPException(422, f"未知時序演算法 {algo}")
 
 
+# ------------------------------------------------------ 異常偵測（設備健康度）
+def _anomaly_xt(sid: str, rec: dict):
+    """監測欄位矩陣＋時間軸（有時間欄時）。現行視圖＝健康基準假設。"""
+    df = _load_base(sid)
+    view, *_ = apply_steps(df, _load_steps(sid))
+    missing = [c for c in rec["features"] if c not in view.columns]
+    if missing:
+        raise HTTPException(422, f"現行視圖缺少欄位：{missing}")
+    feats = view[rec["features"]].apply(pd.to_numeric, errors="coerce")
+    tcol = next((c for c in view.columns if pd.api.types.is_datetime64_any_dtype(view[c])), None)
+    if tcol:
+        t = (view[tcol] - pd.Timestamp(0)) / pd.Timedelta(seconds=1)
+        data = pd.concat([t.rename("__t__"), feats], axis=1).dropna()
+        return data[rec["features"]].to_numpy(dtype=float), data["__t__"].to_numpy(dtype=float)
+    data = feats.dropna()
+    return data.to_numpy(dtype=float), np.arange(len(data), dtype=float)
+
+
+def _fit_anomaly(algo: str, params: dict, Xtr: np.ndarray) -> dict:
+    """以健康基準擬合，回可 joblib 的 meta（純物件，無 closure）。"""
+    from sklearn.preprocessing import StandardScaler
+    p = {k: v for k, v in (params or {}).items() if v is not None and v != ""}
+    sc = StandardScaler().fit(Xtr)
+    Z = sc.transform(Xtr)
+    if algo == "PCA_T2":
+        from sklearn.decomposition import PCA
+        pca = PCA(n_components=min(float(p.get("var_keep", 0.9)), 0.99), svd_solver="full").fit(Z)
+        lam = np.maximum(pca.explained_variance_, 1e-12)
+        T = pca.transform(Z)
+        t2 = ((T ** 2) / lam).sum(axis=1)
+        spe = ((Z - pca.inverse_transform(T)) ** 2).sum(axis=1)
+        # 正規化基準用「訓練段」中位數（新資料評分才可比）
+        return {"scaler": sc, "pca": pca, "lam": lam,
+                "med_t2": max(float(np.median(t2)), 1e-9), "med_spe": max(float(np.median(spe)), 1e-9)}
+    if algo == "IFOREST":
+        from sklearn.ensemble import IsolationForest
+        m = IsolationForest(n_estimators=int(p.get("n_estimators", 200)), random_state=0).fit(Z)
+        return {"scaler": sc, "model": m}
+    if algo == "OCSVM":
+        from sklearn.svm import OneClassSVM
+        m = OneClassSVM(nu=float(p.get("nu", 0.05)), gamma="scale").fit(Z)
+        return {"scaler": sc, "model": m}
+    if algo == "LOF":
+        from sklearn.neighbors import LocalOutlierFactor
+        m = LocalOutlierFactor(n_neighbors=int(p.get("n_neighbors", 20)), novelty=True).fit(Z)
+        return {"scaler": sc, "model": m}
+    if algo == "MAHAL":
+        from sklearn.covariance import EllipticEnvelope
+        m = EllipticEnvelope(support_fraction=0.9, random_state=0).fit(Z)
+        return {"scaler": sc, "model": m}
+    raise HTTPException(422, f"未知異常偵測演算法 {algo}")
+
+
+def _anomaly_score(algo: str, meta: dict, X: np.ndarray) -> np.ndarray:
+    """以已擬合 meta 對任意資料計算風險值（越高越異常）。"""
+    Z = meta["scaler"].transform(X)
+    if algo == "PCA_T2":
+        T = meta["pca"].transform(Z)
+        t2 = ((T ** 2) / meta["lam"]).sum(axis=1)
+        spe = ((Z - meta["pca"].inverse_transform(T)) ** 2).sum(axis=1)
+        return t2 / meta["med_t2"] + spe / meta["med_spe"]
+    if algo == "IFOREST":
+        return -meta["model"].score_samples(Z)
+    if algo in ("OCSVM", "LOF"):
+        return -meta["model"].decision_function(Z)
+    if algo == "MAHAL":
+        return meta["model"].mahalanobis(Z)
+    raise HTTPException(422, f"未知異常偵測演算法 {algo}")
+
+
+THRESH_METHODS = {
+    "p99": ("風險值 99 百分位", lambda r: float(np.percentile(r, 99))),
+    "p995": ("風險值 99.5 百分位", lambda r: float(np.percentile(r, 99.5))),
+    "sigma3": ("平均 + 3 倍標準差", lambda r: float(r.mean() + 3 * r.std())),
+    "iqr": ("IQR 上界（Q3 + 1.5×IQR）", lambda r: float(np.percentile(r, 75) + 1.5 * (np.percentile(r, 75) - np.percentile(r, 25)))),
+}
+
+
+def _run_anomaly(sid: str, rec: dict):
+    """異常偵測訓練：健康基準擬合→全段風險值→建議門檻（P99）＋貢獻度。"""
+    import joblib
+    X, t = _anomaly_xt(sid, rec)
+    if len(X) < 30:
+        raise ValueError(f"有效樣本僅 {len(X)} 筆（<30），不足以建立基準")
+    meta = _fit_anomaly(rec["algo"], rec.get("params"), X)
+    risk = np.asarray(_anomaly_score(rec["algo"], meta, X), float)
+    thr = THRESH_METHODS["p99"][1](risk)
+    exceed = risk > thr
+    rec["metrics_cv"] = {"threshold": round(thr, 5), "exceed_pct": round(float(exceed.mean()) * 100, 3),
+                         "mean_risk": round(float(risk.mean()), 5), "max_risk": round(float(risk.max()), 5)}
+    rec["metrics_train"] = rec["metrics_cv"]
+    rec["val_desc"] = "健康基準＝現行視圖；預設門檻＝P99"
+    step = max(1, len(risk) // 900)
+    rec["plots"] = {"risk": {"t": t[::step].tolist(), "risk": np.round(risk[::step], 5).tolist(),
+                             "threshold": round(thr, 5)}}
+    # 貢獻度：超標點各欄位 |z| 平均（哪些感測器把風險推高）
+    mu, sd = X.mean(axis=0), np.maximum(X.std(axis=0), 1e-9)
+    zi = np.abs((X[exceed] - mu) / sd) if exceed.any() else np.abs((X - mu) / sd)
+    contrib = zi.mean(axis=0)
+    order = np.argsort(contrib)[::-1][:15]
+    rec["plots"]["fi"] = {"names": [rec["features"][i] for i in order],
+                          "values": np.round(contrib[order], 4).tolist()}
+    rec["n_rows"] = int(len(X))
+    joblib.dump({"algo": rec["algo"], "params": rec.get("params"), "meta": meta}, _pipe_path(sid, rec["id"]))
+    rec["status"] = "done"
+
+
 # ------------------------------------------------------ 驗證方法（使用者可選）
 def _validation_cfg(rec: dict) -> dict:
     v = rec.get("validation") or {}
@@ -520,6 +647,10 @@ def _train_job(sid: str, rec: dict):
             _run_ts(sid, rec)
             _save(sid, rec)
             return
+        if task == "anomaly":
+            _run_anomaly(sid, rec)
+            _save(sid, rec)
+            return
 
         cls = task == "classification"
         X, y = _current_xy(sid, rec)
@@ -625,14 +756,22 @@ def create_models(sid: str, body: dict) -> dict:
     任務自動判定：目標欄數值＝迴歸、字串/類別＝分類。"""
     target = body.get("target")
     features = [f for f in body.get("features", []) if f != target]
-    if not target or (not features and body.get("task_type") != "timeseries"):
-        # 時序預測可只用目標自身落遲（外生變數可留空）
+    is_anomaly = body.get("task_type") == "anomaly"
+    if is_anomaly:
+        # 異常偵測＝無監督：不需目標，只要監測欄位
+        if len(features) < 2:
+            raise HTTPException(422, "異常偵測至少需要兩個監測欄位")
+        target = target or "（無監督）"
+    elif not target or not features:
         raise HTTPException(422, "需要 target 與至少一個自變數")
     df = _load_base(sid)
     view, *_ = apply_steps(df, _load_steps(sid))
-    if target not in view.columns:
-        raise HTTPException(422, f"目標欄 {target} 不存在")
-    task = "regression" if pd.api.types.is_numeric_dtype(view[target]) else "classification"
+    if is_anomaly:
+        task = "anomaly"
+    else:
+        if target not in view.columns:
+            raise HTTPException(422, f"目標欄 {target} 不存在")
+        task = "regression" if pd.api.types.is_numeric_dtype(view[target]) else "classification"
     ts_cfg = None
     if body.get("task_type") == "timeseries":
         if task != "regression":
@@ -689,6 +828,29 @@ def evaluate(sid: str, mid: str) -> dict:
     if rec.get("status") != "done":
         raise HTTPException(422, "模型尚未完成訓練")
     cls = rec.get("task") == "classification"
+    if rec.get("task") == "anomaly":
+        # 異常評估＝已訓練基準對「現行視圖」計算風險值（監控新資料）
+        import joblib
+        pack = joblib.load(_pipe_path(sid, mid)) if _pipe_path(sid, mid).exists() else None
+        if not pack:
+            raise HTTPException(422, "此模型未保存訓練成品——請重新訓練")
+        X, t = _anomaly_xt(sid, rec)
+        if len(X) < 5:
+            raise HTTPException(422, f"現行視圖有效樣本僅 {len(X)} 筆，無法評估")
+        risk = np.asarray(_anomaly_score(rec["algo"], pack["meta"], X), float)
+        thr = (rec.get("metrics_cv") or {}).get("threshold") or THRESH_METHODS["p99"][1](risk)
+        step = max(1, len(risk) // 900)
+        ev = {"evaluated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+              "n_rows": int(len(X)),
+              "metrics": {"threshold": round(float(thr), 5),
+                          "exceed_pct": round(float((risk > thr).mean()) * 100, 3),
+                          "mean_risk": round(float(risk.mean()), 5),
+                          "max_risk": round(float(risk.max()), 5)},
+              "risk": {"t": t[::step].tolist(), "risk": np.round(risk[::step], 5).tolist(),
+                       "threshold": round(float(thr), 5)}}
+        rec["evaluation"] = ev
+        _save(sid, rec)
+        return ev
     if rec.get("task") == "timeseries":
         # 時序評估＝在「現行視圖」重跑尾端保留（重擬合＋外推）
         y, t = _ts_series(sid, rec)
@@ -731,12 +893,43 @@ def evaluate(sid: str, mid: str) -> dict:
     return ev
 
 
+@router.post("/{sid}/models/{mid}/threshold")
+def threshold(sid: str, mid: str, body: dict) -> dict:
+    """風險值門檻試算：對異常偵測模型以指定方法計算合理門檻，回門檻＋超標統計。"""
+    rec = _load(sid, mid)
+    if rec.get("task") != "anomaly":
+        raise HTTPException(422, "門檻試算僅適用異常偵測模型")
+    import joblib
+    pack = joblib.load(_pipe_path(sid, mid)) if _pipe_path(sid, mid).exists() else None
+    if not pack:
+        raise HTTPException(422, "此模型未保存訓練成品——請重新訓練")
+    method = body.get("method", "p99")
+    if method not in THRESH_METHODS:
+        raise HTTPException(422, f"未知門檻方法 {method}")
+    X, t = _anomaly_xt(sid, rec)
+    risk = np.asarray(_anomaly_score(rec["algo"], pack["meta"], X), float)
+    name, fn = THRESH_METHODS[method]
+    thr = fn(risk)
+    exceed = risk > thr
+    # 套用：更新模型建議門檻並重繪風險圖
+    if body.get("apply"):
+        rec["metrics_cv"] = {**(rec.get("metrics_cv") or {}), "threshold": round(thr, 5),
+                             "exceed_pct": round(float(exceed.mean()) * 100, 3)}
+        if "risk" in (rec.get("plots") or {}):
+            rec["plots"]["risk"]["threshold"] = round(thr, 5)
+        rec["val_desc"] = f"健康基準＝現行視圖；門檻＝{name}"
+        _save(sid, rec)
+    return {"method": method, "method_name": name, "threshold": round(thr, 5),
+            "n_rows": int(len(risk)), "exceed": int(exceed.sum()),
+            "exceed_pct": round(float(exceed.mean()) * 100, 3), "applied": bool(body.get("apply"))}
+
+
 @router.post("/{sid}/models/{mid}/whatif")
 def whatif(sid: str, mid: str, body: dict) -> dict:
     """操作差異試算：baseline＝現行視圖特徵中位數，body.values 覆蓋部分特徵。"""
     rec = _load(sid, mid)
-    if rec.get("task") == "timeseries":
-        raise HTTPException(422, "時序模型不支援操作差異試算（輸入含自身落遲）")
+    if rec.get("task") not in ("regression", "classification"):
+        raise HTTPException(422, "操作差異試算僅支援迴歸／分類模型")
     pipe = _load_pipe(sid, mid)
     base = _baseline(sid, rec)
     values = body.get("values") or {}

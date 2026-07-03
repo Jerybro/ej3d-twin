@@ -935,6 +935,95 @@ builders.splat = function ({ w, d, elev }) {
   return g;
 };
 
+// -------------------------------------------------- 素材庫擴充（E3D 常見設備補齊）
+builders.platehx = function ({ w, h, d }) {
+  const g = new THREE.Group();
+  const stack = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), std(0x7d92a8, { metalness: 0.4, roughness: 0.5 }));
+  stack.position.y = h / 2 + 0.15;
+  const frameF = new THREE.Mesh(new THREE.BoxGeometry(0.12, h * 1.06, d * 1.06), std(0x3a4a5a));
+  frameF.position.set(w / 2 + 0.07, h / 2 + 0.15, 0);
+  const frameB = frameF.clone();
+  frameB.position.x = -w / 2 - 0.07;
+  const base = new THREE.Mesh(new THREE.BoxGeometry(w * 1.2, 0.15, d * 1.2), std(0x55606c));
+  base.position.y = 0.075;
+  const bolts = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, w * 1.25, 6), std(0x9aa4ad));
+  bolts.rotation.z = Math.PI / 2;
+  bolts.position.y = h + 0.05;
+  g.add(stack, frameF, frameB, base, bolts);
+  return g;
+};
+
+builders.filterv = function ({ r, h }) {
+  const g = new THREE.Group();
+  const shell = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h * 0.7, 20), std(0x9aa7b4));
+  shell.position.y = h * 0.45;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), std(0x8d99a6));
+  head.position.y = h * 0.8;
+  const legsY = h * 0.1;
+  for (const a of [0, 2.09, 4.19]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, h * 0.22, 0.08), std(0x55606c));
+    leg.position.set(Math.cos(a) * r * 0.8, legsY, Math.sin(a) * r * 0.8);
+    g.add(leg);
+  }
+  const swing = new THREE.Mesh(new THREE.TorusGeometry(r * 0.6, 0.03, 6, 14, Math.PI), std(0x55606c));
+  swing.position.y = h * 0.82;
+  g.add(shell, head, swing);
+  return g;
+};
+
+builders.agitank = function ({ r, h }) {
+  const g = new THREE.Group();
+  const shell = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 24), std(0x9aa7b4));
+  shell.position.y = h / 2;
+  const motor = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.28, r * 0.28, 0.7, 12), std(0x2e6da8));
+  motor.position.y = h + 0.55;
+  const gear = new THREE.Mesh(new THREE.BoxGeometry(r * 0.7, 0.35, r * 0.5), std(0x3a4a5a));
+  gear.position.y = h + 0.15;
+  g.add(shell, motor, gear);
+  return g;
+};
+
+builders.hopper = function ({ r, h }) {
+  const g = new THREE.Group();
+  const cone = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.15, h * 0.4, 20), std(0x8d99a6));
+  cone.position.y = h * 0.2 + 0.6;
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h * 0.6, 20), std(0x9aa7b4));
+  body.position.y = h * 0.7 + 0.6;
+  for (const a of [0.52, 2.62, 4.71]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, h * 0.55, 0.1), std(0x55606c));
+    leg.position.set(Math.cos(a) * r * 0.9, h * 0.28, Math.sin(a) * r * 0.9);
+    g.add(leg);
+  }
+  g.add(cone, body);
+  return g;
+};
+
+builders.skid = function ({ w, h, d }) {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(w, 0.16, d), std(0xd9a53a));
+  base.position.y = 0.08;
+  g.add(base);
+  for (const [fx, fz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, h, 0.08), std(0x55606c));
+    post.position.set(fx * (w / 2 - 0.06), h / 2, fz * (d / 2 - 0.06));
+    g.add(post);
+  }
+  const roofX = new THREE.Mesh(new THREE.BoxGeometry(w, 0.07, 0.07), std(0x55606c));
+  roofX.position.y = h;
+  roofX.position.z = d / 2 - 0.06;
+  const roofX2 = roofX.clone();
+  roofX2.position.z = -d / 2 + 0.06;
+  const pumpA = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.7, 12), std(0x2e6da8));
+  pumpA.rotation.z = Math.PI / 2;
+  pumpA.position.set(-w * 0.2, 0.48, 0);
+  const pumpB = pumpA.clone();
+  pumpB.position.x = w * 0.2;
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.1, 0.2), std(0x3a4a5a));
+  panel.position.set(0, 0.72, d / 2 - 0.2);
+  g.add(roofX, roofX2, pumpA, pumpB, panel);
+  return g;
+};
+
 // -------------------------------------------------- 管線元件（Piping Components）
 // E3D Component Editor：閥/法蘭對/異徑管/止回閥，沿管線弧長定位
 export function buildPipeComponent(kind, r) {
@@ -973,15 +1062,64 @@ export function buildPipeComponent(kind, r) {
     const cone = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.62, r * 1.05, R * 1.4, 16), m);
     cone.rotation.z = -Math.PI / 2;
     g.add(cone);
+  } else if (kind === 'ball') {
+    const body = new THREE.Mesh(new THREE.SphereGeometry(R * 0.85, 14, 10), m);
+    const lever = new THREE.Mesh(new THREE.BoxGeometry(R * 1.5, r * 0.4, r * 0.4), m);
+    lever.position.set(R * 0.4, R * 1.0, 0);
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.3, r * 0.3, R * 0.9, 8), m);
+    stem.position.y = R * 0.55;
+    g.add(body, stem, lever);
+  } else if (kind === 'bfly') {
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.8, R * 0.8, r * 1.1, 16), m);
+    body.rotation.z = Math.PI / 2;
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.28, r * 0.28, R * 1.2, 8), m);
+    stem.position.y = R * 0.55;
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(R * 1.1, r * 0.35, r * 0.5), m);
+    handle.position.y = R * 1.15;
+    g.add(body, stem, handle);
+  } else if (kind === 'psv') {
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.55, R * 0.7, R * 1.2, 12), m);
+    body.position.y = R * 0.6;
+    const bonnet = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.35, R * 0.35, R * 0.9, 10), m);
+    bonnet.position.y = R * 1.6;
+    const outlet = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.8, r * 0.8, R * 1.0, 10), m);
+    outlet.rotation.x = Math.PI / 2;
+    outlet.position.set(0, R * 0.8, R * 0.6);
+    g.add(body, bonnet, outlet);
+  } else if (kind === 'fm') {
+    const body = new THREE.Mesh(new THREE.BoxGeometry(R * 1.6, R * 1.3, R * 1.1), m);
+    const disp = new THREE.Mesh(new THREE.BoxGeometry(R * 0.9, R * 0.55, r * 0.3), std(0x2c3e50));
+    disp.position.set(0, R * 0.45, R * 0.6);
+    g.add(body, disp);
   }
   return g;
 }
 
 export const PIPE_COMPONENTS = [
   { kind: 'valve', name: '閘閥' },
+  { kind: 'ball', name: '球閥' },
+  { kind: 'bfly', name: '蝶閥' },
   { kind: 'check', name: '止回閥' },
+  { kind: 'psv', name: '安全閥' },
   { kind: 'flangepair', name: '法蘭對' },
   { kind: 'reducer', name: '異徑管' },
+  { kind: 'fm', name: '流量計' },
+];
+
+// -------------------------------------------------- 管線規格目錄（spec-driven）
+// E3D Specification：選 spec+bore 決定管徑/材質色；元件依 spec 語境選型
+export const PIPE_SPECS = [
+  { code: 'A1A', name: '碳鋼 150#', color: 0x646f7b },
+  { code: 'A3B', name: '碳鋼 300#', color: 0x5a6b7d },
+  { code: 'F1C', name: '不銹鋼 150#', color: 0x8d99a6 },
+  { code: 'B4B', name: '合金鋼 600#', color: 0x7d6a55 },
+  { code: 'PVC', name: 'PVC 化工', color: 0x9a8fb0 },
+];
+export const PIPE_BORES = [
+  { dn: 'DN25', r: 0.017 }, { dn: 'DN40', r: 0.024 }, { dn: 'DN50', r: 0.03 },
+  { dn: 'DN80', r: 0.045 }, { dn: 'DN100', r: 0.057 }, { dn: 'DN150', r: 0.084 },
+  { dn: 'DN200', r: 0.11 }, { dn: 'DN250', r: 0.14 }, { dn: 'DN300', r: 0.16 },
+  { dn: 'DN400', r: 0.21 }, { dn: 'DN500', r: 0.26 },
 ];
 
 // 素材目錄（編輯器面板用）
@@ -990,6 +1128,7 @@ export const ASSET_CATEGORIES = [
     { type: 'reactor', name: '攪拌反應器', dims: { r: 1.5, h: 4 }, prefix: 'R' },
     { type: 'fixedbed', name: '固定床反應器', dims: { r: 1.2, h: 7 }, prefix: 'R' },
     { type: 'pfr', name: '管式反應器', dims: { r: 0.25, len: 5, rows: 3 }, prefix: 'R' },
+    { type: 'agitank', name: '攪拌槽', dims: { r: 1.3, h: 3 }, prefix: 'M' },
   ]},
   { name: '分離設備', items: [
     { type: 'column', name: '蒸餾塔', dims: { r: 1.2, h: 9 }, prefix: 'C' },
@@ -997,10 +1136,12 @@ export const ASSET_CATEGORIES = [
     { type: 'flash_v', name: '立式閃蒸罐', dims: { r: 1.0, h: 4 }, prefix: 'V' },
     { type: 'flash_h', name: '臥式分離槽', dims: { r: 1.1, len: 4.5 }, prefix: 'V' },
     { type: 'cyclone', name: '旋風分離器', dims: { r: 0.8, h: 4 }, prefix: 'S' },
+    { type: 'filterv', name: '籃式過濾器', dims: { r: 0.6, h: 2.4 }, prefix: 'FL' },
   ]},
   { name: '熱交換', items: [
     { type: 'hx', name: '殼管熱交換器', dims: { r: 0.5, len: 3 }, prefix: 'E' },
     { type: 'kettle', name: '釜式再沸器', dims: { r: 0.9, len: 4 }, prefix: 'E' },
+    { type: 'platehx', name: '板式熱交換器', dims: { w: 1.6, h: 1.4, d: 0.8 }, prefix: 'E' },
     { type: 'aircooler', name: '空冷器', dims: { w: 4.5, h: 3, d: 2.5 }, prefix: 'E' },
     { type: 'furnace', name: '加熱爐', dims: { w: 3, h: 3, d: 2.5 }, prefix: 'F' },
   ]},
@@ -1014,6 +1155,8 @@ export const ASSET_CATEGORIES = [
     { type: 'tank', name: '立式儲槽', dims: { r: 2, h: 5 }, prefix: 'T' },
     { type: 'bullet', name: '臥式儲槽', dims: { r: 1.3, len: 6 }, prefix: 'T' },
     { type: 'spheretank', name: '球槽', dims: { r: 3 }, prefix: 'T' },
+    { type: 'hopper', name: '料倉', dims: { r: 1.4, h: 4 }, prefix: 'HP' },
+    { type: 'skid', name: '撬裝設備', dims: { w: 3.6, h: 2.2, d: 2 }, prefix: 'SK' },
   ]},
   { name: '管閥儀錶', items: [
     { type: 'valve', name: '閥', dims: { s: 0.5 }, prefix: 'V' },

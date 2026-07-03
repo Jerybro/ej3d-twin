@@ -374,18 +374,23 @@
         <div class="rpage" data-page="pipe">
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn warn" id="pipe-btn" title="依序點擊路徑點；Enter 完成"><span class="ric" data-ic="pipe"></span>繪製管線</button>
-              <label style="display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--dim)">管徑
-                <input class="rsel" id="pipe-r" type="number" step="0.02" value="0.12" style="width:64px"> m
-              </label>
+              <button class="rbtn warn" id="pipe-btn" title="依序點擊路徑點；Enter 完成、Shift 正交鎖定"><span class="ric" data-ic="pipe"></span>繪製管線</button>
+              <select class="rsel" id="pipe-spec" title="管線規格（Specification）：材質/壓力等級" style="width:104px"></select>
+              <select class="rsel" id="pipe-bore" title="公稱管徑（Bore）" style="width:82px"></select>
             </div>
-            <div class="rgroup-label">建立</div>
+            <div class="rgroup-label">建立（Spec 驅動）</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
               <button class="rbtn warn" id="pipe-node-btn" title="選中管線後編輯節點：拖曳移動、Delete 刪節點"><span class="ric" data-ic="node"></span>節點編輯</button>
             </div>
             <div class="rgroup-label">修改</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" id="btn-iso" title="輸出選中管線的等角 ISO 單管圖（含尺寸標註與元件表）"><span class="ric" data-ic="iso"></span>出 ISO</button>
+            </div>
+            <div class="rgroup-label">交付</div>
           </div>
         </div>
         <!-- 檢視 VIEW -->
@@ -422,6 +427,7 @@
               <button class="rbtn" id="btn-clipbox" title="剖切盒：全場範圍生成，拖面手柄調整"><span class="ric" data-ic="clipbox"></span>剖切盒</button>
               <button class="rbtn" id="btn-clipbox-sel" title="以目前選取生成剖切盒（±1m）"><span class="ric" data-ic="clipsel"></span>從選取</button>
               <button class="rbtn" id="btn-clipsix" title="六平面剖切：屬性面板逐面調整"><span class="ric" data-ic="clipsix"></span>六平面</button>
+              <button class="rbtn" id="btn-clipcap" title="剖面蓋色（Capping）：剖切面上顯示切面填色"><span class="ric" data-ic="cap"></span>蓋面</button>
               <button class="rbtn" id="btn-clipclear" title="清除剖切"><span class="ric" data-ic="clear"></span>清除</button>
             </div>
             <div class="rgroup-label">剖切</div>

@@ -35,3 +35,4 @@ server_8601.log
 
 # AutoML 模型持久化（含使用者資料衍生）
 data/automl/
+batch_rerun.log

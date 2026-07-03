@@ -8,7 +8,8 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight,
-         buildPrim, buildPipeComponent, PIPE_COMPONENTS } from './plant-builders.js';
+         buildPrim, buildPipeComponent, PIPE_COMPONENTS,
+         PIPE_SPECS, PIPE_BORES } from './plant-builders.js';
 import { runClash } from './clash.js';
 
 const viewport = document.getElementById('viewport');
@@ -47,6 +48,8 @@ const ICONS = {
   pipe: '<path d="M4 20V9a2 2 0 0 1 2-2h9"/><path d="M11 3l4 4-4 4"/><path d="M20 4v11a2 2 0 0 1-2 2h-2"/>',
   node: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>',
   ga: '<rect x="3" y="3" width="18" height="18" rx="1.5"/><circle cx="9" cy="9" r="2.6"/><rect x="14" y="13" width="5" height="5"/><path d="M3 17h7M9 3v4"/>',
+  iso: '<path d="M4 17l8-5 8 5M12 12V3"/><path d="M4 17v4h16v-4"/><path d="M8 5l4-2 4 2"/>',
+  cap: '<path d="M12 2l8 4.5v11L12 22l-8-4.5v-11L12 2z"/><path d="M4 6.5l8 4.5 8-4.5" fill="rgba(4,106,251,.2)" stroke="none"/><path d="M4 6.5l8 4.5 8-4.5"/>',
 };
 document.querySelectorAll('.ric[data-ic]').forEach((el) => {
   const d = ICONS[el.dataset.ic];
@@ -607,6 +610,10 @@ function renderPipeProps(index) {
     </div>
     <div class="pg-section">Specification</div>
     <div class="pg-grid">
+      ${pgRow('Spec', `<select data-k="spec" style="width:100%">${PIPE_SPECS.map((sp) =>
+        `<option value="${sp.code}" ${pipe.spec === sp.code ? 'selected' : ''}>${sp.code}｜${sp.name}</option>`).join('')}</select>`)}
+      ${pgRow('Bore', `<select data-k="dn" style="width:100%">${PIPE_BORES.map((b) =>
+        `<option value="${b.dn}" ${pipe.dn === b.dn || (!pipe.dn && Math.abs(b.r - pipe.r) < 0.01) ? 'selected' : ''}>${b.dn}（r${b.r}）</option>`).join('')}</select>`)}
       ${pgRow('管徑 r', `<input data-k="r" type="number" step="0.02" value="${pipe.r}">`)}
       ${pgRow('節點數', `<span>${pipe.pts.length}</span>`)}
       ${pgRow('總長', `<span>${pipeLength(pipe).toFixed(1)} m</span>`)}
@@ -622,6 +629,18 @@ function renderPipeProps(index) {
   propBody.querySelector('[data-k="r"]').addEventListener('change', (e) => {
     pushUndo();
     pipe.r = +e.target.value;
+    rebuildAllPipes();
+    selectPipe(index);
+  });
+  propBody.querySelector('[data-k="spec"]').addEventListener('change', (e) => {
+    pushUndo();
+    pipe.spec = e.target.value;
+    selectPipe(index);
+  });
+  propBody.querySelector('[data-k="dn"]').addEventListener('change', (e) => {
+    pushUndo();
+    pipe.dn = e.target.value;
+    pipe.r = PIPE_BORES.find((b) => b.dn === pipe.dn)?.r ?? pipe.r;
     rebuildAllPipes();
     selectPipe(index);
   });
@@ -1677,6 +1696,7 @@ function clipRebuildPlanes() {
   renderer.clippingPlanes = clip.mode
     ? clip.planes.filter((_, i) => clip.enabled[i])
     : [];
+  clipCapUpdate();
 }
 
 function clipFaceCenter(i) {
@@ -1757,6 +1777,7 @@ function clipStart(mode, box) {
 function clipClear() {
   clip.mode = null;
   clipClearVisuals();
+  clipCapUpdate();
   renderer.clippingPlanes = [];
   if (document.querySelector('.pg-clip')) renderPropEmpty();
   setHint('剖切已清除');
@@ -1957,6 +1978,134 @@ function exportGA() {
   setHint('GA 配置圖已輸出（新分頁預覽＋下載 SVG，可直接列印）');
 }
 document.getElementById('btn-ga').addEventListener('click', exportGA);
+
+// ------------------------------------------------------------ Spec/Bore 選單（E3D spec-driven routing）
+{
+  const specSel = document.getElementById('pipe-spec');
+  const boreSel = document.getElementById('pipe-bore');
+  specSel.innerHTML = PIPE_SPECS.map((sp) => `<option value="${sp.code}">${sp.code}｜${sp.name}</option>`).join('');
+  boreSel.innerHTML = PIPE_BORES.map((b) => `<option value="${b.dn}" ${b.dn === 'DN100' ? 'selected' : ''}>${b.dn}</option>`).join('');
+}
+
+// ------------------------------------------------------------ ISO 等角單管圖（對標 E3D Isometric 交付，輕量版）
+function exportISO() {
+  if (selected?.kind !== 'pipe') { setHint('先選取一條管線再<b>出 ISO</b>'); return; }
+  const pipe = sceneData.pipes[selected.index];
+  const pts = pipe.pts;
+  // 等角投影：X=東、Z=北、Y=上（30° 軸測）
+  const c30 = Math.cos(Math.PI / 6), s30 = Math.sin(Math.PI / 6);
+  const proj = (w) => [(w[0] - w[2]) * c30, (w[0] + w[2]) * s30 - w[1]];
+  const P = pts.map(proj);
+  const xs = P.map((q) => q[0]), ys = P.map((q) => q[1]);
+  const pad = 2.5, S = 26;
+  const x0 = Math.min(...xs) - pad, y0 = Math.min(...ys) - pad;
+  const W = Math.max((Math.max(...xs) - x0 + pad) * S, 560);
+  const H = (Math.max(...ys) - y0 + pad) * S + 128;
+  const px = (q) => ((q[0] - x0) * S).toFixed(1);
+  const py = (q) => ((q[1] - y0) * S).toFixed(1);
+  const parts = [];
+  const dPath = P.map((q, i) => `${i ? 'L' : 'M'}${px(q)} ${py(q)}`).join(' ');
+  parts.push(`<path d="${dPath}" fill="none" stroke="#12283a" stroke-width="3.4" stroke-linejoin="round"/>`);
+  parts.push(`<path d="${dPath}" fill="none" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/>`);
+  const bom = [];
+  for (let i = 0; i < pts.length; i++) {
+    parts.push(`<circle cx="${px(P[i])}" cy="${py(P[i])}" r="2.5" fill="#12283a"/>`);
+    if (i < pts.length - 1) {
+      const seg = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1], pts[i + 1][2] - pts[i][2]);
+      const mx = (+px(P[i]) + +px(P[i + 1])) / 2, my = (+py(P[i]) + +py(P[i + 1])) / 2;
+      parts.push(`<text x="${mx}" y="${my - 7}" font-size="11" fill="#046AFB" text-anchor="middle" font-weight="600">${(seg * 1000).toFixed(0)}</text>`);
+      bom.push(`直管段 ${seg.toFixed(2)} m`);
+    }
+  }
+  // 節點高程標註（ISO 慣例 EL.）
+  for (let i = 0; i < pts.length; i++) {
+    parts.push(`<text x="${+px(P[i]) + 6}" y="${+py(P[i]) + 12}" font-size="9" fill="#5b6b7a">EL.${(pts[i][1] * 1000).toFixed(0)}</text>`);
+  }
+  // 元件符號：沿弧長定位（閥=蝶結、法蘭=雙短線、異徑=三角）
+  const compName = Object.fromEntries(PIPE_COMPONENTS.map((c) => [c.kind, c.name]));
+  for (const c of pipe.components ?? []) {
+    let acc = 0, q = null;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const seg = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1], pts[i + 1][2] - pts[i][2]);
+      if (acc + seg >= c.at || i === pts.length - 2) {
+        const t = Math.max(0, Math.min(1, (c.at - acc) / Math.max(seg, 1e-6)));
+        q = proj(pts[i].map((v, k) => v + (pts[i + 1][k] - v) * t));
+        break;
+      }
+      acc += seg;
+    }
+    if (!q) continue;
+    const cx = +((q[0] - x0) * S).toFixed(1), cy = +((q[1] - y0) * S).toFixed(1);
+    if (c.kind === 'flangepair') {
+      parts.push(`<path d="M${cx - 4} ${cy - 6} v12 M${cx + 4} ${cy - 6} v12" stroke="#12283a" stroke-width="2"/>`);
+    } else if (c.kind === 'reducer') {
+      parts.push(`<path d="M${cx - 6} ${cy - 6} L${cx + 6} ${cy} L${cx - 6} ${cy + 6} Z" fill="#fff" stroke="#12283a" stroke-width="1.4"/>`);
+    } else {
+      parts.push(`<path d="M${cx - 7} ${cy - 5} L${cx + 7} ${cy + 5} L${cx + 7} ${cy - 5} L${cx - 7} ${cy + 5} Z" fill="#fff" stroke="#12283a" stroke-width="1.4"/>`);
+    }
+    parts.push(`<text x="${cx}" y="${cy + 18}" font-size="9.5" fill="#5b6b7a" text-anchor="middle">${compName[c.kind] ?? c.kind}</text>`);
+    bom.push(`${compName[c.kind] ?? c.kind}（沿管 ${c.at} m）`);
+  }
+  // 北向標記（等角：北=右上）
+  parts.push(`<g transform="translate(${W - 58} 26)"><path d="M0 14 L10 -4 L20 14" fill="none" stroke="#12283a" stroke-width="1.6"/><text x="10" y="27" font-size="10" text-anchor="middle" fill="#12283a" font-weight="700">N</text></g>`);
+  const bomRows = bom.slice(0, 6).map((b, i) => `<text x="14" y="${H - 74 + i * 12}" font-size="9.5" fill="#12283a">${i + 1}. ${b}</text>`).join('');
+  const more = bom.length > 6 ? `<text x="14" y="${H - 74 + 6 * 12}" font-size="9.5" fill="#5b6b7a">…共 ${bom.length} 項</text>` : '';
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" font-family="Inter,'Noto Sans TC',sans-serif" style="background:#fff">
+  <rect x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" fill="#fdfefe" stroke="#12283a" stroke-width="1.5"/>
+  ${parts.join('\n  ')}
+  <g>
+    <line x1="0" y1="${H - 110}" x2="${W}" y2="${H - 110}" stroke="#12283a" stroke-width="1"/>
+    <text x="12" y="${H - 90}" font-size="13" font-weight="700" fill="#12283a">ISOMETRIC｜管線 #${selected.index + 1}</text>
+    ${bomRows}${more}
+    <text x="${W - 12}" y="${H - 90}" font-size="10" fill="#5b6b7a" text-anchor="end">Spec ${pipe.spec ?? '—'}｜${pipe.dn ?? `r${pipe.r}`}｜總長 ${pipeLength(pipe).toFixed(2)} m｜尺寸 mm／高程 EL.mm</text>
+    <text x="${W - 12}" y="${H - 74}" font-size="9.5" fill="#5b6b7a" text-anchor="end">J.S Process Intelligence｜E3D 工作區交付</text>
+  </g>
+</svg>`;
+  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  window.open(url, '_blank');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${(sceneId ?? 'scene')}-pipe${selected.index + 1}-ISO.svg`;
+  a.click();
+  setHint('ISO 單管圖已輸出（新分頁預覽＋下載 SVG）');
+}
+document.getElementById('btn-iso').addEventListener('click', exportISO);
+
+// ------------------------------------------------------------ 剖面蓋色（Clip and Cap）
+let capOn = false;
+let capMeshes = [];
+const capMat = new THREE.MeshBasicMaterial({
+  color: 0x046AFB, transparent: true, opacity: 0.2, side: THREE.DoubleSide, depthWrite: false,
+});
+function clipCapUpdate() {
+  for (const m of capMeshes) { scene.remove(m); m.geometry.dispose(); }
+  capMeshes = [];
+  if (!capOn || !clip.mode) return;
+  const size = clip.box.getSize(new THREE.Vector3());
+  const c = clip.box.getCenter(new THREE.Vector3());
+  CLIP_AXES.forEach((cfg, i) => {
+    if (!clip.enabled[i]) return;
+    const { axis, side, n } = cfg;
+    // 貼面往盒內縮 1cm，避免被自身剖切平面裁掉
+    const v = clip.box[side][axis] + n[axis] * 0.01;
+    let dims, pos, rot;
+    if (axis === 'x') { dims = [size.z, size.y]; pos = [v, c.y, c.z]; rot = [0, Math.PI / 2, 0]; }
+    else if (axis === 'y') { dims = [size.x, size.z]; pos = [c.x, v, c.z]; rot = [Math.PI / 2, 0, 0]; }
+    else { dims = [size.x, size.y]; pos = [c.x, c.y, v]; rot = [0, 0, 0]; }
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(dims[0], 0.1), Math.max(dims[1], 0.1)), capMat);
+    quad.position.set(...pos);
+    quad.rotation.set(...rot);
+    scene.add(quad);
+    capMeshes.push(quad);
+  });
+}
+document.getElementById('btn-clipcap').addEventListener('click', (e) => {
+  capOn = !capOn;
+  e.currentTarget.classList.toggle('active', capOn);
+  if (capOn && !clip.mode) setHint('蓋面已開啟——先啟用<b>剖切盒</b>或<b>六平面</b>即會顯示切面填色');
+  clipCapUpdate();
+});
 
 // ------------------------------------------------------------ Clash 檢測面板（工具 tab）
 const clashDock = document.getElementById('clash-dock');
@@ -2187,8 +2336,10 @@ addEventListener('keydown', (e) => {
     redo();
   } else if (e.key === 'Enter' && mode === 'pipe' && pipeDraft.length >= 2) {
     pushUndo();
-    const r = +document.getElementById('pipe-r').value || 0.12;
-    sceneData.pipes.push({ r, pts: pipeDraft.map((p) => [Math.round(p.x * 100) / 100, p.y, Math.round(p.z * 100) / 100]) });
+    const spec = document.getElementById('pipe-spec').value;
+    const dn = document.getElementById('pipe-bore').value;
+    const r = PIPE_BORES.find((b) => b.dn === dn)?.r ?? 0.12;
+    sceneData.pipes.push({ r, spec, dn, pts: pipeDraft.map((p) => [Math.round(p.x * 100) / 100, p.y, Math.round(p.z * 100) / 100]) });
     buildPipe(sceneData.pipes.at(-1), sceneData.pipes.length - 1);
     clearPipeDraft();
     rebuildTree();

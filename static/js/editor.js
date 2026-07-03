@@ -5,8 +5,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight } from './plant-builders.js';
+import { runClash } from './clash.js';
 
 const viewport = document.getElementById('viewport');
 
@@ -68,6 +70,11 @@ transform.addEventListener('dragging-changed', (e) => {
   if (e.value) pushUndo(); // 變換開始前存快照
 });
 scene.add(transform);
+// E3D increment：拖曳中即吸附（0.5m／15°），隨狀態列捕捉開關連動
+function applySnapSettings() {
+  transform.setTranslationSnap(snapOn ? 0.5 : null);
+  transform.setRotationSnap(snapOn ? THREE.MathUtils.degToRad(15) : null);
+}
 
 // 圖紙底圖（P&ID 地毯）：載入場景時重建
 const underlayMeshes = [];
@@ -241,9 +248,23 @@ function buildPipe(pipe, index) {
     cyl.castShadow = !lite;
     cyl.userData.pipeIndex = index;
     group.add(cyl);
-    if (!lite) {
-      const joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
-      joint.position.copy(b);
+    if (!lite && i < pts.length - 2) {
+      // 直角折點畫 quarter-torus 彎頭（E3D elbow 視覺），其餘畫球
+      const u = pts[i].clone().sub(pts[i + 1]).normalize();      // 指向前一段
+      const v = pts[i + 2].clone().sub(pts[i + 1]).normalize();  // 指向後一段
+      const angle = u.angleTo(v) * 180 / Math.PI;
+      let joint;
+      if (angle > 82 && angle < 98) {
+        const R = pipe.r * 1.8;
+        joint = new THREE.Mesh(new THREE.TorusGeometry(R, pipe.r, 8, 10, Math.PI / 2), pipeMat);
+        const X = u.clone().negate(), Y = v.clone().negate();
+        const Z = new THREE.Vector3().crossVectors(X, Y).normalize();
+        joint.setRotationFromMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
+        joint.position.copy(pts[i + 1]).addScaledVector(u, R).addScaledVector(v, R);
+      } else {
+        joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
+        joint.position.copy(pts[i + 1]);
+      }
       joint.userData.pipeIndex = index;
       group.add(joint);
     }
@@ -310,10 +331,12 @@ function setMode(m) {
   document.querySelectorAll('.asset-btn').forEach((b) => b.classList.remove('active'));
   document.getElementById('pipe-btn').classList.remove('active');
   document.getElementById('btn-measure').classList.remove('active');
+  document.getElementById('btn-measure-angle').classList.remove('active');
   document.getElementById('pipe-node-btn').classList.remove('active');
   if (ghost) { scene.remove(ghost); ghost = null; }
   clearPipeDraft();
   clearMeasure();
+  alignSrcTag = null;
   if (m !== 'pipenode') clearNodeHandles();
   if (m === 'idle') setHint('點選素材開始，或點擊場景中的設備編輯');
 }
@@ -606,6 +629,24 @@ function openCtxMenu(x, y, items) {
       ctxMenu.appendChild(sep);
       continue;
     }
+    if (it.children) {   // 子選單（hover 展開）
+      const wrap = document.createElement('div');
+      wrap.className = 'ctx-sub';
+      const btn = document.createElement('button');
+      btn.textContent = it.label;
+      wrap.appendChild(btn);
+      const sub = document.createElement('div');
+      sub.className = 'ctx-sub-menu';
+      for (const c of it.children) {
+        const cb = document.createElement('button');
+        cb.textContent = c.label;
+        cb.addEventListener('click', () => { closeCtxMenu(); c.run(); });
+        sub.appendChild(cb);
+      }
+      wrap.appendChild(sub);
+      ctxMenu.appendChild(wrap);
+      continue;
+    }
     const btn = document.createElement('button');
     btn.textContent = it.label;
     if (it.danger) btn.className = 'danger';
@@ -625,9 +666,61 @@ function eqCtxItems(tag) {
   return [
     { label: '縮放至此（F）', run: () => { selectEquipment(tag); zoomToSelection(); } },
     { label: hidden ? '顯示' : '隱藏', run: () => toggleHidden(tag) },
+    { label: '輸入座標…', run: () => {
+      selectEquipment(tag);
+      const inp = propBody.querySelector('input[data-k="pos.0"]');
+      if (inp) { inp.focus(); inp.select(); }
+    } },
+    { label: '對齊到…', run: () => startAlignPick(tag) },
+    { label: '複製', run: () => duplicateEquipment(tag) },
     'sep',
     { label: '刪除', danger: true, run: () => { selectEquipment(tag); deleteSelected(); } },
   ];
+}
+
+// 複製設備（tag 依前綴遞增、位置偏移 +2,+2）
+function duplicateEquipment(tag) {
+  const src = eqObjects.get(tag)?.def;
+  if (!src) return;
+  pushUndo();
+  const prefix = (src.tag.match(/^[A-Z]+/i)?.[0] ?? 'X').toUpperCase();
+  const def = JSON.parse(JSON.stringify(src));
+  def.tag = nextTag(prefix);
+  def.pos = [src.pos[0] + 2, 0, src.pos[2] + 2];
+  def.instruments = [];
+  const unit = sceneData.plant.units.find((u) => u.equipment.includes(src)) ?? sceneData.plant.units[0];
+  unit.equipment.push(def);
+  buildEquipment(def);
+  rebuildTree();
+  updateTopbar();
+  selectEquipment(def.tag);
+}
+
+// 對齊到…（E3D Align with Feature 簡化版）：點目標設備 → 選對齊軸
+let alignSrcTag = null;
+function startAlignPick(tag) {
+  alignSrcTag = tag;
+  mode = 'alignpick';
+  setHint(`對齊 <b>${tag}</b>：點選<b>目標設備</b>（Esc 取消）`);
+}
+function finishAlignPick(dstTag, x, y) {
+  const src = eqObjects.get(alignSrcTag)?.def;
+  const dst = eqObjects.get(dstTag)?.def;
+  mode = 'idle';
+  if (!src || !dst || dstTag === alignSrcTag) { alignSrcTag = null; setHint('對齊取消'); return; }
+  openCtxMenu(x, y, [
+    { label: `對齊東座標（E＝${dst.pos[0]}）`, run: () => applyAlign(src, dst, true, false) },
+    { label: `對齊北座標（N＝${dst.pos[2]}）`, run: () => applyAlign(src, dst, false, true) },
+    { label: '兩者對齊（重合）', run: () => applyAlign(src, dst, true, true) },
+  ]);
+}
+function applyAlign(src, dst, ex, nz) {
+  pushUndo();
+  if (ex) src.pos[0] = dst.pos[0];
+  if (nz) src.pos[2] = dst.pos[2];
+  eqObjects.get(src.tag).group.position.set(...src.pos);
+  selectEquipment(src.tag);
+  alignSrcTag = null;
 }
 
 function toggleHidden(tag) {
@@ -745,6 +838,17 @@ function groundPoint(e) {
 
 function snapVal(v) { return snapOn ? Math.round(v * 2) / 2 : Math.round(v * 100) / 100; }
 
+// Shift＝正交鎖定（E3D 畫管慣例）：新點強制與上一點同 E 或同 N（取位移大者）
+function orthoLock(pt, e) {
+  if (!e?.shiftKey || !pipeDraft.length) return pt;
+  const prev = pipeDraft[pipeDraft.length - 1];
+  const dx = Math.abs(pt.x - prev.x), dz = Math.abs(pt.z - prev.z);
+  const locked = pt.clone();
+  if (dx >= dz) locked.z = prev.z;
+  else locked.x = prev.x;
+  return locked;
+}
+
 function snapToEquipment(pt) {
   // 2m 內吸附最近設備的接管點（y=0.9）
   let best = null, bestD = 2;
@@ -762,7 +866,7 @@ function pickObject(e) {
   for (const hit of raycaster.intersectObjects(scene.children, true)) {
     let o = hit.object;
     while (o && !o.userData?.eqTag && o.userData?.pipeIndex === undefined
-             && o.userData?.nodeIndex === undefined) o = o.parent;
+             && o.userData?.nodeIndex === undefined && o.userData?.routeDir === undefined) o = o.parent;
     if (o?.userData?.eqTag && hiddenTags.has(o.userData.eqTag)) continue;
     if (o) return { obj: o, point: hit.point };
   }
@@ -776,9 +880,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   if (mode === 'placing' && ghost) {
     if (pt) ghost.position.set(snapVal(pt.x), 0, snapVal(pt.z));
   } else if (mode === 'pipe' && pipeDraft.length) {
-    if (pt) updatePipePreview(snapToEquipment(pt));
-  } else if (mode === 'measure' && measurePts.length === 1) {
-    updateMeasure(e);
+    if (pt) updatePipePreview(orthoLock(snapToEquipment(pt), e));
   }
 });
 
@@ -849,9 +951,9 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   if (mode === 'pipe') {
     const pt = groundPoint(e);
     if (pt) {
-      pipeDraft.push(snapToEquipment(pt));
+      pipeDraft.push(orthoLock(snapToEquipment(pt), e));
       updatePipePreview();
-      setHint(`管線繪製：已 ${pipeDraft.length} 點，<b>Enter</b> 完成、<b>Esc</b> 取消`);
+      setHint(`管線繪製：已 ${pipeDraft.length} 點（<b>Shift</b>=正交鎖定），<b>Enter</b> 完成、<b>Esc</b> 取消`);
     }
     return;
   }
@@ -863,10 +965,18 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     return;
   }
 
+  // alignpick：點目標設備完成對齊
+  if (mode === 'alignpick') {
+    const hit = pickObject(e);
+    if (hit?.obj.userData.eqTag) finishAlignPick(hit.obj.userData.eqTag, e.clientX, e.clientY);
+    return;
+  }
+
   // idle / pipenode：raycast 選取
   const hit = pickObject(e);
   if (hit) {
     const o = hit.obj;
+    if (o.userData.routeDir !== undefined) return; // 箭頭點擊不改選取
     if (o.userData.nodeIndex !== undefined) { selectNodeHandle(o.userData.nodeIndex, o.userData.mid); return; }
     if (o.userData.eqTag) { if (mode !== 'pipenode') selectEquipment(o.userData.eqTag); return; }
     if (o.userData.pipeIndex !== undefined) { selectPipe(o.userData.pipeIndex); return; }
@@ -878,8 +988,30 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 // 右擊才開選單
 renderer.domElement.addEventListener('contextmenu', (e) => {
   e.preventDefault();
-  if (mode !== 'idle') return;
   if (downXY && Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]) > 5) return;
+  // pipenode 模式：節點右鍵 → 輸入數值（E3D Enter Value）
+  if (mode === 'pipenode') {
+    const hit = pickObject(e);
+    if (hit?.obj.userData.nodeIndex !== undefined && !hit.obj.userData.mid && selected?.kind === 'pipe') {
+      const i = hit.obj.userData.nodeIndex;
+      const pipe = sceneData.pipes[selected.index];
+      openCtxMenu(e.clientX, e.clientY, [{
+        label: '輸入數值…（E, U, N）', run: () => {
+          const cur = pipe.pts[i];
+          const s = prompt('節點座標 E, U, N（公尺，逗號分隔）：', `${cur[0]}, ${cur[1]}, ${cur[2]}`);
+          if (!s) return;
+          const v = s.split(',').map((x) => parseFloat(x.trim()));
+          if (v.length !== 3 || v.some(Number.isNaN)) return;
+          pushUndo();
+          pipe.pts[i] = v;
+          rebuildAllPipes();
+          selectPipe(selected.index);
+        },
+      }]);
+    }
+    return;
+  }
+  if (mode !== 'idle') return;
   const hit = pickObject(e);
   if (hit?.obj.userData.eqTag) {
     selectEquipment(hit.obj.userData.eqTag);
@@ -893,10 +1025,25 @@ renderer.domElement.addEventListener('contextmenu', (e) => {
       { label: '刪除', danger: true, run: deleteSelected },
     ]);
   } else {
+    const clickPt = groundPoint(e);
     openCtxMenu(e.clientX, e.clientY, [
       { label: '縮放至全場（Home）', run: fitAll },
-      { label: '等角視', run: () => setViewPreset('iso') },
-      { label: '俯視', run: () => setViewPreset('top') },
+      { label: '視向', children: [
+        { label: '北', run: () => setViewPreset('n') },
+        { label: '南', run: () => setViewPreset('s') },
+        { label: '東', run: () => setViewPreset('e') },
+        { label: '西', run: () => setViewPreset('w') },
+        { label: '俯視', run: () => setViewPreset('top') },
+        { label: '等角', run: () => setViewPreset('iso') },
+      ] },
+      { label: '量測距離', run: () => startMeasure('dist') },
+      { label: '從此點剖切', run: () => {
+        if (!clickPt) return;
+        const b = new THREE.Box3(
+          clickPt.clone().add(new THREE.Vector3(-4, -0.5, -4)),
+          clickPt.clone().add(new THREE.Vector3(4, 8, 4)));
+        clipStart('box', b);
+      } },
     ]);
   }
 });
@@ -981,6 +1128,7 @@ function clearNodeHandles() {
   nodeHandles = [];
   nodeSelected = null;
   nodeDrag = null;
+  clearRoutingArrows();
   if (transform.object && !transform.object.userData?.eqTag) transform.detach();
 }
 
@@ -999,10 +1147,114 @@ function selectNodeHandle(i, isMid) {
   nodeSelected = i;
   const handle = nodeHandles.find((h) => !h.userData.mid && h.userData.nodeIndex === i);
   nodeHandles.forEach((h) => { if (!h.userData.mid) h.material = h === handle ? nodeSelMat : nodeMat; });
-  transform.setMode('translate');
-  transform.attach(handle);
-  nodeDrag = { index: i };
+  const isEnd = i === 0 || i === pipe.pts.length - 1;
+  if (isEnd) {
+    // 端點：Quick Routing 箭頭全權接管（gizmo 會跟箭頭疊在同點打架）
+    transform.detach();
+    nodeDrag = null;
+    buildRoutingArrows(i);
+    setHint('端點：拖<b>方位箭頭</b>正交延伸（轉向自動生彎頭）；右鍵輸入數值、Delete 刪節點');
+  } else {
+    clearRoutingArrows();
+    transform.setMode('translate');
+    transform.attach(handle);
+    nodeDrag = { index: i };
+  }
 }
+
+// ------------------------------------------------------------ Quick Routing（端點延伸箭頭）
+let routeArrows = [];
+let routeDrag = null;   // { dir, endIndex, base }
+const routeMat = new THREE.MeshBasicMaterial({ color: 0x46c2e0 });
+
+function buildRoutingArrows(endIndex) {
+  clearRoutingArrows();
+  if (selected?.kind !== 'pipe') return;
+  const pipe = sceneData.pipes[selected.index];
+  const base = new THREE.Vector3(...pipe.pts[endIndex]);
+  const dirs = [
+    new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
+    new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1),
+    new THREE.Vector3(0, 1, 0),
+  ];
+  for (const dir of dirs) {
+    const g = new THREE.Group();
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.85, 6), routeMat);
+    shaft.position.y = 0.6;
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.35, 8), routeMat);
+    head.position.y = 1.15;
+    g.add(shaft, head);
+    g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    g.position.copy(base);
+    g.traverse((o) => { o.userData.routeDir = dir; o.userData.routeEnd = endIndex; });
+    scene.add(g);
+    routeArrows.push(g);
+  }
+}
+
+function clearRoutingArrows() {
+  for (const a of routeArrows) scene.remove(a);
+  routeArrows = [];
+  routeDrag = null;
+}
+
+// 箭頭拖曳：游標射線與箭頭軸線最近點 → 沿軸延伸量（吸附 0.5m）
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || mode !== 'pipenode' || !routeArrows.length) return;
+  const hit = pickObject(e);
+  if (!hit || hit.obj.userData.routeDir === undefined) return;
+  const pipe = sceneData.pipes[selected.index];
+  routeDrag = {
+    dir: hit.obj.userData.routeDir.clone(),
+    endIndex: hit.obj.userData.routeEnd,
+    base: new THREE.Vector3(...pipe.pts[hit.obj.userData.routeEnd]),
+    s: 0,
+  };
+  controls.enabled = false;
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!routeDrag) return;
+  setPointer(e);
+  raycaster.setFromCamera(pointer, camera);
+  const { base, dir } = routeDrag;
+  const O = raycaster.ray.origin, d = raycaster.ray.direction;
+  const w = new THREE.Vector3().subVectors(O, base);
+  const b = dir.dot(d);
+  const denom = 1 - b * b;
+  if (Math.abs(denom) < 1e-6) return;
+  let s = (b * d.dot(w) - dir.dot(w)) / denom;
+  s = Math.max(0, snapOn ? Math.round(s * 2) / 2 : Math.round(s * 10) / 10);
+  routeDrag.s = s;
+  const tip = base.clone().addScaledVector(dir, s);
+  if (pipePreview) scene.remove(pipePreview);
+  const geo = new THREE.BufferGeometry().setFromPoints([base, tip]);
+  pipePreview = new THREE.Line(geo, new THREE.LineDashedMaterial({ color: 0x46c2e0, dashSize: 0.5, gapSize: 0.3 }));
+  pipePreview.computeLineDistances();
+  scene.add(pipePreview);
+  setHint(`延伸 <b>${s.toFixed(1)} m</b>（放開確定；轉向自動生成彎頭）`);
+});
+renderer.domElement.addEventListener('pointerup', () => {
+  if (!routeDrag) return;
+  const { dir, endIndex, base, s } = routeDrag;
+  if (pipePreview) { scene.remove(pipePreview); pipePreview = null; }
+  controls.enabled = true;
+  if (s >= 0.4 && selected?.kind === 'pipe') {
+    pushUndo();
+    const pipe = sceneData.pipes[selected.index];
+    const np = base.clone().addScaledVector(dir, s);
+    const pt = [Math.round(np.x * 100) / 100, Math.round(np.y * 100) / 100, Math.round(np.z * 100) / 100];
+    if (endIndex === 0) pipe.pts.unshift(pt);
+    else pipe.pts.push(pt);
+    const idx = selected.index;
+    routeDrag = null;
+    rebuildAllPipes();
+    selectPipe(idx);
+    // 重選新端點讓箭頭跟到新端（連續路由）
+    selectNodeHandle(endIndex === 0 ? 0 : sceneData.pipes[idx].pts.length - 1, false);
+    return;
+  }
+  routeDrag = null;
+});
 
 function commitNodeDrag() {
   if (!nodeDrag || selected?.kind !== 'pipe') return;
@@ -1023,19 +1275,35 @@ document.getElementById('pipe-node-btn').addEventListener('click', () => {
   else setHint('先選取一條管線，再按<b>節點編輯</b>');
 });
 
-// ------------------------------------------------------------ 量測工具（E3D Measure）
+// ------------------------------------------------------------ 量測工具（E3D Measure：距離＋角度、持久標註）
 let measurePts = [];
-let measureGroup = null;
-const measureTip = document.getElementById('measure-tip');
-let measureAnchor = null;  // Vector3 中點（畫面座標投影用）
+let measureGroup = null;      // 標註持久群（球/線/弧/CSS2D 標籤）
+let measureMode = 'dist';     // 'dist' | 'angle'
+let lastMeasureMode = 'dist'; // 空白鍵重複上次量測用
+const measureLineMat = new THREE.LineBasicMaterial({ color: 0xffaa3c });
 
-document.getElementById('btn-measure').addEventListener('click', () => {
-  if (mode === 'measure') { setMode('idle'); return; }
+function startMeasure(kind) {
+  if (mode === 'measure' && measureMode === kind) { setMode('idle'); return; }
   setMode('measure');
-  document.getElementById('btn-measure').classList.add('active');
-  document.querySelector('.rtab[data-tab="view"]').click();
-  setHint('量測：點擊<b>兩點</b>（設備表面或地面）顯示距離，Esc 結束');
-});
+  measureMode = kind;
+  lastMeasureMode = kind;
+  const btn = document.getElementById(kind === 'dist' ? 'btn-measure' : 'btn-measure-angle');
+  btn.classList.add('active');
+  setHint(kind === 'dist'
+    ? '量距離：點擊<b>兩點</b>（設備表面或地面）；可連續量，Esc 結束'
+    : '量角度：點<b>三點</b>，<b>第一點＝頂點</b>；可連續量，Esc 結束');
+}
+document.getElementById('btn-measure').addEventListener('click', () => startMeasure('dist'));
+document.getElementById('btn-measure-angle').addEventListener('click', () => startMeasure('angle'));
+
+function measureNote(text, at) {
+  const el = document.createElement('div');
+  el.className = 'm-note';
+  el.textContent = text;
+  const obj = new CSS2DObject(el);
+  obj.position.copy(at);
+  measureGroup.add(obj);
+}
 
 function addMeasurePoint(pt) {
   measurePts.push(pt);
@@ -1043,48 +1311,200 @@ function addMeasurePoint(pt) {
   const dot = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), nodeMat);
   dot.position.copy(pt);
   measureGroup.add(dot);
-  if (measurePts.length === 2) {
+
+  if (measureMode === 'dist' && measurePts.length === 2) {
     const [a, b] = measurePts;
-    const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
-    measureGroup.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffaa3c })));
+    measureGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), measureLineMat));
     const d = a.distanceTo(b);
     const dx = Math.abs(a.x - b.x), dy = Math.abs(a.y - b.y), dz = Math.abs(a.z - b.z);
-    measureTip.textContent = `${d.toFixed(2)} m（ΔX ${dx.toFixed(2)}・ΔY ${dy.toFixed(2)}・ΔZ ${dz.toFixed(2)}）`;
-    measureTip.style.display = 'block';
-    measureAnchor = a.clone().lerp(b, 0.5);
-    measurePts = [];   // 可連續量下一段
-    setHint('量測完成。繼續點兩點量下一段，Esc 結束');
+    measureNote(`${d.toFixed(2)} m（ΔE ${dx.toFixed(2)}・ΔU ${dy.toFixed(2)}・ΔN ${dz.toFixed(2)}）`,
+      a.clone().lerp(b, 0.5).add(new THREE.Vector3(0, 0.4, 0)));
+    measurePts = [];
+    setHint('量測完成。繼續點兩點量下一段，<b>空白鍵</b>重複、Esc 結束');
+  } else if (measureMode === 'angle' && measurePts.length === 3) {
+    const [v, a, b] = measurePts;   // v=頂點
+    const u1 = a.clone().sub(v), u2 = b.clone().sub(v);
+    const ang = u1.angleTo(u2) * 180 / Math.PI;
+    measureGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([v, a]), measureLineMat));
+    measureGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([v, b]), measureLineMat));
+    // 弧：兩方向向量插值取樣（角度 <180° 適用）
+    const r = Math.min(u1.length(), u2.length(), 3) * 0.5;
+    const n1 = u1.clone().normalize(), n2 = u2.clone().normalize();
+    const arc = [];
+    for (let i = 0; i <= 20; i++) {
+      const m = n1.clone().lerp(n2, i / 20).normalize().multiplyScalar(r);
+      arc.push(v.clone().add(m));
+    }
+    measureGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(arc), measureLineMat));
+    measureNote(`∠ ${ang.toFixed(1)}°`, v.clone().add(n1.clone().add(n2).normalize().multiplyScalar(r + 0.5)));
+    measurePts = [];
+    setHint('角度完成。繼續點三點量下一組（第一點＝頂點），Esc 結束');
   }
 }
-
-function updateMeasure() { /* 預留拖曳預覽 */ }
 
 function clearMeasure() {
   measurePts = [];
-  measureAnchor = null;
-  measureTip.style.display = 'none';
   if (measureGroup) { scene.remove(measureGroup); measureGroup = null; }
 }
 
-// ------------------------------------------------------------ 剖切（水平剖切面）
-let clipOn = false;
-const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 10);
-document.getElementById('btn-clip').addEventListener('click', () => {
-  clipOn = !clipOn;
-  document.getElementById('btn-clip').classList.toggle('active', clipOn);
-  document.getElementById('clip-slider').style.display = clipOn ? '' : 'none';
-  applyClip();
-});
-document.getElementById('clip-slider').addEventListener('input', applyClip);
-function applyClip() {
-  if (!clipOn) { renderer.clippingPlanes = []; return; }
-  let maxY = 12;
-  for (const { def } of eqObjects.values()) {
-    maxY = Math.max(maxY, (def.dims.h ?? def.dims.len ?? 4) + 2);
-  }
-  clipPlane.constant = (document.getElementById('clip-slider').value / 100) * maxY;
-  renderer.clippingPlanes = [clipPlane];
+// ------------------------------------------------------------ 剖切（Clip Box＋六平面，對標 E3D Clip and Cap）
+// 六面法向朝內：+X 面 normal(-1,0,0) constant=max.x → 盒內保留
+const clip = {
+  mode: null,             // null | 'box' | 'six'
+  box: new THREE.Box3(),
+  planes: [],             // 6 THREE.Plane（±X ±Y ±Z 順序）
+  enabled: [true, true, true, true, true, true],
+  helper: null,
+  handles: [],            // CSS2D 面手柄（box 模式）
+};
+const CLIP_AXES = [
+  { n: new THREE.Vector3(1, 0, 0), side: 'min', axis: 'x' },   // -X 面（normal 朝 +X）
+  { n: new THREE.Vector3(-1, 0, 0), side: 'max', axis: 'x' },  // +X 面
+  { n: new THREE.Vector3(0, 1, 0), side: 'min', axis: 'y' },
+  { n: new THREE.Vector3(0, -1, 0), side: 'max', axis: 'y' },
+  { n: new THREE.Vector3(0, 0, 1), side: 'min', axis: 'z' },
+  { n: new THREE.Vector3(0, 0, -1), side: 'max', axis: 'z' },
+];
+
+function clipRebuildPlanes() {
+  clip.planes = CLIP_AXES.map(({ n, side, axis }) => {
+    const v = clip.box[side][axis];
+    // 平面式 n·p + c ≥ 0 保留：-X 面 c = -min.x；+X 面 c = max.x
+    return new THREE.Plane(n.clone(), side === 'min' ? -v : v);
+  });
+  renderer.clippingPlanes = clip.mode
+    ? clip.planes.filter((_, i) => clip.enabled[i])
+    : [];
 }
+
+function clipFaceCenter(i) {
+  const c = clip.box.getCenter(new THREE.Vector3());
+  const { side, axis } = CLIP_AXES[i];
+  c[axis] = clip.box[side][axis];
+  return c;
+}
+
+function clipShow() {
+  clipClearVisuals();
+  clip.helper = new THREE.Box3Helper(clip.box, 0x46c2e0);
+  scene.add(clip.helper);
+  if (clip.mode === 'box') {
+    CLIP_AXES.forEach((cfg, i) => {
+      const el = document.createElement('div');
+      el.className = 'clip-handle';
+      el.title = '拖曳沿法向調整剖切面';
+      const obj = new CSS2DObject(el);
+      obj.position.copy(clipFaceCenter(i));
+      scene.add(obj);
+      clip.handles.push(obj);
+      el.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        el.setPointerCapture(e.pointerId);
+        const move = (ev) => {
+          // 游標射線與「面中心＋法向軸線」最近點 → 新面位置
+          setPointer(ev);
+          raycaster.setFromCamera(pointer, camera);
+          const P0 = clipFaceCenter(i);
+          const n = CLIP_AXES[i].axis;
+          const dirN = new THREE.Vector3();
+          dirN[n] = 1;
+          const O = raycaster.ray.origin, d = raycaster.ray.direction;
+          const w = new THREE.Vector3().subVectors(O, P0);
+          const b = dirN.dot(d);
+          const denom = 1 - b * b;
+          if (Math.abs(denom) < 1e-6) return;
+          const s = (b * d.dot(w) - dirN.dot(w)) / denom;
+          let v = P0[n] + s;
+          if (snapOn) v = Math.round(v * 2) / 2;
+          const { side, axis } = CLIP_AXES[i];
+          const other = side === 'min' ? clip.box.max[axis] : clip.box.min[axis];
+          clip.box[side][axis] = side === 'min' ? Math.min(v, other - 0.5) : Math.max(v, other + 0.5);
+          clipRebuildPlanes();
+          clip.handles.forEach((h, j) => h.position.copy(clipFaceCenter(j)));
+        };
+        const up = () => {
+          el.removeEventListener('pointermove', move);
+          el.removeEventListener('pointerup', up);
+        };
+        el.addEventListener('pointermove', move);
+        el.addEventListener('pointerup', up);
+      });
+    });
+  }
+}
+
+function clipClearVisuals() {
+  if (clip.helper) { scene.remove(clip.helper); clip.helper = null; }
+  for (const h of clip.handles) scene.remove(h);
+  clip.handles = [];
+}
+
+function clipStart(mode, box) {
+  clip.mode = mode;
+  clip.box.copy(box);
+  clip.enabled = [true, true, true, true, true, true];
+  clipRebuildPlanes();
+  clipShow();
+  if (mode === 'six') renderClipPanel();
+  setHint(mode === 'box'
+    ? '剖切盒啟用：拖曳<b>面手柄</b>調整範圍；VIEW > 清除 結束'
+    : '六平面剖切啟用：右側屬性面板逐面開關/滑動；VIEW > 清除 結束');
+}
+
+function clipClear() {
+  clip.mode = null;
+  clipClearVisuals();
+  renderer.clippingPlanes = [];
+  if (document.querySelector('.pg-clip')) renderPropEmpty();
+  setHint('剖切已清除');
+}
+
+// 六平面情境面板（占用右側 Properties——E3D 情境編輯面板行為）
+function renderClipPanel() {
+  const b = sceneBounds();
+  document.getElementById('prop-title').textContent = '六平面剖切';
+  const rows = CLIP_AXES.map((cfg, i) => {
+    const { side, axis } = cfg;
+    const lo = b.min[axis] - 2, hi = b.max[axis] + 2;
+    const v = clip.box[side][axis];
+    const name = `${side === 'min' ? '−' : '＋'}${axis.toUpperCase()}`;
+    return `<label><input type="checkbox" data-ci="${i}" ${clip.enabled[i] ? 'checked' : ''}> ${name}</label>
+      <div class="pg-v"><input type="range" data-cs="${i}" min="${lo}" max="${hi}" step="0.5" value="${v}"></div>`;
+  }).join('');
+  propBody.innerHTML = `<div class="pg-section pg-clip">Clip Planes</div>
+    <div class="pg-grid">${rows}</div>
+    <button class="pbtn" id="clip-panel-clear">清除剖切</button>`;
+  propBody.querySelectorAll('[data-ci]').forEach((cb) => cb.addEventListener('change', () => {
+    clip.enabled[+cb.dataset.ci] = cb.checked;
+    clipRebuildPlanes();
+  }));
+  propBody.querySelectorAll('[data-cs]').forEach((sl) => sl.addEventListener('input', () => {
+    const i = +sl.dataset.cs;
+    const { side, axis } = CLIP_AXES[i];
+    clip.box[side][axis] = +sl.value;
+    clipRebuildPlanes();
+    clip.handles.forEach((h, j) => h.position.copy(clipFaceCenter(j)));
+  }));
+  document.getElementById('clip-panel-clear').addEventListener('click', clipClear);
+}
+
+document.getElementById('btn-clipbox').addEventListener('click', () =>
+  clipStart('box', sceneBounds().expandByScalar(1)));
+document.getElementById('btn-clipbox-sel').addEventListener('click', () => {
+  let box;
+  if (selected?.kind === 'eq') {
+    box = new THREE.Box3().expandByObject(eqObjects.get(selected.def.tag).group).expandByScalar(1);
+  } else if (selected?.kind === 'pipe') {
+    box = new THREE.Box3();
+    for (const p of sceneData.pipes[selected.index].pts) box.expandByPoint(new THREE.Vector3(...p));
+    box.expandByScalar(1);
+  } else box = sceneBounds().expandByScalar(1);
+  clipStart('box', box);
+});
+document.getElementById('btn-clipsix').addEventListener('click', () =>
+  clipStart('six', sceneBounds().expandByScalar(1)));
+document.getElementById('btn-clipclear').addEventListener('click', clipClear);
 
 // ------------------------------------------------------------ 視角/縮放（View）
 function sceneBounds() {
@@ -1164,7 +1584,175 @@ document.getElementById('btn-labels').addEventListener('click', (e) => {
 document.getElementById('st-snap').addEventListener('click', (e) => {
   snapOn = !snapOn;
   e.currentTarget.classList.toggle('on', snapOn);
+  applySnapSettings();
 });
+applySnapSettings();
+
+// ------------------------------------------------------------ Clash 檢測面板（工具 tab）
+const clashDock = document.getElementById('clash-dock');
+let clashMarks = [];   // BoxHelper 高亮
+
+function clearClashMarks() {
+  for (const m of clashMarks) scene.remove(m);
+  clashMarks = [];
+}
+
+document.getElementById('btn-clash-run').addEventListener('click', () => {
+  const t0 = performance.now();
+  const { clashes, capped } = runClash(sceneData, eqObjects, hiddenTags);
+  const ms = Math.round(performance.now() - t0);
+  const n = { overlap: 0, touch: 0, pipe: 0 };
+  for (const c of clashes) n[c.type]++;
+  document.getElementById('clash-summary').textContent =
+    `硬碰撞 ${n.overlap}｜淨距 ${n.touch}｜管線干涉 ${n.pipe}（${ms}ms${capped ? '，已截斷' : ''}）`;
+  document.getElementById('clash-count').textContent = `　${clashes.length} 筆`;
+  const list = document.getElementById('clash-list');
+  const BADGE = { overlap: ['overlap', '硬碰撞'], touch: ['touch', '淨距'], pipe: ['pipe', '管線'] };
+  list.innerHTML = clashes.length ? clashes.map((c, i) => `
+    <div class="clash-row" data-ci="${i}">
+      <span class="clash-badge ${BADGE[c.type][0]}">${BADGE[c.type][1]}</span>
+      <span>${c.a}</span><span>${c.b}</span>
+      <span style="color:var(--dim)">(${c.point.x.toFixed(1)}, ${c.point.z.toFixed(1)})</span>
+    </div>`).join('')
+    : '<div style="padding:14px;color:var(--dim)">無碰撞——場景乾淨</div>';
+  clashDock.classList.add('show');
+  list.querySelectorAll('.clash-row').forEach((row) => row.addEventListener('click', () => {
+    list.querySelectorAll('.clash-row').forEach((r) => r.classList.toggle('selected', r === row));
+    const c = clashes[+row.dataset.ci];
+    clearClashMarks();
+    for (const tag of [c.a, c.b]) {
+      const entry = eqObjects.get(tag);
+      if (entry) {
+        const h = new THREE.BoxHelper(entry.group, 0xff4d4f);
+        scene.add(h);
+        clashMarks.push(h);
+      }
+    }
+    if (c.pipeIndex !== undefined) selectPipe(c.pipeIndex);
+    const box = new THREE.Box3(
+      c.point.clone().add(new THREE.Vector3(-5, -1, -5)),
+      c.point.clone().add(new THREE.Vector3(5, 9, 5)));
+    frameBox(box, camera.position.clone().sub(controls.target).normalize());
+  }));
+});
+document.getElementById('clash-close').addEventListener('click', () => {
+  clashDock.classList.remove('show');
+  clearClashMarks();
+});
+
+// ------------------------------------------------------------ 視角書籤（E3D Save & Restore Views）
+function captureThumb() {
+  renderer.render(scene, camera);  // preserveDrawingBuffer=false → 先渲染同幀取圖
+  const src = renderer.domElement;
+  const c = document.createElement('canvas');
+  c.width = 160;
+  c.height = 100;
+  c.getContext('2d').drawImage(src, 0, 0, 160, 100);
+  return c.toDataURL('image/jpeg', 0.6);
+}
+
+document.getElementById('btn-view-save').addEventListener('click', () => {
+  const name = prompt('視角名稱：', `視角 ${(sceneData.views?.length ?? 0) + 1}`);
+  if (!name) return;
+  sceneData.views ??= [];
+  sceneData.views.push({
+    name,
+    pos: camera.position.toArray(),
+    target: controls.target.toArray(),
+    hidden: [...hiddenTags],
+    thumb: captureThumb(),
+  });
+  setHint(`視角 <b>${name}</b> 已存（隨場景儲存）`);
+  renderViewsPanel();
+});
+
+let camTween = null;
+function flyTo(pos, target) {
+  camTween = {
+    fromP: camera.position.clone(), toP: new THREE.Vector3(...pos),
+    fromT: controls.target.clone(), toT: new THREE.Vector3(...target),
+    t: 0,
+  };
+}
+
+function renderViewsPanel() {
+  const views = sceneData.views ?? [];
+  document.getElementById('prop-title').textContent = '視角書籤';
+  propBody.innerHTML = views.length
+    ? views.map((v, i) => `
+      <div class="scene-item" data-vi="${i}" style="gap:8px">
+        <img src="${v.thumb}" width="72" height="45" style="border-radius:5px;border:1px solid var(--bdr)">
+        <span style="flex:1">${v.name}</span>
+        <button class="pane-x" data-del="${i}" title="刪除">✕</button>
+      </div>`).join('')
+    : '<div id="prop-empty">尚無書籤<br>VIEW > 存視角 建立</div>';
+  propBody.querySelectorAll('[data-vi]').forEach((el) => el.addEventListener('click', (e) => {
+    if (e.target.dataset.del !== undefined) return;
+    const v = views[+el.dataset.vi];
+    flyTo(v.pos, v.target);
+    hiddenTags.clear();
+    for (const t of v.hidden ?? []) hiddenTags.add(t);
+    for (const [tag, entry] of eqObjects) entry.group.visible = !hiddenTags.has(tag);
+    rebuildTree();
+  }));
+  propBody.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => {
+    views.splice(+b.dataset.del, 1);
+    renderViewsPanel();
+  }));
+}
+document.getElementById('btn-view-restore').addEventListener('click', renderViewsPanel);
+
+// ------------------------------------------------------------ Walk 漫遊（E3D Walk F6：第一人稱）
+const walk = { on: false, keys: new Set(), plc: null, prevFov: 55 };
+function walkStep() {
+  if (camTween) {  // 視角書籤飛行
+    camTween.t = Math.min(1, camTween.t + 0.045);
+    const k = camTween.t * camTween.t * (3 - 2 * camTween.t);
+    camera.position.lerpVectors(camTween.fromP, camTween.toP, k);
+    controls.target.lerpVectors(camTween.fromT, camTween.toT, k);
+    if (camTween.t >= 1) camTween = null;
+  }
+  if (!walk.on) return;
+  const sp = (walk.keys.has('shift') ? 8 : 4) / 60;
+  if (walk.keys.has('w') || walk.keys.has('arrowup')) walk.plc.moveForward(sp);
+  if (walk.keys.has('s') || walk.keys.has('arrowdown')) walk.plc.moveForward(-sp);
+  if (walk.keys.has('a') || walk.keys.has('arrowleft')) walk.plc.moveRight(-sp);
+  if (walk.keys.has('d') || walk.keys.has('arrowright')) walk.plc.moveRight(sp);
+  camera.position.y = 1.7;  // 眼高鎖定
+}
+
+function enterWalk() {
+  if (walk.on) return;
+  walk.plc ??= new PointerLockControls(camera, renderer.domElement);
+  walk.prevFov = camera.fov;
+  walk.on = true;
+  controls.enabled = false;
+  camera.fov = 90;
+  camera.position.y = 1.7;
+  camera.updateProjectionMatrix();
+  document.getElementById('btn-walk').classList.add('active');
+  setHint('漫遊中：<b>WASD/方向鍵</b>移動、<b>Shift</b> 加速、滑鼠轉頭、<b>Esc</b> 離開');
+  walk.plc.lock();
+  walk.plc.addEventListener('unlock', exitWalk);
+}
+function exitWalk() {
+  if (!walk.on) return;
+  walk.on = false;
+  walk.keys.clear();
+  walk.plc.removeEventListener('unlock', exitWalk);
+  camera.fov = walk.prevFov;
+  camera.updateProjectionMatrix();
+  // 走到哪看到哪：target 設為前方 10m，OrbitControls 無縫接手
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  controls.target.copy(camera.position).addScaledVector(dir, 10);
+  controls.enabled = true;
+  document.getElementById('btn-walk').classList.remove('active');
+  setHint('已離開漫遊');
+}
+document.getElementById('btn-walk').addEventListener('click', enterWalk);
+addEventListener('keydown', (e) => { if (walk.on) walk.keys.add(e.key.toLowerCase()); });
+addEventListener('keyup', (e) => { walk.keys.delete(e.key.toLowerCase()); });
 
 // ------------------------------------------------------------ PowerCompass
 // E3D 球形方位羅盤：點 N/S/E/W/U/D 切視向、可拖曳移位、方位環隨相機轉
@@ -1213,7 +1801,11 @@ document.getElementById('prop-reopen').addEventListener('click', () => { documen
 // ------------------------------------------------------------ 鍵盤
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
-  if (e.key === 'Escape') { setMode('idle'); selectNone(); }
+  if (e.key === 'Escape') {
+    if (walk.on) exitWalk();  // pointer lock 失敗/headless 時的保險退出
+    setMode('idle');
+    selectNone();
+  }
   else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
     e.preventDefault();
     saveScene(false);
@@ -1244,6 +1836,9 @@ addEventListener('keydown', (e) => {
       return;
     }
     deleteSelected();
+  } else if (e.key === ' ' && mode !== 'measure' && mode !== 'pipe' && !walk.on) {
+    e.preventDefault();  // 空白鍵＝以上次模式重複量測（E3D 3.1.7）
+    startMeasure(lastMeasureMode);
   } else if (e.key === 'F2') {
     e.preventDefault();
     setNavMode('zoom');
@@ -1410,13 +2005,8 @@ function animate() {
   camera.getWorldDirection(tmpDir);
   const yaw = Math.atan2(tmpDir.x, -tmpDir.z) * 180 / Math.PI;
   compassRose.setAttribute('transform', `rotate(${-yaw} 48 48)`);
-  // 量測標籤跟隨 3D 位置
-  if (measureAnchor && measureTip.style.display !== 'none') {
-    const v = measureAnchor.clone().project(camera);
-    const r = renderer.domElement.getBoundingClientRect();
-    measureTip.style.left = `${((v.x + 1) / 2) * r.width - 40}px`;
-    measureTip.style.top = `${((1 - v.y) / 2) * r.height - 30}px`;
-  }
+  // Walk 漫遊移動積分
+  walkStep();
 }
 animate();
 
@@ -1426,5 +2016,10 @@ window.EJ3D_EDITOR = {
   get undoDepth() { return undoStack.length; },
   get redoDepth() { return redoStack.length; },
   get selected() { return selected; },
+  get clipMode() { return clip.mode; },
+  get measureCount() { return measureGroup ? measureGroup.children.length : 0; },
   selectEquipment, selectPipe, fitAll, setViewPreset,
+  startMeasure, addMeasurePoint, clipStart, clipClear, enterNodeMode,
+  duplicateEquipment,
+  V3: (x, y, z) => new THREE.Vector3(x, y, z),
 };

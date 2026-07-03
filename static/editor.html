@@ -198,6 +198,37 @@
     #ctx-menu button:hover { background: var(--accent-deep); }
     #ctx-menu button.danger { color: var(--danger); }
     #ctx-menu .ctx-sep { border-top: 1px solid var(--bdr); margin: 4px 6px; }
+    .ctx-sub { position: relative; }
+    .ctx-sub > button::after { content: '›'; float: right; color: var(--dim); }
+    .ctx-sub-menu { position: absolute; left: 100%; top: -4px; display: none; min-width: 110px;
+      background: var(--panel); border: 1px solid var(--bdr); border-radius: 8px; padding: 4px;
+      box-shadow: 0 8px 28px rgba(0,0,0,.5); }
+    .ctx-sub:hover > .ctx-sub-menu { display: block; }
+
+    /* 量測持久標註 */
+    .m-note { padding: 2px 9px; border-radius: 10px; background: rgba(255, 170, 60, 0.92);
+      color: #1a1204; font-size: 12px; font-weight: 700; white-space: nowrap; pointer-events: none; }
+
+    /* 剖切盒面手柄（CSS2D） */
+    .clip-handle { width: 14px; height: 14px; border-radius: 3px; background: rgba(70,194,224,.85);
+      border: 1px solid #0e141b; cursor: grab; pointer-events: auto; }
+    .clip-handle:hover { background: var(--warn); }
+
+    /* Clash 底部面板 */
+    #clash-dock { position: absolute; left: 0; right: 0; bottom: 0; height: 170px; z-index: 26;
+      background: rgba(19, 27, 36, 0.96); border-top: 1px solid var(--bdr); display: none;
+      flex-direction: column; }
+    #clash-dock.show { display: flex; }
+    #clash-dock .pane-head { flex-shrink: 0; }
+    #clash-list { flex: 1; overflow-y: auto; font-size: 12px; }
+    .clash-row { display: grid; grid-template-columns: 74px 1fr 1fr 1fr; gap: 8px; padding: 4px 12px;
+      cursor: pointer; border-bottom: 1px solid rgba(34,49,64,.5); align-items: center; }
+    .clash-row:hover { background: var(--panel3); }
+    .clash-row.selected { background: var(--accent-deep); }
+    .clash-badge { font-size: 10.5px; font-weight: 700; text-align: center; border-radius: 8px; padding: 1px 6px; }
+    .clash-badge.overlap { background: rgba(255,77,79,.25); color: #ff8a8c; }
+    .clash-badge.touch { background: rgba(255,170,60,.22); color: var(--warn); }
+    .clash-badge.pipe { background: rgba(70,194,224,.18); color: var(--accent); }
 
     /* ================= 狀態列 ================= */
     #statusbar { grid-area: status; display: flex; align-items: center; gap: 18px; padding: 0 12px;
@@ -246,6 +277,7 @@
         <button class="rtab" data-tab="project">專案</button>
         <button class="rtab active" data-tab="home">首頁</button>
         <button class="rtab" data-tab="view">檢視</button>
+        <button class="rtab" data-tab="tools">工具</button>
         <span class="rtab-sep"></span>
         <button class="rtab ctx-tab" data-tab="equip">設備 EQUIPMENT</button>
         <button class="rtab ctx-tab" data-tab="pipe">管線 PIPING</button>
@@ -288,7 +320,8 @@
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn warn" id="btn-measure" title="點兩點量距離；Esc 結束"><span class="ric">📐</span>距離</button>
+              <button class="rbtn warn" id="btn-measure" title="點兩點量距離（可連續；空白鍵重複上次量測）；Esc 結束"><span class="ric">📐</span>距離</button>
+              <button class="rbtn warn" id="btn-measure-angle" title="點三點量角度（第一點＝頂點）；Esc 結束"><span class="ric">∠</span>角度</button>
             </div>
             <div class="rgroup-label">量測</div>
           </div>
@@ -351,17 +384,30 @@
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" disabled title="視角書籤（規劃中）"><span class="ric">📌</span>存視角</button>
-              <button class="rbtn" disabled title="視角書籤（規劃中）"><span class="ric">🔖</span>回視角</button>
+              <button class="rbtn" id="btn-view-save" title="儲存目前視角（含隱藏清單與縮圖）"><span class="ric">📌</span>存視角</button>
+              <button class="rbtn" id="btn-view-restore" title="視角書籤清單（屬性面板開啟）"><span class="ric">🔖</span>回視角</button>
+              <button class="rbtn warn" id="btn-walk" title="第一人稱漫遊：WASD 移動、Shift 加速、Esc 離開"><span class="ric">🚶</span>漫遊</button>
             </div>
             <div class="rgroup-label">操縱</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" id="btn-clip" title="水平剖切面開關"><span class="ric">▤</span>剖切</button>
-              <input type="range" id="clip-slider" min="0" max="100" value="100" style="width:90px;display:none">
+              <button class="rbtn" id="btn-clipbox" title="剖切盒：全場範圍生成，拖面手柄調整"><span class="ric">▣</span>剖切盒</button>
+              <button class="rbtn" id="btn-clipbox-sel" title="以目前選取生成剖切盒（±1m）"><span class="ric">◱</span>從選取</button>
+              <button class="rbtn" id="btn-clipsix" title="六平面剖切：屬性面板逐面調整"><span class="ric">▤</span>六平面</button>
+              <button class="rbtn" id="btn-clipclear" title="清除剖切"><span class="ric">✕</span>清除</button>
             </div>
             <div class="rgroup-label">剖切</div>
+          </div>
+        </div>
+        <!-- 工具 TOOLS -->
+        <div class="rpage" data-page="tools">
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn warn" id="btn-clash-run" title="全場景碰撞檢查：設備硬碰撞/淨距不足/管線干涉"><span class="ric">⚠</span>檢查全部</button>
+              <span id="clash-summary" style="font-size:11.5px;color:var(--dim);align-self:center"></span>
+            </div>
+            <div class="rgroup-label">碰撞</div>
           </div>
         </div>
       </div>
@@ -382,6 +428,11 @@
       <div id="mode-hint">點選素材開始，或點擊場景中的設備編輯</div>
       <div id="measure-tip"></div>
       <canvas id="axis-triad"></canvas>
+      <div id="clash-dock">
+        <div class="pane-head">碰撞檢查結果<span id="clash-count" style="color:var(--dim);font-weight:400"></span>
+          <button class="pane-x" id="clash-close" title="關閉">✕</button></div>
+        <div id="clash-list"></div>
+      </div>
       <div id="power-compass" title="方位羅盤：點 N/S/E/W 切視向、U 俯視、D 仰視；可拖曳移位">
         <svg viewBox="0 0 96 96">
           <circle cx="48" cy="48" r="45" fill="rgba(19,27,36,.85)" stroke="#223140" stroke-width="1.5"/>

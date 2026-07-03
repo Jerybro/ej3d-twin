@@ -30,6 +30,20 @@ viewport.appendChild(labelRenderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.maxPolarAngle = 1.5;
+// E3D 滑鼠慣例：左鍵純選取、中鍵按住＝旋轉（F2/F3/F5 切縮放/平移/旋轉）、
+// 右鍵拖＝平移、滾輪＝朝游標縮放
+controls.mouseButtons = { LEFT: -1, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+controls.zoomToCursor = true;
+
+const NAV_MODES = {
+  rotate: { btn: THREE.MOUSE.ROTATE, label: 'MB2：旋轉' },
+  zoom: { btn: THREE.MOUSE.DOLLY, label: 'MB2：縮放' },
+  pan: { btn: THREE.MOUSE.PAN, label: 'MB2：平移' },
+};
+function setNavMode(k) {
+  controls.mouseButtons.MIDDLE = NAV_MODES[k].btn;
+  document.getElementById('st-nav').textContent = NAV_MODES[k].label;
+}
 
 scene.add(new THREE.HemisphereLight(0xbdd2e2, 0x1a222b, 1.4));
 const sun = new THREE.DirectionalLight(0xfff4e0, 1.4);
@@ -146,8 +160,8 @@ function redo() {
 }
 
 function updateUndoButtons() {
-  document.getElementById('btn-undo').disabled = !undoStack.length;
-  document.getElementById('btn-redo').disabled = !redoStack.length;
+  for (const id of ['btn-undo', 'qat-undo']) document.getElementById(id).disabled = !undoStack.length;
+  for (const id of ['btn-redo', 'qat-redo']) document.getElementById(id).disabled = !redoStack.length;
 }
 
 const eqObjects = new Map();  // tag → { group, def, labelEl }
@@ -357,6 +371,7 @@ function pgRow(label, inner) {
 
 function renderPropPanel(def) {
   document.getElementById('prop-title').textContent = def.tag;
+  const owner = sceneData.plant.units.find((u) => u.equipment.includes(def));
   const dimRows = Object.entries(def.dims).map(([k, v]) =>
     pgRow(`尺寸 ${k}`, `<input data-k="dims.${k}" type="number" step="0.1" value="${v}">`)).join('');
   const infoRows = [
@@ -365,23 +380,30 @@ function renderPropPanel(def) {
     def.instruments?.length ? pgRow('儀錶', `<span>${def.instruments.length} 點</span>`) : '',
   ].filter(Boolean).join('');
   propBody.innerHTML = `
-    <div class="pg-section">識別</div>
+    <div class="pg-section">General</div>
     <div class="pg-grid">
-      ${pgRow('位號 Tag', `<input data-k="tag" value="${def.tag}">`)}
-      ${pgRow('名稱', `<input data-k="name" value="${def.name}">`)}
-      ${pgRow('類型', `<span>${def.type}</span>`)}
+      ${pgRow('Name', `<input data-k="tag" value="${def.tag}">`)}
+      ${pgRow('Description', `<input data-k="name" value="${def.name}">`)}
+      ${pgRow('Type', `<span>${def.type}</span>`)}
+      ${pgRow('Owner', `<span class="pg-owner" style="cursor:pointer" title="點擊定位到模型樹">ZONE ${owner?.id ?? '—'}</span>`)}
     </div>
-    <div class="pg-section">定位</div>
+    <div class="pg-section">Positional</div>
     <div class="pg-grid">
-      ${pgRow('東座標 X', `<input data-k="pos.0" type="number" step="0.5" value="${def.pos[0]}">`)}
-      ${pgRow('北座標 Z', `<input data-k="pos.2" type="number" step="0.5" value="${def.pos[2]}">`)}
+      ${pgRow('東 E', `<input data-k="pos.0" type="number" step="0.5" value="${def.pos[0]}">`)}
+      ${pgRow('北 N', `<input data-k="pos.2" type="number" step="0.5" value="${def.pos[2]}">`)}
+      ${pgRow('上 U', `<span>0.00</span>`)}
       ${pgRow('旋轉（度）', `<input data-k="rot" type="number" step="5" value="${Math.round((def.rot_y ?? 0) * 180 / Math.PI)}">`)}
+      ${pgRow('WRT', `<span>/WORL</span>`)}
     </div>
-    <div class="pg-section">尺寸</div>
+    <div class="pg-section">Design Parameters</div>
     <div class="pg-grid">${dimRows}</div>
-    ${infoRows ? `<div class="pg-section">資訊</div><div class="pg-grid">${infoRows}</div>` : ''}
+    ${infoRows ? `<div class="pg-section">Information</div><div class="pg-grid">${infoRows}</div>` : ''}
     <button class="pbtn" id="prop-zoom">縮放至（F）</button>
     <button class="pbtn danger" id="prop-delete">刪除（Delete）</button>`;
+  propBody.querySelector('.pg-owner')?.addEventListener('click', () => {
+    const det = treeRoot.querySelector(`details[data-zone="${owner?.id}"]`);
+    if (det) { det.open = true; det.scrollIntoView({ block: 'nearest' }); }
+  });
 
   propBody.querySelectorAll('input').forEach((inp) => {
     inp.addEventListener('change', () => {
@@ -422,11 +444,16 @@ function renderPipeProps(index) {
   const pipe = sceneData.pipes[index];
   document.getElementById('prop-title').textContent = `管線 #${index + 1}`;
   propBody.innerHTML = `
-    <div class="pg-section">管線</div>
+    <div class="pg-section">General</div>
+    <div class="pg-grid">
+      ${pgRow('Name', `<span>PIPE #${index + 1}</span>`)}
+      ${pgRow('Owner', `<span>ZONE PIPES</span>`)}
+      ${pipe.bridge ? pgRow('類別', '<span>跨圖橋接</span>') : ''}
+    </div>
+    <div class="pg-section">Specification</div>
     <div class="pg-grid">
       ${pgRow('管徑 r', `<input data-k="r" type="number" step="0.02" value="${pipe.r}">`)}
       ${pgRow('節點數', `<span>${pipe.pts.length}</span>`)}
-      ${pipe.bridge ? pgRow('類別', '<span>跨圖橋接</span>') : ''}
     </div>
     <button class="pbtn" id="prop-nodes">節點編輯</button>
     <button class="pbtn danger" id="prop-delete">刪除（Delete）</button>`;
@@ -449,22 +476,43 @@ const TYPE_ICON = {
   tank: '⬢', bullet: '⬢', spheretank: '⬢',
 };
 
+// E3D/PDMS 資料庫階層字樣（WORL→SITE→ZONE→EQUI/PIPE）——識別度核心，照抄縮寫
 function rebuildTree(filter = document.getElementById('tree-search').value.trim().toUpperCase()) {
   const frag = document.createDocumentFragment();
+  const worl = document.createElement('details');
+  worl.className = 'mt-unit';
+  worl.open = true;
+  worl.innerHTML = `<summary><span class="tw">▶</span><span class="mt-dbtype">WORL</span>*</summary>`;
+  const site = document.createElement('details');
+  site.className = 'mt-unit';
+  site.open = true;
+  site.style.paddingLeft = '10px';
+  site.innerHTML = `<summary><span class="tw">▶</span><span class="mt-dbtype">SITE</span>${sceneData.plant.id}</summary>`;
+  worl.appendChild(site);
+
   for (const unit of sceneData.plant.units) {
     const eqs = unit.equipment.filter((e) =>
       !filter || e.tag.toUpperCase().includes(filter) || e.name.toUpperCase().includes(filter));
     if (!eqs.length && filter) continue;
     const det = document.createElement('details');
     det.className = 'mt-unit';
+    det.dataset.zone = unit.id;
+    det.style.paddingLeft = '10px';
     det.open = Boolean(filter) || sceneData.plant.units.length <= 4;
-    det.innerHTML = `<summary><span class="tw">▶</span>${unit.name}（${eqs.length}）</summary>`;
+    det.innerHTML = `<summary><span class="tw">▶</span><span class="mt-dbtype">ZONE</span>${unit.name}（${eqs.length}）</summary>`;
+    det.querySelector('summary').addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openCtxMenu(e.clientX, e.clientY, [
+        { label: '全部顯示', run: () => { for (const eq of unit.equipment) if (hiddenTags.has(eq.tag)) toggleHidden(eq.tag); } },
+        { label: '全部隱藏', run: () => { for (const eq of unit.equipment) if (!hiddenTags.has(eq.tag)) toggleHidden(eq.tag); } },
+      ]);
+    });
     for (const eq of eqs) {
       const row = document.createElement('div');
       row.className = 'mt-eq';
       row.dataset.tag = eq.tag;
       if (hiddenTags.has(eq.tag)) row.classList.add('hidden-eq');
-      row.innerHTML = `<span class="mt-ico">${TYPE_ICON[eq.type] ?? '▪'}</span>
+      row.innerHTML = `<span class="mt-dbtype">EQUI</span><span class="mt-ico">${TYPE_ICON[eq.type] ?? '▪'}</span>
         <span class="mt-tag">${eq.tag}</span><span class="mt-name">${eq.name}</span>`;
       row.addEventListener('click', () => selectEquipment(eq.tag));
       row.addEventListener('dblclick', () => { selectEquipment(eq.tag); zoomToSelection(); });
@@ -475,18 +523,20 @@ function rebuildTree(filter = document.getElementById('tree-search').value.trim(
       });
       det.appendChild(row);
     }
-    frag.appendChild(det);
+    site.appendChild(det);
   }
   if (sceneData.pipes.length) {
     const det = document.createElement('details');
     det.className = 'mt-unit';
-    det.innerHTML = `<summary><span class="tw">▶</span>管線（${sceneData.pipes.length}）</summary>`;
+    det.dataset.zone = 'PIPES';
+    det.style.paddingLeft = '10px';
+    det.innerHTML = `<summary><span class="tw">▶</span><span class="mt-dbtype">ZONE</span>管線（${sceneData.pipes.length}）</summary>`;
     const max = Math.min(sceneData.pipes.length, 200);
     for (let i = 0; i < max; i++) {
       const row = document.createElement('div');
       row.className = 'mt-eq';
       row.dataset.pipe = i;
-      row.innerHTML = `<span class="mt-ico">╱</span><span class="mt-tag">#${i + 1}</span>
+      row.innerHTML = `<span class="mt-dbtype">PIPE</span><span class="mt-tag">#${i + 1}</span>
         <span class="mt-name">${sceneData.pipes[i].bridge ? '橋接' : `${sceneData.pipes[i].pts.length} 節點`}</span>`;
       row.addEventListener('click', () => selectPipe(i));
       det.appendChild(row);
@@ -497,18 +547,50 @@ function rebuildTree(filter = document.getElementById('tree-search').value.trim(
       more.innerHTML = `<span class="mt-name">…共 ${sceneData.pipes.length} 條（僅列前 ${max}）</span>`;
       det.appendChild(more);
     }
-    frag.appendChild(det);
+    site.appendChild(det);
   }
+  frag.appendChild(worl);
   treeRoot.replaceChildren(frag);
   syncTreeSelection();
 }
 
+// CE 麵包屑（E3D 頂部路徑）：WORL * › SITE x › ZONE y › EQUI tag
+function updateBreadcrumb() {
+  const bc = document.getElementById('ce-breadcrumb');
+  const segs = [['WORL', '*', null], ['SITE', sceneData.plant.id, null]];
+  if (selected?.kind === 'eq') {
+    const unit = sceneData.plant.units.find((u) => u.equipment.includes(selected.def));
+    if (unit) segs.push(['ZONE', unit.name, unit.id]);
+    segs.push(['EQUI', selected.def.tag, null]);
+  } else if (selected?.kind === 'pipe') {
+    segs.push(['ZONE', '管線', 'PIPES']);
+    segs.push(['PIPE', `#${selected.index + 1}`, null]);
+  }
+  bc.innerHTML = segs.map(([t, v, zone]) =>
+    `<span class="bc-seg" ${zone ? `data-zone="${zone}"` : ''}><span class="bc-type">${t}</span>${v}</span>`
+  ).join('<span class="bc-sep">›</span>');
+  bc.querySelectorAll('[data-zone]').forEach((el) => el.addEventListener('click', () => {
+    const det = treeRoot.querySelector(`details[data-zone="${el.dataset.zone}"]`);
+    if (det) { det.open = true; det.scrollIntoView({ block: 'nearest' }); }
+  }));
+}
+
 function syncTreeSelection() {
+  let selRow = null;
   treeRoot.querySelectorAll('.mt-eq').forEach((el) => {
-    el.classList.toggle('selected',
-      (selected?.kind === 'eq' && el.dataset.tag === selected.def.tag) ||
-      (selected?.kind === 'pipe' && el.dataset.pipe === String(selected.index)));
+    const on = (selected?.kind === 'eq' && el.dataset.tag === selected.def.tag) ||
+      (selected?.kind === 'pipe' && el.dataset.pipe === String(selected.index));
+    el.classList.toggle('selected', on);
+    if (on) selRow = el;
   });
+  // CE 連動：自動展開祖先節點並捲動到可視（E3D Model Explorer 行為）
+  if (selRow) {
+    for (let p = selRow.parentElement; p && p !== treeRoot; p = p.parentElement) {
+      if (p.tagName === 'DETAILS') p.open = true;
+    }
+    selRow.scrollIntoView({ block: 'nearest' });
+  }
+  updateBreadcrumb();
 }
 
 document.getElementById('tree-search').addEventListener('input', () => rebuildTree());
@@ -567,6 +649,35 @@ document.querySelectorAll('.rtab').forEach((tab) => {
     document.querySelectorAll('.rpage').forEach((p) =>
       p.classList.toggle('active', p.dataset.page === tab.dataset.tab));
   });
+});
+
+// QAT Discipline 下拉 → 情境頁籤顯示（E3D：手動切換，非點物件自動切）
+document.getElementById('qat-discipline').addEventListener('change', (e) => {
+  const v = e.target.value;
+  const show = { pipe: ['equip', 'pipe'], equip: ['equip'], none: [] }[v];
+  document.querySelectorAll('.ctx-tab').forEach((t) => {
+    const on = show.includes(t.dataset.tab);
+    t.classList.toggle('hidden', !on);
+    if (!on && t.classList.contains('active')) {
+      document.querySelector('.rtab[data-tab="home"]').click();
+    }
+  });
+});
+
+// QAT 迷你鈕鏡射主要功能
+document.getElementById('qat-save').addEventListener('click', () => saveScene(false));
+document.getElementById('qat-saveas').addEventListener('click', () => saveScene(true));
+document.getElementById('qat-undo').addEventListener('click', undo);
+document.getElementById('qat-redo').addEventListener('click', redo);
+
+// 視窗開關（HOME > 視窗）
+document.getElementById('btn-win-tree').addEventListener('click', () => {
+  document.body.classList.toggle('tree-collapsed');
+  onResize();
+});
+document.getElementById('btn-win-prop').addEventListener('click', () => {
+  document.body.classList.toggle('prop-collapsed');
+  onResize();
 });
 
 // 設備分頁：分類群組（E3D discipline gallery 式）
@@ -672,11 +783,48 @@ renderer.domElement.addEventListener('pointermove', (e) => {
 });
 
 let downXY = null;
-renderer.domElement.addEventListener('pointerdown', (e) => { downXY = [e.clientX, e.clientY]; });
+let mb2Down = null;   // 中鍵按下點（單擊置中判定）
+let pivotPin = null;  // 粉紅 pivot 指示
+
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  downXY = [e.clientX, e.clientY];
+  if (e.button === 1) {
+    // E3D：中鍵按下時在游標點放 pivot pin（粉紅）
+    mb2Down = [e.clientX, e.clientY];
+    const hit = pickObject(e);
+    const pt = hit ? hit.point : groundPoint(e);
+    if (pt) {
+      pivotPin = new THREE.Group();
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8),
+        new THREE.MeshBasicMaterial({ color: 0xff69b4 }));
+      pivotPin.add(ball);
+      for (const [dx, dz] of [[1, 0], [0, 1]]) {
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(dx ? 0.9 : 0.03, 0.03, dz ? 0.9 : 0.03),
+          new THREE.MeshBasicMaterial({ color: 0xff69b4 }));
+        pivotPin.add(bar);
+      }
+      pivotPin.position.copy(pt);
+      pivotPin.userData.pt = pt.clone();
+      scene.add(pivotPin);
+    }
+  }
+});
+
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (e.button === 1 && pivotPin) {
+    // 中鍵單擊（無拖曳）＝游標點置中（E3D MB2 click centre）
+    if (mb2Down && Math.hypot(e.clientX - mb2Down[0], e.clientY - mb2Down[1]) < 5) {
+      controls.target.copy(pivotPin.userData.pt);
+    }
+    scene.remove(pivotPin);
+    pivotPin = null;
+    mb2Down = null;
+  }
+});
 renderer.domElement.addEventListener('pointerup', (e) => {
   if (!downXY || Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]) > 5) return;
   if (transform.dragging) return;
-  if (e.button === 2) return; // 右鍵交給 contextmenu
+  if (e.button !== 0) return; // 左鍵＝選取；中鍵導航、右鍵選單各自處理
 
   if (mode === 'placing' && ghost && placingAsset) {
     pushUndo();
@@ -977,8 +1125,12 @@ function zoomToSelection() {
   } else fitAll();
 }
 
+// 場景慣例：+Z＝南（P&ID 地毯 v 軸向下），看向北＝相機在南側（+Z）朝 -Z
 const VIEW_DIRS = {
   iso: new THREE.Vector3(1, 0.9, 1), top: new THREE.Vector3(0.001, 1, 0.001),
+  bottom: new THREE.Vector3(0.001, -1, 0.001),
+  n: new THREE.Vector3(0, 0.14, 1), s: new THREE.Vector3(0, 0.14, -1),
+  e: new THREE.Vector3(-1, 0.14, 0), w: new THREE.Vector3(1, 0.14, 0),
   front: new THREE.Vector3(0, 0.12, 1), right: new THREE.Vector3(1, 0.12, 0),
 };
 function setViewPreset(k) { frameBox(sceneBounds(), VIEW_DIRS[k]); }
@@ -1013,6 +1165,44 @@ document.getElementById('st-snap').addEventListener('click', (e) => {
   snapOn = !snapOn;
   e.currentTarget.classList.toggle('on', snapOn);
 });
+
+// ------------------------------------------------------------ PowerCompass
+// E3D 球形方位羅盤：點 N/S/E/W/U/D 切視向、可拖曳移位、方位環隨相機轉
+const compassEl = document.getElementById('power-compass');
+const compassRose = document.getElementById('pc-rose');
+compassEl.querySelectorAll('.pc-hot').forEach((hot) => {
+  hot.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (compassDragMoved) return;
+    setViewPreset(hot.dataset.vp);
+  });
+});
+let compassDrag = null, compassDragMoved = false;
+compassEl.addEventListener('pointerdown', (e) => {
+  compassDrag = { x: e.clientX, y: e.clientY, left: compassEl.offsetLeft, top: compassEl.offsetTop };
+  compassDragMoved = false;
+  compassEl.setPointerCapture(e.pointerId);
+});
+compassEl.addEventListener('pointermove', (e) => {
+  if (!compassDrag) return;
+  const dx = e.clientX - compassDrag.x, dy = e.clientY - compassDrag.y;
+  if (Math.hypot(dx, dy) > 5) compassDragMoved = true;
+  if (compassDragMoved) {
+    compassEl.style.left = `${compassDrag.left + dx}px`;
+    compassEl.style.top = `${compassDrag.top + dy}px`;
+    compassEl.style.bottom = 'auto';
+  }
+});
+compassEl.addEventListener('pointerup', () => {
+  if (compassDragMoved) {
+    localStorage.setItem('ej-compass-pos', JSON.stringify({ left: compassEl.style.left, top: compassEl.style.top }));
+  }
+  compassDrag = null;
+});
+try {
+  const saved = JSON.parse(localStorage.getItem('ej-compass-pos') ?? 'null');
+  if (saved) { compassEl.style.left = saved.left; compassEl.style.top = saved.top; compassEl.style.bottom = 'auto'; }
+} catch { /* 忽略壞值 */ }
 
 // 面板收合
 document.getElementById('tree-hide').addEventListener('click', () => { document.body.classList.add('tree-collapsed'); onResize(); });
@@ -1054,6 +1244,15 @@ addEventListener('keydown', (e) => {
       return;
     }
     deleteSelected();
+  } else if (e.key === 'F2') {
+    e.preventDefault();
+    setNavMode('zoom');
+  } else if (e.key === 'F3') {
+    e.preventDefault();
+    setNavMode('pan');
+  } else if (e.key === 'F5') {
+    e.preventDefault();  // E3D 導航模式鍵（蓋掉瀏覽器重整）
+    setNavMode('rotate');
   } else if (e.key === 'f' || e.key === 'F') {
     zoomToSelection();
   } else if (e.key === 'Home') {
@@ -1156,6 +1355,7 @@ if (initId) {
 updateTopbar();
 rebuildTree();
 renderPropEmpty();
+updateBreadcrumb();
 
 // ------------------------------------------------------------ 視角三軸指示（axis triad）
 const triadCanvas = document.getElementById('axis-triad');
@@ -1196,6 +1396,7 @@ new ResizeObserver(onResize).observe(viewport);
 onResize();
 
 const tmpQ = new THREE.Quaternion();
+const tmpDir = new THREE.Vector3();
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
@@ -1205,6 +1406,10 @@ function animate() {
   camera.getWorldQuaternion(tmpQ);
   triadScene.quaternion.copy(tmpQ).invert();
   triadRenderer.render(triadScene, triadCam);
+  // PowerCompass 方位環隨相機 yaw 旋轉（N 永遠指向場景北＝-Z）
+  camera.getWorldDirection(tmpDir);
+  const yaw = Math.atan2(tmpDir.x, -tmpDir.z) * 180 / Math.PI;
+  compassRose.setAttribute('transform', `rotate(${-yaw} 48 48)`);
   // 量測標籤跟隨 3D 位置
   if (measureAnchor && measureTip.style.display !== 'none') {
     const v = measureAnchor.clone().project(camera);

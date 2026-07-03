@@ -18,7 +18,7 @@
       --bg: #0e141b; --panel: #131b24; --panel2: #17212c; --panel3: #1b2733;
       --bdr: #223140; --accent: #46c2e0; --accent-deep: #1f6ea8;
       --text: #dbe5ee; --dim: #8ba0b3; --warn: #ffaa3c; --danger: #ff4d4f;
-      --ribbon-h: 92px; --status-h: 26px; --tree-w: 236px; --prop-w: 250px;
+      --ribbon-h: 118px; --status-h: 26px; --vtabs-h: 24px; --tree-w: 236px; --prop-w: 250px;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
@@ -27,19 +27,28 @@
     /* ================= 停靠佈局（對標 E3D：ribbon/樹/屬性/狀態列） ===== */
     #workspace {
       display: grid; height: 100vh;
-      grid-template-rows: var(--ribbon-h) 1fr var(--status-h);
+      grid-template-rows: var(--ribbon-h) 1fr var(--vtabs-h) var(--status-h);
       grid-template-columns: var(--tree-w) 1fr var(--prop-w);
-      grid-template-areas: "ribbon ribbon ribbon" "tree view prop" "status status status";
+      grid-template-areas: "ribbon ribbon ribbon" "tree view prop" "vtabs vtabs vtabs" "status status status";
     }
     body.tree-collapsed #workspace { grid-template-columns: 0 1fr var(--prop-w); }
     body.prop-collapsed #workspace { grid-template-columns: var(--tree-w) 1fr 0; }
     body.tree-collapsed.prop-collapsed #workspace { grid-template-columns: 0 1fr 0; }
 
-    /* ================= Ribbon 功能區 ================= */
+    /* ================= Ribbon 功能區（QAT＋Tabs＋Body 三列） ================= */
     #ribbon { grid-area: ribbon; background: var(--panel); border-bottom: 1px solid var(--bdr);
       display: flex; flex-direction: column; user-select: none; }
+    #qat { display: flex; align-items: center; height: 26px; padding: 0 8px; gap: 3px;
+      background: var(--panel3); border-bottom: 1px solid var(--bdr); font-size: 12px; }
+    .qbtn { width: 24px; height: 20px; border-radius: 4px; cursor: pointer; background: none;
+      border: 1px solid transparent; color: var(--accent); font-size: 12px; line-height: 1; }
+    .qbtn:hover { background: var(--panel2); border-color: var(--bdr); }
+    .qbtn:disabled { opacity: 0.3; pointer-events: none; }
+    #qat-discipline { margin-left: 10px; }
     #ribbon-tabs { display: flex; align-items: center; height: 30px; padding: 0 8px; gap: 2px;
       border-bottom: 1px solid var(--bdr); }
+    .rtab-sep { width: 12px; }
+    .rtab.hidden { display: none; }
     .brand-home {
       display: inline-flex; align-items: center; justify-content: center;
       width: 22px; height: 22px; border-radius: 5px; margin-right: 8px;
@@ -126,11 +135,45 @@
     #viewport canvas { display: block; }
     #axis-triad { position: absolute; right: 10px; bottom: 8px; width: 84px; height: 84px;
       z-index: 5; pointer-events: none; }
+
+    /* CE 麵包屑（E3D 頂部路徑列） */
+    #ce-breadcrumb { position: absolute; top: 0; left: 0; right: 0; height: 24px; z-index: 22;
+      display: flex; align-items: center; gap: 4px; padding: 0 10px;
+      background: rgba(19, 27, 36, 0.92); border-bottom: 1px solid var(--bdr);
+      font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; }
+    #ce-breadcrumb .bc-seg { cursor: pointer; padding: 1px 4px; border-radius: 4px; }
+    #ce-breadcrumb .bc-seg:hover { color: var(--accent); background: var(--panel3); }
+    #ce-breadcrumb .bc-type { color: var(--accent); font-family: Consolas, monospace; font-size: 10px; margin-right: 2px; }
+    #ce-breadcrumb .bc-sep { color: var(--bdr); }
+
+    /* PowerCompass（E3D 球形方位羅盤，可拖曳） */
+    #power-compass { position: absolute; left: 12px; bottom: 46px; width: 96px; height: 96px;
+      z-index: 24; cursor: grab; user-select: none; }
+    #power-compass svg { width: 100%; height: 100%; }
+    #power-compass .pc-hot { cursor: pointer; }
+    #power-compass .pc-hot:hover circle { fill: rgba(70, 194, 224, 0.35); }
+    #power-compass .pc-hot text { fill: var(--text); font-size: 13px; font-weight: 700; }
+
+    /* 模型樹 DB 型別字（WORL/SITE/ZONE/EQUI/PIPE） */
+    .mt-dbtype { font-family: Consolas, monospace; font-size: 10px; color: var(--dim);
+      letter-spacing: 0.5px; margin-right: 3px; flex-shrink: 0; }
+    .mt-eq.selected .mt-dbtype { color: rgba(255,255,255,.75); }
+
+    /* 底部視圖分頁列 */
+    #vtabs { grid-area: vtabs; display: flex; align-items: stretch; gap: 2px; padding: 0 8px;
+      background: var(--panel); border-top: 1px solid var(--bdr); user-select: none; }
+    .vtab { display: flex; align-items: center; padding: 0 14px; font-size: 11.5px;
+      color: var(--accent); background: var(--panel2); border: 1px solid var(--bdr); border-top: none;
+      border-radius: 0 0 6px 6px; font-weight: 600; }
+    .vtab-add { align-self: center; margin-left: 4px; width: 20px; height: 18px; border-radius: 4px;
+      background: none; border: 1px solid var(--bdr); color: var(--dim); font-size: 12px;
+      line-height: 1; opacity: 0.5; }
+    /* Prompt Area：E3D 提示固定左下，不浮動置中 */
     #mode-hint {
-      position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
-      z-index: 25; padding: 6px 16px; border-radius: 16px; font-size: 12.5px;
+      position: absolute; bottom: 12px; left: 12px;
+      z-index: 25; padding: 6px 14px; border-radius: 8px; font-size: 12.5px;
       background: rgba(19, 27, 36, 0.94); border: 1px solid var(--bdr); color: var(--dim);
-      max-width: 70%; text-align: center;
+      max-width: 46%; text-align: left;
     }
     #mode-hint b { color: var(--accent); font-weight: 600; }
     #measure-tip { position: absolute; z-index: 26; padding: 3px 9px; border-radius: 10px;
@@ -184,19 +227,32 @@
 </head>
 <body>
   <div id="workspace">
-    <!-- ============ Ribbon ============ -->
+    <!-- ============ Ribbon（QAT＋Tabs＋Body） ============ -->
     <div id="ribbon">
-      <div id="ribbon-tabs">
+      <div id="qat">
         <a class="brand-home" href="/" title="回平台首頁">J.S</a>
+        <button class="qbtn" id="qat-save" title="儲存（Ctrl+S）">💾</button>
+        <button class="qbtn" id="qat-saveas" title="另存">⧉</button>
+        <button class="qbtn" id="qat-undo" disabled title="復原（Ctrl+Z）">↶</button>
+        <button class="qbtn" id="qat-redo" disabled title="還原（Ctrl+Y）">↷</button>
+        <select class="rsel" id="qat-discipline" title="專業領域（Discipline）——切換情境功能頁籤">
+          <option value="pipe" selected>管線 PIPING</option>
+          <option value="equip">設備 EQUIPMENT</option>
+          <option value="none">通用 GENERAL</option>
+        </select>
+        <span id="scene-name" style="margin-left:auto">未儲存場景</span>
+      </div>
+      <div id="ribbon-tabs">
+        <button class="rtab" data-tab="project">專案</button>
         <button class="rtab active" data-tab="home">首頁</button>
-        <button class="rtab" data-tab="equip">設備</button>
-        <button class="rtab" data-tab="pipe">管線</button>
         <button class="rtab" data-tab="view">檢視</button>
-        <span id="scene-name">未儲存場景</span>
+        <span class="rtab-sep"></span>
+        <button class="rtab ctx-tab" data-tab="equip">設備 EQUIPMENT</button>
+        <button class="rtab ctx-tab" data-tab="pipe">管線 PIPING</button>
       </div>
       <div id="ribbon-body">
-        <!-- 首頁 -->
-        <div class="rpage active" data-page="home">
+        <!-- 專案 PROJECT -->
+        <div class="rpage" data-page="project">
           <div class="rgroup">
             <div class="rgroup-tools">
               <button class="rbtn" id="btn-save" title="儲存（Ctrl+S）"><span class="ric">💾</span>儲存</button>
@@ -208,25 +264,48 @@
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
+              <a class="rbtn" id="btn-view-twin" href="#" target="_blank" style="display:none"><span class="ric">👁</span>孿生檢視</a>
+            </div>
+            <div class="rgroup-label">交付</div>
+          </div>
+        </div>
+        <!-- 首頁 HOME -->
+        <div class="rpage active" data-page="home">
+          <div class="rgroup">
+            <div class="rgroup-tools">
               <button class="rbtn" id="btn-undo" disabled title="復原（Ctrl+Z）"><span class="ric">↶</span>復原</button>
               <button class="rbtn" id="btn-redo" disabled title="還原（Ctrl+Y）"><span class="ric">↷</span>還原</button>
+              <button class="rbtn" id="btn-del" title="刪除選取（Delete）"><span class="ric">🗑</span>刪除</button>
             </div>
-            <div class="rgroup-label">歷程</div>
+            <div class="rgroup-label">共用</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" id="btn-fit-sel" title="縮放至選取（F）"><span class="ric">◎</span>至選取</button>
+              <button class="rbtn" id="btn-fit" title="縮放至全場景（Home）"><span class="ric">⛶</span>全場</button>
+            </div>
+            <div class="rgroup-label">巡覽</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn warn" id="btn-measure" title="點兩點量距離；Esc 結束"><span class="ric">📐</span>距離</button>
+            </div>
+            <div class="rgroup-label">量測</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
               <button class="rbtn xf-btn active" data-m="translate" title="移動（W）"><span class="ric">⇄</span>移動</button>
               <button class="rbtn xf-btn" data-m="rotate" title="旋轉（E）"><span class="ric">⟳</span>旋轉</button>
               <button class="rbtn xf-btn" data-m="scale" title="縮放（R）"><span class="ric">⤢</span>縮放</button>
-              <button class="rbtn" id="btn-del" title="刪除選取（Delete）"><span class="ric">🗑</span>刪除</button>
             </div>
             <div class="rgroup-label">修改</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <a class="rbtn" id="btn-view-twin" href="#" target="_blank" style="display:none"><span class="ric">👁</span>孿生檢視</a>
+              <button class="rbtn" id="btn-win-tree" title="模型瀏覽器開關"><span class="ric">☰</span>模型樹</button>
+              <button class="rbtn" id="btn-win-prop" title="屬性面板開關"><span class="ric">🗔</span>屬性</button>
             </div>
-            <div class="rgroup-label">交付</div>
+            <div class="rgroup-label">視窗</div>
           </div>
         </div>
         <!-- 設備（JS 依 ASSET_CATEGORIES 動態生成分類群組） -->
@@ -249,39 +328,40 @@
             <div class="rgroup-label">修改</div>
           </div>
         </div>
-        <!-- 檢視 -->
+        <!-- 檢視 VIEW -->
         <div class="rpage" data-page="view">
-          <div class="rgroup">
-            <div class="rgroup-tools">
-              <button class="rbtn" data-vp="iso" title="等角視">等角</button>
-              <button class="rbtn" data-vp="top" title="俯視">俯視</button>
-              <button class="rbtn" data-vp="front" title="前視">前視</button>
-              <button class="rbtn" data-vp="right" title="右視">右視</button>
-            </div>
-            <div class="rgroup-label">視角</div>
-          </div>
-          <div class="rgroup">
-            <div class="rgroup-tools">
-              <button class="rbtn" id="btn-fit" title="縮放至全場景（Home）"><span class="ric">⛶</span>全場</button>
-              <button class="rbtn" id="btn-fit-sel" title="縮放至選取（F）"><span class="ric">◎</span>選取</button>
-            </div>
-            <div class="rgroup-label">縮放</div>
-          </div>
-          <div class="rgroup">
-            <div class="rgroup-tools">
-              <button class="rbtn warn" id="btn-measure" title="點兩點量距離；Esc 結束"><span class="ric">📐</span>量測</button>
-              <button class="rbtn" id="btn-clip" title="水平剖切面開關"><span class="ric">▤</span>剖切</button>
-              <input type="range" id="clip-slider" min="0" max="100" value="100" style="width:90px;display:none">
-            </div>
-            <div class="rgroup-label">分析</div>
-          </div>
           <div class="rgroup">
             <div class="rgroup-tools">
               <button class="rbtn" id="btn-underlay" title="P&ID 圖紙底圖顯示切換"><span class="ric">🗺</span>底圖</button>
               <button class="rbtn" id="btn-grid" title="地面網格顯示切換"><span class="ric">▦</span>網格</button>
               <button class="rbtn" id="btn-labels" title="設備位號標籤顯示切換"><span class="ric">🏷</span>標籤</button>
             </div>
-            <div class="rgroup-label">顯示</div>
+            <div class="rgroup-label">內容</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" data-vp="n" title="看向北">北</button>
+              <button class="rbtn" data-vp="s" title="看向南">南</button>
+              <button class="rbtn" data-vp="e" title="看向東">東</button>
+              <button class="rbtn" data-vp="w" title="看向西">西</button>
+              <button class="rbtn" data-vp="top" title="俯視">俯視</button>
+              <button class="rbtn" data-vp="iso" title="等角視">等角</button>
+            </div>
+            <div class="rgroup-label">視向</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" disabled title="視角書籤（規劃中）"><span class="ric">📌</span>存視角</button>
+              <button class="rbtn" disabled title="視角書籤（規劃中）"><span class="ric">🔖</span>回視角</button>
+            </div>
+            <div class="rgroup-label">操縱</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" id="btn-clip" title="水平剖切面開關"><span class="ric">▤</span>剖切</button>
+              <input type="range" id="clip-slider" min="0" max="100" value="100" style="width:90px;display:none">
+            </div>
+            <div class="rgroup-label">剖切</div>
           </div>
         </div>
       </div>
@@ -296,11 +376,26 @@
 
     <!-- ============ 3D 視圖 ============ -->
     <main id="viewport">
-      <button class="pane-reopen" id="tree-reopen">☰ 模型樹</button>
-      <button class="pane-reopen" id="prop-reopen">☰ 屬性</button>
+      <div id="ce-breadcrumb"></div>
+      <button class="pane-reopen" id="tree-reopen" style="top:32px">☰ 模型樹</button>
+      <button class="pane-reopen" id="prop-reopen" style="top:32px">☰ 屬性</button>
       <div id="mode-hint">點選素材開始，或點擊場景中的設備編輯</div>
       <div id="measure-tip"></div>
       <canvas id="axis-triad"></canvas>
+      <div id="power-compass" title="方位羅盤：點 N/S/E/W 切視向、U 俯視、D 仰視；可拖曳移位">
+        <svg viewBox="0 0 96 96">
+          <circle cx="48" cy="48" r="45" fill="rgba(19,27,36,.85)" stroke="#223140" stroke-width="1.5"/>
+          <circle cx="48" cy="48" r="30" fill="none" stroke="#223140" stroke-width="1"/>
+          <g id="pc-rose">
+            <g class="pc-hot" data-vp="n"><circle cx="48" cy="12" r="10" fill="rgba(70,194,224,.12)"/><text x="48" y="17" text-anchor="middle">N</text></g>
+            <g class="pc-hot" data-vp="s"><circle cx="48" cy="84" r="10" fill="rgba(70,194,224,.12)"/><text x="48" y="89" text-anchor="middle">S</text></g>
+            <g class="pc-hot" data-vp="e"><circle cx="84" cy="48" r="10" fill="rgba(70,194,224,.12)"/><text x="84" y="53" text-anchor="middle">E</text></g>
+            <g class="pc-hot" data-vp="w"><circle cx="12" cy="48" r="10" fill="rgba(70,194,224,.12)"/><text x="12" y="53" text-anchor="middle">W</text></g>
+          </g>
+          <g class="pc-hot" data-vp="top"><circle cx="48" cy="38" r="8" fill="rgba(70,194,224,.12)"/><text x="48" y="42" text-anchor="middle" font-size="10">U</text></g>
+          <g class="pc-hot" data-vp="bottom"><circle cx="48" cy="58" r="8" fill="rgba(70,194,224,.12)"/><text x="48" y="62" text-anchor="middle" font-size="10">D</text></g>
+        </svg>
+      </div>
     </main>
 
     <!-- ============ Properties ============ -->
@@ -309,12 +404,19 @@
       <div id="prop-body"><div id="prop-empty">未選取物件<br>點擊 3D 視圖或模型樹選取</div></div>
     </aside>
 
+    <!-- ============ 視圖分頁列 ============ -->
+    <div id="vtabs">
+      <div class="vtab">3D View (1)</div>
+      <button class="vtab-add" disabled title="多視圖規劃中">＋</button>
+    </div>
+
     <!-- ============ 狀態列 ============ -->
     <div id="statusbar">
       <span id="st-coords">X: — Y: — Z: —</span>
       <span id="st-sel">選取：無</span>
       <button class="st-toggle on" id="st-snap" title="放置/節點拖曳吸附 0.5m 網格">捕捉 0.5m</button>
       <span id="st-count"></span>
+      <span id="st-nav" title="中鍵按住＝目前導航模式；F2 縮放、F3 平移、F5 旋轉">MB2：旋轉</span>
       <span style="margin-left:auto" id="st-mode">就緒</span>
     </div>
   </div>

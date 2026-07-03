@@ -208,21 +208,25 @@ function buildPipe(pipe, index) {
   const group = new THREE.Group();
   group.userData.pipeIndex = index;
   const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
+  // P&ID 自動抽取場景管線量大：降面數/關陰影，維持可選取
+  const lite = sceneData.pipes.length > 60;
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i], b = pts[i + 1];
     const dir = b.clone().sub(a);
     const len = dir.length();
     if (len < 1e-4) continue;
-    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(pipe.r, pipe.r, len, 12), pipeMat);
+    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(pipe.r, pipe.r, len, lite ? 6 : 12), pipeMat);
     cyl.position.copy(a).addScaledVector(dir, 0.5);
     cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
-    cyl.castShadow = true;
+    cyl.castShadow = !lite;
     cyl.userData.pipeIndex = index;
     group.add(cyl);
-    const joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
-    joint.position.copy(b);
-    joint.userData.pipeIndex = index;
-    group.add(joint);
+    if (!lite) {
+      const joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
+      joint.position.copy(b);
+      joint.userData.pipeIndex = index;
+      group.add(joint);
+    }
   }
   scene.add(group);
   pipeObjects[index] = { group };

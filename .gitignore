@@ -28,3 +28,4 @@ scans/*
 .vscode/
 .DS_Store
 Thumbs.db
+server_8601.log

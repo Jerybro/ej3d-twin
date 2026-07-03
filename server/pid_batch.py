@@ -19,7 +19,9 @@ import threading
 import time
 from pathlib import Path
 
-from .pid_parse import PID_DIR, _push_apart, parse_pid
+from .pid_parse import PID_DIR, _push_apart, _uv_to_scene_pipes, parse_pid
+
+MERGED_PIPES_PER_SHEET = 80  # 整廠模式每張圖取最長 N 條（30 張全收會塞爆）
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATUS_PATH = BASE_DIR / "data" / "pid_batch_status.json"
@@ -164,6 +166,7 @@ def merge_results(results: dict[str, dict]) -> dict:
 
     units = []
     underlays = []
+    pipes = []
     for stem in order:
         ox, oz = origins[stem][0] + off_x, origins[stem][1] + off_z
         stage = STAGES[_sheet_stage(stem, sheet_tags[stem])]
@@ -179,10 +182,15 @@ def merge_results(results: dict[str, dict]) -> dict:
                       "name": f"{stage}｜{stem.upper()}", "equipment": equipment})
         underlays.append({"image": tiles[stem], "x": round(ox, 2), "z": round(oz, 2),
                           "w": spans[stem][0], "h": spans[stem][1]})
+        # 管線 3D 化（extract_pipes 已按長度降冪，取前 N=保主幹）
+        pipes += _uv_to_scene_pipes(
+            results[stem]["geom"].get("pipes_uv", []),
+            spans[stem][0], spans[stem][1], ox, oz,
+            limit=MERGED_PIPES_PER_SHEET)
 
     return {
         "plant": {"id": "TA32-FULL", "name": MERGED_NAME, "units": units},
-        "pipes": [],
+        "pipes": pipes,
         "instruments": instruments,
         "underlays": underlays,
     }

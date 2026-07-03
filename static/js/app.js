@@ -6,6 +6,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { std, markShadow, builders, detailedBuilders, dm, dFlange, mergeByMaterial, labelHeight } from './plant-builders.js';
 
 const ACCENT = new THREE.Color('#46c2e0');
@@ -313,8 +314,9 @@ function buildDressing() {
       g.add(wall);
     }
   }
-  // 主管線：接頭法蘭對+管架支撐
-  for (const pipe of plantData.pipes) {
+  // 主管線：接頭法蘭對+管架支撐（P&ID 自動抽取的大量管線跳過——敷設是給
+  // 手繪示範廠的細節，數千段的法蘭/管架會拖垮效能）
+  for (const pipe of plantData.pipes.length > 60 ? [] : plantData.pipes) {
     const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
     for (let i = 1; i < pts.length - 1; i++) {
       const fl = dFlange(pipe.r * 1.8, dm.steelDark);
@@ -395,21 +397,41 @@ for (const unit of plantData.plant.units) {
 }
 
 // 管線（裝飾用，串接設備）
+// P&ID 自動抽取的管線可達數千段——合併成單一 BufferGeometry（一次 draw call），
+// 手繪少量管線走原路徑（個別 mesh 保留陰影品質）
 const pipeMat = std(0x646f7b);
-for (const pipe of plantData.pipes) {
-  const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
-  for (let i = 0; i < pts.length - 1; i++) {
-    const a = pts[i], b = pts[i + 1];
-    const dir = b.clone().sub(a);
-    const len = dir.length();
-    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(pipe.r, pipe.r, len, 12), pipeMat);
-    cyl.position.copy(a).addScaledVector(dir, 0.5);
-    cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
-    cyl.castShadow = true;
-    plantGroup.add(cyl);
-    const joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
-    joint.position.copy(b);
-    plantGroup.add(joint);
+{
+  const manyPipes = plantData.pipes.length > 60;
+  const geos = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  for (const pipe of plantData.pipes) {
+    const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const dir = b.clone().sub(a);
+      const len = dir.length();
+      if (len < 0.01) continue;
+      const cylGeo = new THREE.CylinderGeometry(pipe.r, pipe.r, len, manyPipes ? 6 : 12);
+      const q = new THREE.Quaternion().setFromUnitVectors(up, dir.clone().normalize());
+      const mid = a.clone().addScaledVector(dir, 0.5);
+      cylGeo.applyQuaternion(q);
+      cylGeo.translate(mid.x, mid.y, mid.z);
+      if (manyPipes) {
+        geos.push(cylGeo);
+      } else {
+        const cyl = new THREE.Mesh(cylGeo, pipeMat);
+        cyl.castShadow = true;
+        plantGroup.add(cyl);
+        const joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
+        joint.position.copy(b);
+        plantGroup.add(joint);
+      }
+    }
+  }
+  if (geos.length) {
+    const merged = new THREE.Mesh(BufferGeometryUtils.mergeGeometries(geos, false), pipeMat);
+    merged.castShadow = false; // 數千段的陰影貼圖成本不值得
+    plantGroup.add(merged);
   }
 }
 
@@ -454,7 +476,9 @@ const treeRoot = document.getElementById('plant-tree');
 for (const unit of plantData.plant.units) {
   const unitDiv = document.createElement('div');
   unitDiv.className = 'tree-unit';
-  unitDiv.innerHTML = `<div class="tree-unit-name">${unit.id}｜${unit.name}</div>`;
+  // P&ID 場景的 unit.name 已含圖號（「分離｜C12070-1」）— 不再重複前綴 id
+  const unitLabel = unit.name.includes(unit.id) ? unit.name : `${unit.id}｜${unit.name}`;
+  unitDiv.innerHTML = `<div class="tree-unit-name">${unitLabel}</div>`;
   for (const eq of unit.equipment) {
     const item = document.createElement('div');
     item.className = 'tree-eq';
@@ -464,6 +488,20 @@ for (const unit of plantData.plant.units) {
     eqMap[eq.tag].treeEl = item;
   }
   treeRoot.appendChild(unitDiv);
+}
+
+// 設備樹收合（狀態記 localStorage）
+{
+  const leftPanel = document.getElementById('left-panel');
+  const expandBtn = document.getElementById('tree-expand');
+  const setCollapsed = (on) => {
+    leftPanel.classList.toggle('hidden', on);
+    expandBtn.classList.toggle('hidden', !on);
+    localStorage.setItem('ej-tree-collapsed', on ? '1' : '');
+  };
+  document.getElementById('tree-collapse').addEventListener('click', () => setCollapsed(true));
+  expandBtn.addEventListener('click', () => setCollapsed(false));
+  if (localStorage.getItem('ej-tree-collapsed') === '1') setCollapsed(true);
 }
 
 // 外部資產也列進設備樹，點擊飛到定位

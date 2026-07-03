@@ -11,6 +11,7 @@ undo/delete 就是清理誤抓的工作流。
 
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 
@@ -305,6 +306,88 @@ def _slugify(stem: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")
 
 
+# ------------------------------------------------- 管線向量抽取（3D 化）
+# CAD PDF 的線 = stroke 路徑（文字/箭頭是 fill，線寬屬性無意義——實測
+# 主管線與引線同寬 0.8，**長度**才是判準：主管線長、引線/符號/字短）。
+PIPE_MIN_LEN = 60.0    # pt；主管線閾值（A3 圖上約 21mm）
+PIPE_MAX_SEG = 400     # 每張圖最多收的管段數（防雲形/密集雜線塞爆場景）
+
+
+def extract_pipes(pdf_path: Path) -> tuple[list, float, float]:
+    """P&ID 向量線 → 管線 polyline 清單（頁面座標）＋頁面尺寸。
+
+    過濾器（C12070-1 疊圖驗證逐一調出）：
+    1. 只收 stroke 路徑、跳過含 Bezier 的（儀錶圓圈/弧）
+    2. 長度 ≥ PIPE_MIN_LEN（殺引線/符號/文字/虛線的短段）
+    3. 閉合迴路剔除（殺儀錶方框/六角框/容器輪廓）
+    4. 雲形剔除（段數多且平均段長短 = 修訂雲）
+    5. 頁緣框線剔除（貼邊的長直線 = 圖框）
+    """
+    import ctypes
+
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as praw
+
+    doc = pdfium.PdfDocument(str(pdf_path))
+    try:
+        page = doc[0]
+        pw, ph = page.get_size()
+        n = praw.FPDFPage_CountObjects(page.raw)
+        out = []
+
+        def flush(cur, has_bezier):
+            if len(cur) < 2 or has_bezier:
+                return
+            length = sum(math.dist(cur[k], cur[k + 1]) for k in range(len(cur) - 1))
+            if length < PIPE_MIN_LEN:
+                return
+            if math.dist(cur[0], cur[-1]) < 5.0:  # 閉合迴路
+                return
+            if len(cur) > 12 and length / (len(cur) - 1) < 8.0:  # 雲形
+                return
+            xs = [q[0] for q in cur]
+            ys = [q[1] for q in cur]
+            margin = 26.0
+            if (min(xs) < margin or max(xs) > pw - margin
+                    or min(ys) < margin or max(ys) > ph - margin) and length > 300:
+                return  # 圖框/標題欄長線
+            out.append((cur, length))
+
+        for i in range(n):
+            obj = praw.FPDFPage_GetObject(page.raw, i)
+            if praw.FPDFPageObj_GetType(obj) != praw.FPDF_PAGEOBJ_PATH:
+                continue
+            fill = ctypes.c_int()
+            stroke = ctypes.c_int()
+            praw.FPDFPath_GetDrawMode(obj, ctypes.byref(fill), ctypes.byref(stroke))
+            if not stroke.value:
+                continue
+            m = praw.FS_MATRIX()
+            praw.FPDFPageObj_GetMatrix(obj, ctypes.byref(m))
+            cur: list = []
+            has_bezier = False
+            for j in range(praw.FPDFPath_CountSegments(obj)):
+                seg = praw.FPDFPath_GetPathSegment(obj, j)
+                x = ctypes.c_float()
+                y = ctypes.c_float()
+                praw.FPDFPathSegment_GetPoint(seg, ctypes.byref(x), ctypes.byref(y))
+                st = praw.FPDFPathSegment_GetType(seg)
+                X = m.a * x.value + m.c * y.value + m.e
+                Y = m.b * x.value + m.d * y.value + m.f
+                if st == praw.FPDF_SEGMENT_MOVETO:
+                    flush(cur, has_bezier)
+                    cur, has_bezier = [(X, Y)], False
+                else:
+                    if st == praw.FPDF_SEGMENT_BEZIERTO:
+                        has_bezier = True
+                    cur.append((X, Y))
+            flush(cur, has_bezier)
+    finally:
+        doc.close()
+    out.sort(key=lambda t: -t[1])  # 長的優先（超量時保主幹）
+    return [pl for pl, _ in out[:PIPE_MAX_SEG]], pw, ph
+
+
 def _save_tiles(img, stem: str) -> str:
     """OCR 渲染圖轉存圖紙底圖（hi：單圖場景讀位號用；lo：整廠 30 張省 GPU）。
     回傳 hi 檔 URL 路徑。"""
@@ -331,6 +414,34 @@ def _pixel_true_layout(equips: dict, width: float, height: float,
     return _push_apart(pos, min_gap), tile_h
 
 
+PIPE_Y = 1.8   # 管線離地高（避開地毯、低於設備頂；>1.6 不觸發敷設管架）
+PIPE_R = 0.11
+
+
+def _pipes_to_uv(polylines: list, pw: float, ph: float) -> list:
+    """頁面座標 polyline → (u,v) 分數座標（0-1，與轉正後圖紙同向）。"""
+    portrait = ph > pw  # 與 _render 的直式轉正一致
+    out = []
+    for pl in polylines:
+        if portrait:
+            uv = [((ph - y) / ph, (pw - x) / pw) for x, y in pl]
+        else:
+            uv = [(x / pw, (ph - y) / ph) for x, y in pl]
+        out.append([(round(u, 4), round(v, 4)) for u, v in uv])
+    return out
+
+
+def _uv_to_scene_pipes(pipes_uv: list, tile_w: float, tile_h: float,
+                       ox: float = 0.0, oz: float = 0.0, limit: int | None = None) -> list:
+    """(u,v) 管線 → 場景 pipes[]（可帶群聚原點偏移；與圖紙地毯對位）。"""
+    out = []
+    for uv in (pipes_uv[:limit] if limit else pipes_uv):
+        pts = [[round((u - 0.5) * tile_w + ox, 2), PIPE_Y,
+                round((v - 0.5) * tile_h + oz, 2)] for u, v in uv]
+        out.append({"pts": pts, "r": PIPE_R})
+    return out
+
+
 def parse_pid(filename: str) -> dict:
     """主入口：P&ID 檔名 → 場景草稿 dict ＋解析統計。"""
     pdf_path = PID_DIR / Path(filename).name
@@ -343,6 +454,8 @@ def parse_pid(filename: str) -> dict:
     equips, insts = _classify(hits)
     tile_url = _save_tiles(img, Path(filename).stem)
     pos, tile_h = _pixel_true_layout(equips, img.width, img.height)
+    pipe_polys, page_w, page_h = extract_pipes(pdf_path)
+    pipes_uv = _pipes_to_uv(pipe_polys, page_w, page_h)
 
     # 儀錶掛最近設備
     inst_of_eq: dict[str, list] = {t: [] for t in equips}
@@ -380,7 +493,8 @@ def parse_pid(filename: str) -> dict:
             "name": f"P&ID 草稿｜{Path(filename).stem}",
             "units": [{"id": "U-PID", "name": "P&ID 解析", "equipment": equipment}],
         },
-        "pipes": [],
+        # 管線 3D 化：向量抽取的主管線浮在圖紙上方（與地毯對位）
+        "pipes": _uv_to_scene_pipes(pipes_uv, TILE_W, tile_h),
         "instruments": instruments,
         # 圖紙底圖：設備即站在圖面自己的位置上（像素保真佈局），直接對圖
         "underlays": [{"image": tile_url, "x": 0, "z": 0,
@@ -392,6 +506,7 @@ def parse_pid(filename: str) -> dict:
             "ocr_hits": len(hits),
             "equipment": len(equipment),
             "instruments": len(instruments),
+            "pipes": len(pipes_uv),
             "items": items,
         },
         # 整廠合併需要的原始幾何（像素座標與頁面尺寸）
@@ -399,5 +514,6 @@ def parse_pid(filename: str) -> dict:
             "page_w": img.width, "page_h": img.height,
             "px": {tag: [round(c[0], 1), round(c[1], 1)] for tag, c in equips.items()},
             "tile_lo": tile_url.replace(".jpg", "_lo.jpg"),
+            "pipes_uv": pipes_uv,
         },
     }

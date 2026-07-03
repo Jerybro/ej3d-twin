@@ -246,6 +246,175 @@ def _rescue_orphans(img, hits, used):
     return rescued
 
 
+# ------------------------------------------------- 設備尺寸挖掘（模型比例真實化）
+# P&ID 設備標題三行制：「V 613」/「REACTOR PRODUCTS SEPARATOR」/「1700 X 5100」
+# （mm，殼徑 X 切線長）。OCR 實測讀法：'1700' + 'X-5100' 兩 token 同行，
+# header 位號常只剩數字（'613'，字母貼底線被吃）→ 從尺寸行往上找位號行。
+# 縮徑塔兩段殼徑分隔符：1600/2000、1600AND2000、1600AND-2000（OCR 讀法不一）
+# X 前後都可能黏 OCR 連字號（'3000-X5100'、'X-5100'——空格被讀成 '-'）
+_SEP = r"(?:/|AND-?|-)"
+_DIM_JOINED_RE = re.compile(rf"^(\d{{3,5}})(?:{_SEP}(\d{{3,5}}))?-?X-?(\d{{4,5}})$")
+_DIM_NUM_RE = re.compile(rf"^(\d{{3,5}})(?:{_SEP}(\d{{3,5}}))?$")
+_DIM_XNUM_RE = re.compile(r"^-?X-?(\d{4,5})$")
+# 有尺寸意義的素材類型 → dims 鍵
+_SIZED_TYPES = {"reactor": "h", "column": "h", "tank": "h", "flash_v": "h",
+                "cyclone": "h", "hx": "len"}
+
+
+def _dim_candidates(hits) -> list:
+    """命中 → 尺寸候選 [(cx, cy, h, 殼徑mm, 長mm)]。
+
+    三形態：joined（1700X5100）、num+Xnum（'1700'+'X-5100' 同行）、
+    縮徑塔雙徑（1600AND2000 取大者）。
+    """
+    def left_num(cx, cy, h):
+        for cx2, cy2, t2, conf2, h2 in hits:
+            mn = _DIM_NUM_RE.match(t2)
+            if mn and abs(cy2 - cy) < h and 0 < cx - cx2 < 8 * h:
+                return max(int(mn.group(1)), int(mn.group(2) or 0))
+        return None
+
+    out = []
+    for cx, cy, t, conf, h in hits:
+        m = _DIM_JOINED_RE.match(t)
+        if m:
+            d = max(int(m.group(1)), int(m.group(2) or 0))
+            out.append((cx, cy, h, d, int(m.group(3))))
+            continue
+        mx = _DIM_XNUM_RE.match(t)
+        if mx:  # 'X-5100' 黏字形：往左找同列殼徑數字
+            d = left_num(cx, cy, h)
+            if d:
+                out.append((cx, cy, h, d, int(mx.group(1))))
+            continue
+        if t == "X":  # 三連 token 形：'3000' 'X' '5100'
+            d = left_num(cx, cy, h)
+            if d is None:
+                continue
+            best = None
+            for cx2, cy2, t2, conf2, h2 in hits:
+                m2 = re.match(r"^(\d{4,5})$", t2)
+                if m2 and abs(cy2 - cy) < h and 0 < cx2 - cx < 8 * h:
+                    if best is None or cx2 < best[0]:
+                        best = (cx2, int(m2.group(1)))
+            if best:
+                out.append((cx, cy, h, d, best[1]))
+    return out
+
+
+def _dim_sane(d_mm: int, l_mm: int) -> bool:
+    return 300 <= d_mm <= 8000 and 1500 <= l_mm <= 60000 and l_mm >= d_mm
+
+
+def _mine_dims(raw, equips) -> dict:
+    """OCR 命中 → {位號: (殼徑mm, 長mm)}。
+
+    位號關聯：尺寸行正上方 1~6 字高內的 header 位號（完整位號或裸數字
+    ——裸數字對回唯一符合的分類設備；header 字母常貼底線被吃）。
+    """
+    by_num: dict[str, list] = {}
+    for tag in equips:
+        num = re.sub(r"^[A-Z]+-?", "", tag)
+        by_num.setdefault(num, []).append(tag)
+
+    out = {}
+    for cx, cy, h, d_mm, l_mm in _dim_candidates(raw):
+        if not _dim_sane(d_mm, l_mm):
+            continue  # 非設備尺寸（管號/座標等）
+        best, best_d = None, float("inf")
+        for cx2, cy2, t2, conf2, h2 in raw:
+            dy = cy - cy2  # header 位號在尺寸行上方
+            if not (h * 0.8 < dy < h * 6.5) or abs(cx2 - cx) > 10 * h:
+                continue
+            tag = None
+            t2n = t2.replace("-", "")
+            if t2n in equips:
+                tag = t2n
+            elif t2n in by_num and len(by_num[t2n]) == 1:
+                tag = by_num[t2n][0]
+            if tag is not None:
+                dist = dy + abs(cx2 - cx)
+                if dist < best_d:
+                    best, best_d = tag, dist
+        if best and best not in out:
+            out[best] = (d_mm, l_mm)
+    return out
+
+
+def _rescue_dims(img, raw, equips, have) -> dict:
+    """尺寸定向補刀：全域掃描沒挖到的設備，裁其位號命中的正下方窗，
+    放大 2x＋限字元集重掃（同 V613 救 V 的套路——header 區小字/貼線
+    數字全域掃描常讀爛，限縮候選字元後補刀成功率高）。"""
+    import numpy as np
+
+    reader = _get_reader()
+    out = {}
+    for tag in equips:
+        if tag in have:
+            continue
+        num = re.sub(r"^[A-Z]+-?", "", tag)
+        anchors = []
+        for cx, cy, t, conf, h in raw:
+            tn = t.replace("-", "")
+            if tn == tag or tn == num or (
+                    tn.startswith(tag[0]) and num in tn and len(tn) <= len(tag) + 3):
+                anchors.append((cx, cy, h))
+        # 同一窗微調重試：EasyOCR 偵測分組對窗口位置敏感（20px 平移就會
+        # 把「5100」黏進鄰字或漏偵），多窗多一次分組落對的機會
+        for cx, cy, h in anchors:
+            for pad, scale in ((10.0, 2), (11.5, 2), (9.0, 3)):
+                x0 = max(0, int(cx - pad * h))
+                x1 = min(img.width, int(cx + pad * h))
+                y0 = int(cy + 0.5 * h)
+                y1 = min(img.height, int(cy + 8 * h))
+                if y1 - y0 < 10 or x1 - x0 < 10:
+                    continue
+                crop = img.crop((x0, y0, x1, y1))
+                crop = crop.resize((crop.width * scale, crop.height * scale))
+                hits2 = []
+                # 完整字元集——限縮字元集會把行內單位字（M^3/MT）硬轉成
+                # 數字垃圾並把鄰近尺寸一起攪爛；字母開放讓雜字自然成雜字
+                for bbox, text, c in reader.readtext(
+                        np.array(crop.convert("RGB")),
+                        allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/",
+                        text_threshold=0.35, low_text=0.25):
+                    t2 = text.strip().replace(" ", "")
+                    hcx = sum(p[0] for p in bbox) / (4 * scale) + x0
+                    hcy = sum(p[1] for p in bbox) / (4 * scale) + y0
+                    hh = (max(p[1] for p in bbox) - min(p[1] for p in bbox)) / scale
+                    hits2.append((hcx, hcy, t2, c, hh))
+                cands = _dim_candidates(hits2)
+                # token 分組免疫：同列 token 依 x 串接後全文搜尺寸樣式
+                rows: dict[int, list] = {}
+                for hcx, hcy, t2, c, hh in hits2:
+                    rows.setdefault(round(hcy / max(hh, 8)), []).append((hcx, t2))
+                for row in rows.values():
+                    joined = "".join(t for _, t in sorted(row))
+                    m = re.search(rf"(\d{{3,5}})(?:{_SEP}(\d{{3,5}}))?-?X-?(\d{{4,5}})", joined)
+                    if m:
+                        d = max(int(m.group(1)), int(m.group(2) or 0))
+                        cands.append((0, 0, 0, d, int(m.group(3))))
+                for _cx, _cy, _h, d_mm, l_mm in cands:
+                    if _dim_sane(d_mm, l_mm):
+                        out[tag] = (d_mm, l_mm)
+                        break
+                if tag in out:
+                    break
+            if tag in out:
+                break
+    return out
+
+
+def _apply_dims(entry: dict, d_mm: int, l_mm: int) -> bool:
+    """把挖到的實尺寸套進設備 dims（依素材類型；mm→m）。"""
+    key = _SIZED_TYPES.get(entry["type"])
+    if not key:
+        return False
+    entry["dims"] = {"r": round(d_mm / 2000, 2), key: round(l_mm / 1000, 2)}
+    entry.setdefault("design", {})["尺寸來源"] = f"P&ID 標題 {d_mm}×{l_mm}mm"
+    return True
+
+
 def _extract_connectors(hits) -> list:
     """OCR 命中 → 跨圖接續標記清單（同標記取信心最高者）。"""
     conns = {}
@@ -473,6 +642,8 @@ def parse_pid(filename: str) -> dict:
     hits += _rescue_orphans(img, raw, used)
     equips, insts = _classify(hits)
     connectors = _extract_connectors(hits)
+    dims_mm = _mine_dims(raw, equips)
+    dims_mm.update(_rescue_dims(img, raw, equips, set(dims_mm)))
     tile_url = _save_tiles(img, Path(filename).stem)
     pos, tile_h = _pixel_true_layout(equips, img.width, img.height)
     pipe_polys, page_w, page_h = extract_pipes(pdf_path)
@@ -502,14 +673,17 @@ def parse_pid(filename: str) -> dict:
     items = []
     for tag, (cx, cy, conf) in sorted(equips.items()):
         etype = TYPE_MAP.get(tag[0], "block")
-        equipment.append({
+        entry = {
             "tag": tag, "name": TYPE_NAME.get(etype, "設備"), "type": etype,
             "pos": pos[tag], "rot_y": 0,
             "dims": dict(TYPE_DIMS.get(etype, TYPE_DIMS["block"])),
             "pid_ref": Path(filename).stem, "design": {},
             "instruments": inst_of_eq.get(tag, []),
-        })
-        items.append({"tag": tag, "type": etype, "conf": round(conf, 2)})
+        }
+        sized = tag in dims_mm and _apply_dims(entry, *dims_mm[tag])
+        equipment.append(entry)
+        items.append({"tag": tag, "type": etype, "conf": round(conf, 2),
+                      "dims_mm": list(dims_mm[tag]) if sized else None})
 
     scene = {
         "plant": {
@@ -541,6 +715,7 @@ def parse_pid(filename: str) -> dict:
                         for itag, c in insts.items()},
             "tile_lo": tile_url.replace(".jpg", "_lo.jpg"),
             "pipes_uv": pipes_uv,
+            "dims_mm": {tag: list(v) for tag, v in dims_mm.items()},
             # 跨圖接續標記（縫合用；cx/cy 為轉正後圖像像素）
             "connectors": [{**c, "u": round(c["cx"] / img.width, 4),
                             "v": round(c["cy"] / img.height, 4)} for c in connectors],

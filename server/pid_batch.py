@@ -19,7 +19,8 @@ import threading
 import time
 from pathlib import Path
 
-from .pid_parse import PID_DIR, PIPE_Y, _push_apart, _uv_to_scene_pipes, parse_pid
+from .pid_parse import (PID_DIR, PIPE_Y, _apply_dims, _push_apart,
+                        _uv_to_scene_pipes, parse_pid)
 
 MERGED_PIPES_PER_SHEET = None  # None=全收（渲染端已合併幾何，扛得住）
 BRIDGE_Y = 8.0     # 橋接管線高度（跨圖島，飛越一般管線與多數設備）
@@ -210,6 +211,12 @@ def merge_results(results: dict[str, dict]) -> dict:
     total_h = rows * slot_h - gap
     off_x, off_z = -total_w / 2, -total_h / 2  # 全場置中
 
+    # 跨圖尺寸註冊表：任一張圖標題挖到的實尺寸，套用到所有圖的同位號實例
+    dims_reg: dict[str, tuple] = {}
+    for stem in sheets:
+        for tag, v in results[stem]["geom"].get("dims_mm", {}).items():
+            dims_reg.setdefault(tag, tuple(v))
+
     units = []
     underlays = []
     pipes = []
@@ -233,6 +240,9 @@ def merge_results(results: dict[str, dict]) -> dict:
             eq["tag"] = uniq
             eq["pos"] = [round(x + ox, 2), 0, round(z + oz, 2)]
             eq["pid_ref"] = stem
+            # 本圖沒挖到尺寸但他圖有 → 套跨圖註冊表
+            if tag in dims_reg and "尺寸來源" not in eq.get("design", {}):
+                _apply_dims(eq, *dims_reg[tag])
             equipment.append(eq)
         # 儀錶：本圖掛載、世界座標標記位置；跨圖同位號取先見（同一迴路重繪）
         for itag, inst in sheet_scene.get("instruments", {}).items():

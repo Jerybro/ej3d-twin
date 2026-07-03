@@ -256,6 +256,7 @@ def cards(sid: str, target: str = "", page: int = 1, per_page: int = 9, bins: in
     lo, hi = (page - 1) * per_page, page * per_page
     page_cols = cols[lo:hi]
     tgt = view[target] if target and target in view.columns else None
+    tgt_time = tgt is not None and pd.api.types.is_datetime64_any_dtype(tgt)
 
     out = []
     for c in page_cols:
@@ -263,7 +264,15 @@ def cards(sid: str, target: str = "", page: int = 1, per_page: int = 9, bins: in
         is_time = pd.api.types.is_datetime64_any_dtype(s)
         is_num = pd.api.types.is_numeric_dtype(s)
         card = {"col": str(c), "kind": "time" if is_time else "numeric" if is_num else "string"}
-        if tgt is not None and c != target and pd.api.types.is_numeric_dtype(tgt):
+        if tgt is not None and c != target and tgt_time and is_num:
+            # 時序模式（target=時間欄）：X=時間、Y=c —— 每欄變時序圖
+            sub = pd.DataFrame({"x": tgt, "y": pd.to_numeric(s, errors="coerce")}).dropna()
+            if len(sub) > 500:
+                sub = sub.sample(500, random_state=0).sort_index()
+            xs = ((sub["x"] - pd.Timestamp(0)) // pd.Timedelta(seconds=1)).tolist()
+            card.update({"mode": "scatter", "x": xs, "y": [_f(v) for v in sub["y"]],
+                         "x_is_time": True, "x_col": str(target), "y_col": str(c)})
+        elif tgt is not None and c != target and pd.api.types.is_numeric_dtype(tgt):
             # 二維：c（X）vs target（Y）散佈
             sub = pd.DataFrame({"x": s, "y": tgt}).dropna()
             if len(sub) > 500:
@@ -271,7 +280,7 @@ def cards(sid: str, target: str = "", page: int = 1, per_page: int = 9, bins: in
             xs = ((sub["x"] - pd.Timestamp(0)) // pd.Timedelta(seconds=1)).tolist() if is_time else \
                  [_f(v) for v in sub["x"]] if is_num else sub["x"].astype(str).tolist()
             card.update({"mode": "scatter", "x": xs, "y": [_f(v) for v in sub["y"]],
-                         "x_is_time": is_time})
+                         "x_is_time": is_time, "x_col": str(c), "y_col": str(target)})
         elif is_num:
             vals = pd.to_numeric(s, errors="coerce").dropna()
             if len(vals):

@@ -76,11 +76,13 @@ if (urlSid) {
 async function refreshState() {
   state = await api('/state');
   $('count-chip').textContent = `${state.n_view.toLocaleString()} 筆 ${state.columns.filter((c) => !c.hidden && c.name !== '__id__').length} 欄`;
-  // 二維目標下拉（數值欄）
+  // 二維目標下拉（數值欄＋時間欄——選時間欄＝整牆時序圖 X=time）
+  const timeCols = state.columns.filter((c) => !c.hidden && c.dtype.startsWith('datetime'));
   const numeric = state.columns.filter((c) => !c.hidden && c.name !== '__id__' &&
     (c.dtype.startsWith('float') || c.dtype.startsWith('int')));
   $('target-select').innerHTML = '<option value="">選擇預測目標進行二維分析</option>'
     + '<option value="">進行單維度分析</option>'
+    + timeCols.map((c) => `<option value="${c.name}" ${c.name === target ? 'selected' : ''}>${c.name}（時序）</option>`).join('')
     + numeric.map((c) => `<option ${c.name === target ? 'selected' : ''}>${c.name}</option>`).join('');
   renderHistory();
   renderColMgr();
@@ -89,8 +91,8 @@ async function refreshState() {
 }
 
 // ------------------------------------------------------------ 導航
-document.querySelectorAll('.nav-tab').forEach((t) => t.addEventListener('click', () => {
-  document.querySelectorAll('.nav-tab').forEach((x) => x.classList.remove('active'));
+document.querySelectorAll('.nav-tab[data-view]').forEach((t) => t.addEventListener('click', () => {
+  document.querySelectorAll('.nav-tab[data-view]').forEach((x) => x.classList.remove('active'));
   t.classList.add('active');
   const isExplore = t.dataset.view === 'explore';
   $('explore-view').style.display = isExplore ? '' : 'none';
@@ -120,13 +122,34 @@ document.querySelectorAll('.dtab').forEach((t) => t.addEventListener('click', ()
   $(`d-${t.dataset.d}`).classList.add('show');
 }));
 
-// 更多選單
+// 更多側邊欄
 $('btn-more').addEventListener('click', (e) => {
   e.stopPropagation();
-  $('more-menu').classList.toggle('open');
+  $('more-drawer').classList.toggle('open');
 });
+$('more-close').addEventListener('click', () => $('more-drawer').classList.remove('open'));
+
+// 圖表主題色
+function markThemeMenu() {
+  $('theme-menu').querySelectorAll('button').forEach((b) =>
+    b.classList.toggle('on', b.dataset.theme === themeKey));
+}
+$('btn-theme').addEventListener('click', (e) => {
+  e.stopPropagation();
+  markThemeMenu();
+  $('theme-menu').classList.toggle('open');
+});
+$('theme-menu').querySelectorAll('button').forEach((b) => b.addEventListener('click', async () => {
+  themeKey = b.dataset.theme;
+  localStorage.setItem('ej-chart-theme', themeKey);
+  markThemeMenu();
+  $('theme-menu').classList.remove('open');
+  if (sid) await renderWall();
+}));
+
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('#more-menu') && !e.target.closest('#btn-more')) $('more-menu').classList.remove('open');
+  if (!e.target.closest('#more-drawer') && !e.target.closest('#btn-more')) $('more-drawer').classList.remove('open');
+  if (!e.target.closest('#theme-menu') && !e.target.closest('#btn-theme')) $('theme-menu').classList.remove('open');
   if (!e.target.closest('.popover') && !e.target.closest('.cicon') && !e.target.closest('.thops')) closePopovers();
   // 框選面板：點 canvas 是拖曳流程的一部分，不在此收合
   if (!e.target.closest('.brush-panel') && e.target.tagName !== 'CANVAS') closeBrushPanel();
@@ -212,16 +235,30 @@ function renderPager(el, page, pages, go) {
   el.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => go(+b.dataset.p)));
 }
 
-// 卡片繪圖 — 綠黑 AI 風（使用者指定：預設綠色、依密度深淺）＋完整軸刻度＋框選
+// 卡片繪圖 — 可選主題色（預設綠黑 AI 風，深淺=資料密度）＋完整軸刻度＋框選
 const C_AXIS = '#061027';
 const C_LABEL = '#555555';
 const C_GRID = '#ECEEF2';
-const INK_LO = [183, 212, 196];  // #B7D4C4 淺灰綠（低柱）
-const INK_HI = [4, 46, 34];      // #042E22 墨綠（高柱）
-const C_DOT = 'rgba(5, 95, 70, 0.5)';          // 散佈點 翡翠綠
-const C_SEL_FILL = 'rgba(16, 185, 129, 0.12)'; // 框選帶
-const C_SEL_LINE = 'rgba(5, 150, 105, 0.65)';
-const ink = (t) => `rgb(${INK_LO.map((lo, i) => Math.round(lo + (INK_HI[i] - lo) * t)).join(',')})`;
+// 深淺語意：柱越高（筆數越多）顏色越深；散佈點半透明重疊越密越深
+const THEMES = {
+  green:  { name: '綠', lo: [183, 212, 196], hi: [4, 46, 34],
+            dot: 'rgba(5, 95, 70, 0.5)', selF: 'rgba(16, 185, 129, 0.12)', selL: 'rgba(5, 150, 105, 0.65)' },
+  blue:   { name: '藍', lo: [186, 206, 233], hi: [5, 34, 84],
+            dot: 'rgba(4, 106, 251, 0.45)', selF: 'rgba(4, 106, 251, 0.10)', selL: 'rgba(4, 106, 251, 0.6)' },
+  purple: { name: '紫', lo: [211, 199, 227], hi: [51, 18, 84],
+            dot: 'rgba(126, 58, 242, 0.45)', selF: 'rgba(126, 58, 242, 0.10)', selL: 'rgba(126, 58, 242, 0.6)' },
+  amber:  { name: '琥珀', lo: [233, 216, 183], hi: [102, 54, 4],
+            dot: 'rgba(217, 119, 6, 0.5)', selF: 'rgba(217, 119, 6, 0.10)', selL: 'rgba(217, 119, 6, 0.6)' },
+  ink:    { name: '墨', lo: [182, 188, 198], hi: [6, 16, 39],
+            dot: 'rgba(6, 16, 39, 0.45)', selF: 'rgba(6, 16, 39, 0.08)', selL: 'rgba(6, 16, 39, 0.55)' },
+};
+let themeKey = localStorage.getItem('ej-chart-theme') ?? 'green';
+if (!THEMES[themeKey]) themeKey = 'green';
+const theme = () => THEMES[themeKey];
+const ink = (t) => {
+  const { lo, hi } = theme();
+  return `rgb(${lo.map((l, i) => Math.round(l + (hi[i] - l) * t)).join(',')})`;
+};
 const GEOM = new WeakMap();      // canvas → 幾何映射（框選 px→值）
 
 function niceTicks(lo, hi, n = 6) {
@@ -229,7 +266,8 @@ function niceTicks(lo, hi, n = 6) {
   const step0 = (hi - lo) / n;
   const mag = 10 ** Math.floor(Math.log10(step0));
   const norm = step0 / mag;
-  const step = (norm >= 5 ? 5 : norm >= 2 ? 2 : 1) * mag;
+  // 標準 nice-step 分界（1.5/3/7），避免 norm≈4.7 落到 step=2 產生過密刻度
+  const step = (norm >= 7 ? 10 : norm >= 3 ? 5 : norm >= 1.5 ? 2 : 1) * mag;
   const out = [];
   for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + step * 1e-6; v += step) out.push(v);
   return out;
@@ -337,9 +375,9 @@ function drawCard(canvas, card, big = false, selPx = null) {
       b = Math.min(Math.max(selPx[0], selPx[1]), w - M.r);
       t = M.t; btm = h - M.b;
     }
-    ctx.fillStyle = C_SEL_FILL;
+    ctx.fillStyle = theme().selF;
     ctx.fillRect(a, t, b - a, btm - t);
-    ctx.strokeStyle = C_SEL_LINE;
+    ctx.strokeStyle = theme().selL;
     ctx.strokeRect(a + 0.5, t + 0.5, b - a - 1, btm - t - 1);
   };
 
@@ -372,7 +410,7 @@ function drawCard(canvas, card, big = false, selPx = null) {
     if (!card.x.length) return;
     yAxis(niceTicks(ylo, yhi, 5));
     axes();
-    ctx.fillStyle = C_DOT;
+    ctx.fillStyle = theme().dot;
     card.x.forEach((xv, i) => {
       ctx.beginPath();
       ctx.arc(px(typeof xv === 'number' ? xv : 0), py(card.y[i]), big ? 2.5 : 1.8, 0, Math.PI * 2);
@@ -485,10 +523,12 @@ function bindBrush(canvas) {
     const toY = (pv) => g.ylo + ((g.h - g.M.b - clampY(pv)) / (g.plotH || 1)) * (g.yhi - g.ylo);
     const isTime = !!g.card.x_is_time || g.card.kind === 'time';
     if (g.card.mode === 'scatter') {
-      // 橫拖=X 篩選、直拖=Y 篩選、斜拖=矩形（兩欄同時）
-      const xr = dx >= 5 ? { col: g.card.col, lo: Math.min(toX(x0), toX(x1)), hi: Math.max(toX(x0), toX(x1)), isTime } : null;
-      const yr = dy >= 5 && g.card.target
-        ? { col: g.card.target, lo: Math.min(toY(y0), toY(y1)), hi: Math.max(toY(y0), toY(y1)) } : null;
+      // 橫拖=X 篩選、直拖=Y 篩選、斜拖=矩形（兩欄同時）；欄位以後端 x_col/y_col 為準
+      const xCol = g.card.x_col ?? g.card.col;
+      const yCol = g.card.y_col ?? g.card.target;
+      const xr = dx >= 5 ? { col: xCol, lo: Math.min(toX(x0), toX(x1)), hi: Math.max(toX(x0), toX(x1)), isTime } : null;
+      const yr = dy >= 5 && yCol
+        ? { col: yCol, lo: Math.min(toY(y0), toY(y1)), hi: Math.max(toY(y0), toY(y1)) } : null;
       if (!xr && !yr) { drawCard(canvas, g.card, g.big); return; }  // 誤觸
       openBrushPanel(e.clientX, e.clientY, canvas, g, { x: xr, y: yr });
     } else {
@@ -657,6 +697,9 @@ async function openZoom(col) {
   if (!card) return;
   card.target = res.target;
   $('zoom-title').textContent = `${col}${res.target && col !== res.target ? `｜vs ${res.target}` : ''}`;
+  const { lo, hi } = theme();
+  $('zoom-modal').querySelector('.zl-bar').style.background =
+    `linear-gradient(90deg, rgb(${lo.join(',')}), rgb(${hi.join(',')}))`;
   $('zoom-modal').classList.add('open');
   requestAnimationFrame(() => drawCard($('zoom-canvas'), card, true));
 }

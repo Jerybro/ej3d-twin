@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>資料前處理｜EJ Process Intelligence</title>
+  <title>資料前處理｜Process Intelligence</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500&display=swap" rel="stylesheet" />
   <style>
     /* Tukey 實測設計 token（demo.chimes.ai 2026-07-03）：
@@ -281,21 +281,47 @@
     .brush-panel [data-a="exclude"] { background: var(--green); border-color: var(--green); color: #fff; }
     .brush-panel .bp-actions button:hover { filter: brightness(0.96); }
 
-    /* 更多選單 */
-    #more-menu {
-      position: absolute; top: 46px; right: 12px; z-index: 45; width: 256px;
-      background: var(--white); border: 1px solid var(--bdr); border-radius: 5px;
-      box-shadow: 0 6px 24px rgba(6, 16, 39, 0.12); padding: 8px; display: none;
+    /* 更多側邊欄 */
+    #more-drawer {
+      position: fixed; top: 0; right: -320px; width: 320px; height: 100vh; z-index: 55;
+      background: var(--white); border-left: 1px solid var(--bdr);
+      box-shadow: -6px 0 24px rgba(6, 16, 39, 0.08); transition: right 0.22s;
+      display: flex; flex-direction: column;
     }
-    #more-menu.open { display: block; }
-    #more-menu .mh { font-size: 12px; color: var(--text2); padding: 8px 10px 4px; }
-    #more-menu button {
-      display: block; width: 100%; text-align: left; padding: 9px 10px;
+    #more-drawer.open { right: 0; }
+    .md-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 13px 16px; border-bottom: 1px solid var(--bdr);
+      font-size: 15px; font-weight: 500; color: var(--text);
+    }
+    .md-head button { border: none; background: none; font-size: 20px; line-height: 1;
+      cursor: pointer; color: var(--text2); }
+    .md-body { flex: 1; overflow-y: auto; padding: 10px; }
+    .md-body .mh { font-size: 12px; color: var(--text2); padding: 8px 10px 4px; }
+    .md-body button {
+      display: block; width: 100%; text-align: left; padding: 10px 12px;
       border: none; background: none; cursor: pointer; font-size: 14px;
       border-radius: 4px; color: var(--text);
     }
-    #more-menu button:hover { background: var(--bg); }
-    #more-menu hr { border: none; border-top: 1px solid var(--bdr); margin: 6px 0; }
+    .md-body button:hover { background: var(--bg); }
+    .md-body hr { border: none; border-top: 1px solid var(--bdr); margin: 8px 0; }
+
+    /* 主題色選單 */
+    #theme-menu {
+      position: absolute; top: 46px; right: 76px; z-index: 45; width: 208px;
+      background: var(--white); border: 1px solid var(--bdr); border-radius: 6px;
+      box-shadow: 0 6px 24px rgba(6, 16, 39, 0.12); padding: 8px; display: none;
+    }
+    #theme-menu.open { display: block; }
+    #theme-menu .mh { font-size: 12px; color: var(--text2); padding: 6px 10px 4px; }
+    #theme-menu button {
+      display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+      padding: 8px 10px; border: none; background: none; cursor: pointer;
+      font-size: 14px; border-radius: 4px; color: var(--text);
+    }
+    #theme-menu button:hover { background: var(--bg); }
+    #theme-menu button.on { background: rgba(4, 106, 251, 0.07); }
+    #theme-menu .sw { width: 34px; height: 12px; border-radius: 6px; flex-shrink: 0; }
 
     /* 放大 modal */
     #zoom-modal {
@@ -306,9 +332,12 @@
     .zoom-box { width: min(880px, 92vw); background: var(--white); border-radius: 5px;
       border: 1px solid var(--bdr); padding: 24px; }
     .zoom-box h3 { font-size: 15px; font-weight: 500; color: var(--text); margin-bottom: 14px; }
-    .zoom-box canvas { width: 100%; height: 440px; display: block; }
+    .zoom-box canvas { width: 100%; height: 420px; display: block; }
     .zoom-close { float: right; border: none; background: none; font-size: 20px;
       cursor: pointer; color: var(--text2); line-height: 1; }
+    #zoom-legend { display: flex; align-items: center; gap: 10px; margin-top: 10px;
+      font-size: 13px; color: var(--text2); }
+    #zoom-legend .zl-bar { width: 120px; height: 10px; border-radius: 5px; }
   </style>
 </head>
 <body>
@@ -316,7 +345,9 @@
     <a class="nav-back" href="/" title="回平台首頁">
       <svg class="ic" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
     </a>
-    <span class="brand" title="EJ Process Intelligence">EJ</span>
+    <span class="brand" title="Process Intelligence">
+      <svg class="ic sm" viewBox="0 0 24 24" style="stroke:#fff"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+    </span>
     <span id="ds-name">資料前處理</span>
     <span class="nav-sep"></span>
     <button class="nav-tab" data-view="dataset">
@@ -326,25 +357,43 @@
       <svg class="ic" viewBox="0 0 24 24"><path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/></svg>
       探索分析</button>
     <span class="spacer"></span>
+    <button class="nav-tab" id="btn-theme" title="圖表主題色">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 1 10-10c0 2.2-1.8 4-4 4h-2.5a2 2 0 0 0-1.5 3.3c.3.4.5.9.5 1.4A1.3 1.3 0 0 1 13 22z"/><circle cx="7.5" cy="11.5" r="0.5"/><circle cx="10.5" cy="7.5" r="0.5"/><circle cx="15" cy="7.5" r="0.5"/></svg>
+    </button>
     <button id="btn-more">更多
       <svg class="ic sm" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
     </button>
   </header>
 
-  <div id="more-menu">
-    <div class="mh">資料萃取樣板</div>
-    <button id="mm-template-dl">下載篩選歷程樣板</button>
-    <button id="mm-template-up">套用樣板（複用歷程）</button>
-    <hr>
-    <div class="mh">下載資料集</div>
-    <button id="mm-export">下載最新篩選資料集</button>
-    <button id="mm-export-raw">下載原始資料集</button>
-    <hr>
-    <div class="mh">下載資料報表</div>
-    <button id="mm-report">下載分析報表</button>
-    <hr>
-    <button id="mm-new">上傳新資料集</button>
+  <div id="theme-menu">
+    <div class="mh">圖表主題色（深淺＝資料密度）</div>
+    <button data-theme="green"><span class="sw" style="background:linear-gradient(90deg,#B7D4C4,#042E22)"></span>綠（預設）</button>
+    <button data-theme="blue"><span class="sw" style="background:linear-gradient(90deg,#BACEE9,#052254)"></span>藍</button>
+    <button data-theme="purple"><span class="sw" style="background:linear-gradient(90deg,#D3C7E3,#331254)"></span>紫</button>
+    <button data-theme="amber"><span class="sw" style="background:linear-gradient(90deg,#E9D8B7,#663604)"></span>琥珀</button>
+    <button data-theme="ink"><span class="sw" style="background:linear-gradient(90deg,#B6BCC6,#061027)"></span>墨</button>
   </div>
+
+  <aside id="more-drawer">
+    <div class="md-head">
+      <span>更多</span>
+      <button id="more-close" title="關閉">×</button>
+    </div>
+    <div class="md-body">
+      <div class="mh">資料萃取樣板</div>
+      <button id="mm-template-dl">下載篩選歷程樣板</button>
+      <button id="mm-template-up">套用樣板（複用歷程）</button>
+      <hr>
+      <div class="mh">下載資料集</div>
+      <button id="mm-export">下載最新篩選資料集</button>
+      <button id="mm-export-raw">下載原始資料集</button>
+      <hr>
+      <div class="mh">下載資料報表</div>
+      <button id="mm-report">下載分析報表</button>
+      <hr>
+      <button id="mm-new">上傳新資料集</button>
+    </div>
+  </aside>
 
   <nav id="subnav" style="display:none">
     <span id="count-chip">—</span>
@@ -450,6 +499,10 @@
       <button class="zoom-close" id="zoom-close">×</button>
       <h3 id="zoom-title"></h3>
       <canvas id="zoom-canvas"></canvas>
+      <div id="zoom-legend">
+        <span class="zl-bar"></span>
+        <span>淺 → 深：該區間筆數越多（散佈點重疊越密、顏色越深）</span>
+      </div>
     </div>
   </div>
 

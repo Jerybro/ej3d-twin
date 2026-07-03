@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EJ Process Intelligence｜製程智能平台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0e141b; --panel: #131b24; --panel2: #17212c;
+      --bdr: #223140; --accent: #46c2e0; --accent-deep: #1f6ea8;
+      --text: #dbe5ee; --dim: #8ba0b3; --ok: #35e08c;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; background: var(--bg); color: var(--text);
+      font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 48px 32px; }
+    header.site { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+    .logo { font-size: 22px; font-weight: 700; letter-spacing: 0.5px;
+      background: linear-gradient(90deg, var(--accent), #7ee2f5);
+      -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .site-sub { color: var(--dim); font-size: 13px; }
+    .tagline { color: var(--dim); font-size: 14px; margin: 4px 0 40px; line-height: 1.7; }
+    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @media (max-width: 860px) { .cards { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--panel); border: 1px solid var(--bdr); border-radius: 14px;
+      padding: 28px; display: flex; flex-direction: column; gap: 14px;
+      transition: border-color 0.2s;
+    }
+    .card:hover { border-color: var(--accent-deep); }
+    .card .kicker { font-size: 12px; font-weight: 600; color: var(--accent); letter-spacing: 1.5px; }
+    .card h2 { font-size: 20px; font-weight: 700; }
+    .card p { color: var(--dim); font-size: 13.5px; line-height: 1.75; flex: 1; }
+    .links { display: flex; flex-direction: column; gap: 8px; }
+    .links a {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 16px; border-radius: 9px; text-decoration: none;
+      background: var(--panel2); border: 1px solid var(--bdr);
+      color: var(--text); font-size: 14px; font-weight: 500;
+    }
+    .links a:hover { border-color: var(--accent); background: rgba(70, 194, 224, 0.08); }
+    .links a .hint { color: var(--dim); font-size: 12px; font-weight: 400; }
+    .links a.soon { opacity: 0.5; pointer-events: none; }
+    footer.site { margin-top: 48px; color: var(--dim); font-size: 12px;
+      border-top: 1px solid var(--bdr); padding-top: 18px; display: flex; justify-content: space-between; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="site">
+      <span class="logo">EJ Process Intelligence</span>
+      <span class="site-sub">製程智能平台</span>
+    </header>
+    <p class="tagline">
+      數據與物理雙驅動的流程工業平台：先成就數據孿生，再映射視覺孿生。<br />
+      物理約束治理 AI 外插，每一個模型附驗證度。
+    </p>
+
+    <div class="cards">
+      <section class="card">
+        <span class="kicker">PRODUCT 2</span>
+        <h2>數據孿生平台</h2>
+        <p>
+          上傳製程數據，互動式前處理：圈選剔除、穩態過濾、相關性分析。
+          可搭載物性模組（CoolProp）做物理合理性檢查與物性推算，
+          為下游建模提供防外插的物理柵欄。
+        </p>
+        <div class="links">
+          <a href="/data">資料前處理<span class="hint">上傳、清洗、相關分析、物性模組</span></a>
+        </div>
+      </section>
+
+      <section class="card">
+        <span class="kicker">PRODUCT 3</span>
+        <h2>3D 視覺孿生平台</h2>
+        <p>
+          廠區 3D 數位孿生：即時數據熱力圖、工安情境模擬、施工衝突檢測。
+          以 3D 模塊編輯器自建場景，或由 P&amp;ID 圖面規劃建模，
+          並保留實拍影片重建 3D 的升級路徑。
+        </p>
+        <div class="links">
+          <a href="/twin">孿生檢視<span class="hint">示範廠場景、即時數據、情境模擬</span></a>
+          <a href="/twin/editor">3D 模塊編輯器<span class="hint">工業素材放置、管線繪製、場景存檔</span></a>
+          <a href="/twin/pid">P&amp;ID 管理<span class="hint">圖面上傳與檢視</span></a>
+        </div>
+      </section>
+    </div>
+
+    <footer class="site">
+      <span>穎杰科技 EJ Process Intelligence</span>
+      <span>OpenUSD 相容・OPC UA 就緒</span>
+    </footer>
+  </div>
+</body>
+</html>

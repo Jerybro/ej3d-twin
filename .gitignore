@@ -9,6 +9,7 @@ dataset/
 *.xls
 *.xlsx
 quality_daily*.csv
+uploads/
 
 # 產出物（可由程式重新生成）
 exports/*.usda

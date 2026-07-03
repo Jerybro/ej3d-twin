@@ -16,10 +16,14 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import File as FastAPIFile
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
+from .dataprep import router as dataprep_router
+from .scenes import load_scene
+from .scenes import router as scenes_router
 from .sources import History, SimSource, load_source
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -179,15 +183,19 @@ app = FastAPI(title="EJ_3D 數位孿生平台 MVP", lifespan=lifespan)
 
 
 @app.get("/api/plant")
-def get_plant() -> dict:
-    return PLANT
+def get_plant(scene: str = "demo") -> dict:
+    """場景資料：預設 demo（=plant.json）；編輯器自建場景由 scenes API 存取。"""
+    if scene == "demo":
+        return PLANT
+    return load_scene(scene)
 
 
 @app.get("/api/scenarios")
-def get_scenarios() -> list:
+def get_scenarios(scene: str = "demo") -> list:
+    src = PLANT if scene == "demo" else load_scene(scene)
     return [
-        {"id": s["id"], "name": s["name"], "kind": s["kind"], "desc": s.get("desc", "")}
-        for s in PLANT["scenarios"]
+        {"id": s["id"], "name": s["name"], "kind": s.get("kind", "normal"), "desc": s.get("desc", "")}
+        for s in src.get("scenarios", [])
     ]
 
 
@@ -348,10 +356,46 @@ async def ws_endpoint(ws: WebSocket) -> None:
 
 # ------------------------------------------------------------------- 靜態檔案
 
+app.include_router(scenes_router)
+app.include_router(dataprep_router)
+
+# --------------------------------------------------------- P&ID 圖面管理
+UPLOADS_DIR = BASE_DIR / "uploads"
+PID_DIR = UPLOADS_DIR / "pid"
+PID_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@app.post("/api/pid/upload")
+async def pid_upload(file: "UploadFile" = FastAPIFile(...)) -> dict:
+    name = Path(file.filename or "upload.pdf").name  # 去除路徑成分
+    if not name.lower().endswith(".pdf"):
+        raise HTTPException(422, "僅接受 PDF")
+    dest = PID_DIR / name
+    dest.write_bytes(await file.read())
+    return {"ok": True, "name": name, "size": dest.stat().st_size}
+
+
+@app.get("/api/pid/list")
+def pid_list() -> list:
+    return [
+        {"name": p.name, "size": p.stat().st_size}
+        for p in sorted(PID_DIR.glob("*.pdf"))
+    ]
+
+
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 app.mount("/scans", StaticFiles(directory=SCANS_DIR), name="scans")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-
-@app.get("/")
-def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+# ------------------------------------------------------------------ 頁面路由
+PAGES = {
+    "/": "home.html",          # 平台首頁（產品導航）
+    "/twin": "index.html",     # 產品3：3D 數位孿生檢視
+    "/twin/editor": "editor.html",  # 產品3：3D 模塊編輯器
+    "/twin/pid": "pid.html",   # 產品3：P&ID 管理
+    "/data": "data.html",      # 產品2：資料前處理
+}
+for route, fname in PAGES.items():
+    def _page(fname=fname) -> FileResponse:
+        return FileResponse(STATIC_DIR / fname)
+    app.get(route)(_page)

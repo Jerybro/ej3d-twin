@@ -34,6 +34,13 @@ html, body {
   z-index: 30;
 }
 .brand { display: flex; align-items: baseline; gap: 10px; }
+.brand-home {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 6px; align-self: center;
+  background: rgba(70, 194, 224, 0.15); border: 1px solid var(--panel-border);
+  color: var(--accent); font-size: 11px; font-weight: 700; text-decoration: none;
+}
+.brand-home:hover { background: rgba(70, 194, 224, 0.3); }
 .brand-mark {
   font-weight: 700; font-size: 18px; letter-spacing: 0.5px;
   background: linear-gradient(90deg, var(--accent), #7ee2f5);

@@ -7,235 +7,319 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #0e141b; --panel: #131b24; --panel2: #17212c;
-      --bdr: #223140; --accent: #46c2e0; --accent-deep: #1f6ea8;
-      --text: #dbe5ee; --dim: #8ba0b3; --warn: #ffaa3c; --danger: #ff4d4f; --ok: #35e08c;
+      --bg: #f4f6f8; --panel: #ffffff; --panel2: #f0f3f6;
+      --bdr: #dde4ea; --accent: #3b82d6; --accent-soft: #74a8e8;
+      --text: #1c2733; --dim: #6b7c8c; --warn: #d97706; --danger: #dc2626; --ok: #16a34a;
+      --shadow: 0 1px 3px rgba(16,32,48,0.08);
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; background: var(--bg); color: var(--text);
-      font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", sans-serif; font-size: 14px; overflow: hidden; }
-    .layout { display: flex; height: 100vh; }
-    aside.left {
-      width: 264px; flex-shrink: 0; border-right: 1px solid var(--bdr);
-      padding: 14px; overflow-y: auto; background: var(--panel);
+      font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", sans-serif; font-size: 14px; }
+    button { font-family: inherit; }
+
+    /* ---------- 頂導航 ---------- */
+    #topnav {
+      display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 48px;
+      background: var(--panel); border-bottom: 1px solid var(--bdr);
     }
-    .head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
     .brand-home {
       display: inline-flex; align-items: center; justify-content: center;
       width: 26px; height: 26px; border-radius: 6px;
-      background: rgba(70, 194, 224, 0.15); border: 1px solid var(--bdr);
+      background: #e8f0fa; border: 1px solid var(--bdr);
       color: var(--accent); font-size: 11px; font-weight: 700; text-decoration: none;
     }
-    h1 { font-size: 15px; font-weight: 700; }
-    .section-title { font-size: 11px; font-weight: 700; color: var(--accent);
-      letter-spacing: 1px; margin: 14px 0 8px; }
+    #ds-name { font-weight: 600; font-size: 14px; max-width: 220px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nav-tab {
+      padding: 6px 10px; border: none; background: none; cursor: pointer;
+      font-size: 13.5px; color: var(--dim); border-radius: 6px;
+    }
+    .nav-tab:hover { background: var(--panel2); }
+    .nav-tab.active { color: var(--accent); font-weight: 600; }
+    .spacer { flex: 1; }
+
+    /* ---------- 次導航 ---------- */
+    #subnav {
+      display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    }
+    #count-chip { font-size: 13px; color: var(--text); font-weight: 500; }
+    select.ctl, .ctl-btn {
+      padding: 6px 12px; border-radius: 7px; border: 1px solid var(--bdr);
+      background: var(--panel); color: var(--text); font-size: 13px; cursor: pointer;
+    }
+    .ctl-btn:hover, select.ctl:hover { border-color: var(--accent-soft); }
+    .ctl-btn.primary { color: var(--accent); font-weight: 500; }
+
+    /* ---------- 上傳頁 ---------- */
+    #upload-view { max-width: 660px; margin: 60px auto; padding: 0 20px; }
     .drop {
-      border: 1.5px dashed var(--bdr); border-radius: 10px; padding: 14px;
-      text-align: center; color: var(--dim); font-size: 12.5px; cursor: pointer;
+      border: 2px dashed var(--bdr); border-radius: 14px; padding: 44px;
+      text-align: center; color: var(--dim); font-size: 14px; cursor: pointer;
+      background: var(--panel); display: block;
     }
     .drop:hover, .drop.over { border-color: var(--accent); color: var(--text); }
     .drop input { display: none; }
-    #file-meta { font-size: 12px; color: var(--dim); margin-top: 8px; line-height: 1.6; }
-    #col-search {
-      width: 100%; padding: 6px 9px; border-radius: 7px; margin-bottom: 6px;
-      background: var(--bg); border: 1px solid var(--bdr); color: var(--text);
-      font-family: inherit; font-size: 12.5px;
+    .format-card {
+      margin-top: 18px; background: var(--panel); border: 1px solid var(--bdr);
+      border-radius: 12px; padding: 18px 20px; box-shadow: var(--shadow);
     }
-    .col-item {
-      display: flex; align-items: center; gap: 7px; padding: 5px 6px;
-      border-radius: 6px; font-size: 12.5px;
+    .format-card h3 { font-size: 13px; color: var(--accent); margin-bottom: 10px; letter-spacing: 0.5px; }
+    .format-card ul { margin: 0 0 12px 18px; color: var(--dim); font-size: 13px; line-height: 1.9; }
+    .format-card table { border-collapse: collapse; font-size: 12px; }
+    .format-card td, .format-card th { border: 1px solid var(--bdr); padding: 4px 10px; }
+    .format-card th { background: var(--panel2); font-weight: 600; }
+    #upload-err { color: var(--danger); font-size: 13px; margin-top: 12px; line-height: 1.7; display: none; }
+
+    /* ---------- 卡片牆 ---------- */
+    #main-area { padding: 0 16px 20px; }
+    #card-wall { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    @media (max-width: 1100px) { #card-wall { grid-template-columns: repeat(2, 1fr); } }
+    .card {
+      background: var(--panel); border: 1px solid var(--bdr); border-radius: 10px;
+      box-shadow: var(--shadow); overflow: visible;
     }
-    .col-item:hover { background: rgba(70, 194, 224, 0.08); }
-    .col-item input { accent-color: var(--accent); flex-shrink: 0; }
-    .col-item .cname { cursor: pointer; overflow: hidden; text-overflow: ellipsis;
-      white-space: nowrap; flex: 1; }
-    .col-item .cname:hover { color: var(--accent); }
-    .col-item.is-hidden .cname { text-decoration: line-through; color: var(--dim); }
-    .col-item .warn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex-shrink: 0; }
-    .col-item .hide-btn { color: var(--dim); font-size: 10.5px; cursor: pointer; flex-shrink: 0; }
-    .col-item .hide-btn:hover { color: var(--text); }
-    main.center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-    #toolbar {
-      display: flex; align-items: center; gap: 8px; padding: 10px 14px;
-      border-bottom: 1px solid var(--bdr); background: var(--panel);
+    .card-head {
+      display: flex; align-items: center; padding: 10px 12px 0;
     }
-    .tbtn {
-      padding: 6px 13px; border-radius: 7px; cursor: pointer; font-family: inherit;
-      background: var(--panel2); border: 1px solid var(--bdr); color: var(--text); font-size: 12.5px;
+    .card-title { font-size: 13px; font-weight: 600; flex: 1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .card-icons { display: flex; gap: 2px; }
+    .cicon {
+      width: 24px; height: 24px; border: none; background: none; cursor: pointer;
+      color: var(--dim); border-radius: 5px; font-size: 13px;
+      display: inline-flex; align-items: center; justify-content: center;
     }
-    .tbtn:hover { border-color: var(--accent); }
-    .tbtn.warn { border-color: rgba(255, 170, 60, 0.5); color: var(--warn); }
-    .tbtn:disabled { opacity: 0.4; pointer-events: none; }
-    #stat-chip { margin-left: auto; font-size: 12px; color: var(--dim); }
-    #stat-chip b { color: var(--ok); }
-    #chart-wrap { flex: 1; position: relative; min-height: 0; }
-    #chart { width: 100%; height: 100%; display: block; cursor: crosshair; }
-    #chart-hint { position: absolute; top: 10px; left: 14px; font-size: 12px; color: var(--dim);
-      background: rgba(14,20,27,0.8); padding: 4px 10px; border-radius: 8px; }
-    #detail-wrap { height: 220px; border-top: 1px solid var(--bdr); position: relative; flex-shrink: 0; }
-    #detail { width: 100%; height: 100%; display: block; }
-    #detail-title { position: absolute; top: 8px; left: 14px; font-size: 12px; color: var(--dim); }
-    aside.right {
-      width: 330px; flex-shrink: 0; border-left: 1px solid var(--bdr);
-      background: var(--panel); display: flex; flex-direction: column;
+    .cicon:hover { background: var(--panel2); color: var(--text); }
+    .card-type { padding: 2px 12px 6px; font-size: 11.5px; color: var(--dim); }
+    .card-body { position: relative; height: 190px; }
+    .card-body canvas { width: 100%; height: 100%; display: block; }
+
+    /* 卡片 popover */
+    .popover {
+      position: absolute; top: 30px; right: 6px; z-index: 40; width: 260px;
+      background: var(--panel); border: 1px solid var(--bdr); border-radius: 10px;
+      box-shadow: 0 8px 28px rgba(16,32,48,0.18); padding: 12px;
     }
-    .tabs { display: flex; border-bottom: 1px solid var(--bdr); }
-    .tab {
-      flex: 1; padding: 10px 0; text-align: center; cursor: pointer;
-      font-size: 12.5px; color: var(--dim); border-bottom: 2px solid transparent;
+    .pop-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+    .pop-tab {
+      flex: 1; padding: 5px 0; border: none; background: var(--panel2);
+      border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--dim);
     }
-    .tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
-    .tab-body { flex: 1; overflow-y: auto; padding: 12px; display: none; }
-    .tab-body.show { display: block; }
-    .step-row {
-      display: flex; align-items: center; gap: 8px;
-      background: var(--panel2); border: 1px solid var(--bdr); border-radius: 8px;
-      padding: 8px 10px; margin-bottom: 6px; font-size: 12.5px;
+    .pop-tab.active { background: #e8f0fa; color: var(--accent); font-weight: 600; }
+    .popover label { font-size: 11.5px; color: var(--dim); display: block; margin: 7px 0 3px; }
+    .popover input, .popover select {
+      width: 100%; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--bdr);
+      font-size: 12.5px; font-family: inherit;
     }
-    .step-row.off { opacity: 0.45; }
-    .step-row input[type="checkbox"] { accent-color: var(--accent); }
-    .step-row .lbl { flex: 1; line-height: 1.4; }
-    .step-row .hits { color: var(--warn); font-size: 11.5px; white-space: nowrap; }
-    .step-row .del { color: var(--danger); cursor: pointer; font-size: 12px; }
-    .rule-row {
-      background: var(--panel2); border: 1px solid var(--bdr); border-radius: 8px;
-      padding: 10px; margin-bottom: 8px; font-size: 12.5px;
+    .pop-actions { display: flex; gap: 6px; margin-top: 10px; }
+    .pop-actions button {
+      flex: 1; padding: 6px 0; border-radius: 7px; cursor: pointer; font-size: 12.5px;
+      border: 1px solid var(--bdr); background: var(--panel);
     }
-    .rule-row select, .rule-row input, select.mini, input.mini {
-      width: 100%; margin-top: 5px; padding: 5px 8px; border-radius: 6px;
-      background: var(--bg); border: 1px solid var(--bdr); color: var(--text);
-      font-family: inherit; font-size: 12.5px;
+    .pop-actions .save { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
+
+    /* ---------- 資料集表格 ---------- */
+    #table-wrap { background: var(--panel); border: 1px solid var(--bdr);
+      border-radius: 10px; overflow: auto; box-shadow: var(--shadow); }
+    #ds-table { border-collapse: collapse; font-size: 12.5px; width: max-content; min-width: 100%; }
+    #ds-table th {
+      text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--bdr);
+      background: var(--panel2); position: sticky; top: 0; min-width: 110px;
     }
-    .rule-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-    select.mini, input.mini { margin: 0 0 7px; }
-    .hint { font-size: 11.5px; color: var(--dim); line-height: 1.7; margin-top: 8px; }
-    #corr-grid { display: grid; gap: 1px; font-size: 10px; }
-    .corr-cell { aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
-      border-radius: 2px; color: rgba(255,255,255,0.85); }
-    .corr-label { font-size: 10px; color: var(--dim); overflow: hidden; white-space: nowrap;
-      display: flex; align-items: center; padding: 0 2px; }
-    .health-item { background: var(--panel2); border: 1px solid rgba(255,170,60,0.4);
-      border-radius: 8px; padding: 9px 11px; margin-bottom: 6px; font-size: 12.5px; }
-    .health-item b { color: var(--warn); }
-    .health-item .w { color: var(--dim); font-size: 11.5px; line-height: 1.6; }
+    #ds-table th .tname { font-weight: 600; font-size: 12.5px; }
+    #ds-table th .ttype { font-weight: 400; font-size: 10.5px; color: var(--dim); margin-top: 2px; }
+    #ds-table td { padding: 7px 14px; border-bottom: 1px solid #edf1f5; white-space: nowrap; }
+    #ds-table tr:hover td { background: #f7fafc; }
+
+    /* 分頁 */
+    .pager { display: flex; align-items: center; gap: 6px; padding: 12px 0; justify-content: center; }
+    .pager button {
+      padding: 5px 11px; border-radius: 6px; border: 1px solid var(--bdr);
+      background: var(--panel); cursor: pointer; font-size: 12.5px;
+    }
+    .pager button:disabled { opacity: 0.4; pointer-events: none; }
+    .pager .pinfo { font-size: 12.5px; color: var(--dim); margin: 0 8px; }
+
+    /* ---------- 右側 drawer ---------- */
+    #drawer {
+      position: fixed; top: 0; right: -380px; width: 380px; height: 100vh; z-index: 50;
+      background: var(--panel); border-left: 1px solid var(--bdr);
+      box-shadow: -4px 0 24px rgba(16,32,48,0.10); transition: right 0.25s;
+      display: flex; flex-direction: column;
+    }
+    #drawer.open { right: 0; }
+    .drawer-tabs { display: flex; border-bottom: 1px solid var(--bdr); }
+    .dtab {
+      flex: 1; padding: 13px 0; text-align: center; border: none; background: none;
+      cursor: pointer; font-size: 13px; color: var(--dim); border-bottom: 2px solid transparent;
+    }
+    .dtab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+    .dbody { flex: 1; overflow-y: auto; padding: 14px; display: none; }
+    .dbody.show { display: block; }
+    .hist-node {
+      border: 1px solid var(--bdr); border-radius: 9px; padding: 10px 12px;
+      margin-bottom: 8px; font-size: 12.5px; background: var(--panel);
+    }
+    .hist-node.origin { background: var(--panel2); }
+    .hist-node .n-title { font-weight: 600; }
+    .hist-node .n-meta { color: var(--dim); font-size: 11.5px; margin-top: 3px; line-height: 1.6; }
+    .hist-node .n-row { display: flex; align-items: center; gap: 8px; }
+    .hist-node.off { opacity: 0.45; }
+    .hist-node input[type="checkbox"] { accent-color: var(--accent); }
+    .hist-node .del { margin-left: auto; color: var(--danger); cursor: pointer; font-size: 11.5px; }
+    .col-row { display: flex; align-items: center; gap: 8px; padding: 5px 4px;
+      font-size: 12.5px; border-radius: 6px; }
+    .col-row:hover { background: var(--panel2); }
+    .col-row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .col-row.hid .nm { text-decoration: line-through; color: var(--dim); }
+    .col-row .act { color: var(--accent); cursor: pointer; font-size: 11.5px; }
+    input.search {
+      width: 100%; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--bdr);
+      font-size: 12.5px; margin-bottom: 8px; font-family: inherit;
+    }
+    .mini { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--bdr);
+      font-size: 12.5px; margin-bottom: 7px; font-family: inherit; }
+    .dbtn { width: 100%; padding: 7px 0; border-radius: 7px; cursor: pointer; font-size: 12.5px;
+      border: 1px solid var(--bdr); background: var(--panel); margin-bottom: 6px; }
+    .dbtn:hover { border-color: var(--accent-soft); }
     .props-result { font-size: 12.5px; background: var(--panel2); border: 1px solid var(--bdr);
-      border-radius: 8px; padding: 10px; margin-top: 10px; line-height: 1.8; }
+      border-radius: 8px; padding: 10px; margin-top: 8px; line-height: 1.8; }
     .props-result .bad { color: var(--danger); font-weight: 700; }
     .props-result .good { color: var(--ok); font-weight: 700; }
+    .hint { font-size: 11.5px; color: var(--dim); line-height: 1.7; }
+
+    /* 更多選單 */
+    #more-menu {
+      position: absolute; top: 42px; right: 16px; z-index: 45; width: 250px;
+      background: var(--panel); border: 1px solid var(--bdr); border-radius: 10px;
+      box-shadow: 0 8px 28px rgba(16,32,48,0.16); padding: 8px; display: none;
+    }
+    #more-menu.open { display: block; }
+    #more-menu .mh { font-size: 11px; color: var(--dim); padding: 6px 10px 3px; letter-spacing: 0.5px; }
+    #more-menu button {
+      display: block; width: 100%; text-align: left; padding: 8px 10px;
+      border: none; background: none; cursor: pointer; font-size: 13px; border-radius: 6px;
+    }
+    #more-menu button:hover { background: var(--panel2); }
+    #more-menu hr { border: none; border-top: 1px solid var(--bdr); margin: 6px 0; }
+
+    /* 放大 modal */
+    #zoom-modal {
+      position: fixed; inset: 0; z-index: 60; background: rgba(16,32,48,0.45);
+      display: none; align-items: center; justify-content: center;
+    }
+    #zoom-modal.open { display: flex; }
+    .zoom-box { width: min(860px, 92vw); background: var(--panel); border-radius: 14px;
+      padding: 20px; box-shadow: 0 16px 60px rgba(0,0,0,0.3); }
+    .zoom-box h3 { font-size: 15px; margin-bottom: 12px; }
+    .zoom-box canvas { width: 100%; height: 420px; display: block; }
+    .zoom-close { float: right; border: none; background: none; font-size: 18px;
+      cursor: pointer; color: var(--dim); }
   </style>
 </head>
 <body>
-  <div class="layout">
-    <aside class="left">
-      <div class="head">
-        <a class="brand-home" href="/" title="回平台首頁">EJ</a>
-        <h1>資料前處理</h1>
-      </div>
-      <label class="drop" id="drop">
-        點擊或拖放 CSV / Excel
-        <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.xlsm" />
-      </label>
-      <div id="file-meta"></div>
-      <div class="section-title">欄位（勾選繪圖・點名稱看分布）</div>
-      <input id="col-search" placeholder="搜尋欄位…" style="display:none" />
-      <div id="col-list"><span style="color:var(--dim);font-size:12px">先上傳資料</span></div>
-    </aside>
+  <header id="topnav">
+    <a class="brand-home" href="/" title="回平台首頁">EJ</a>
+    <span id="ds-name">資料前處理</span>
+    <button class="nav-tab" data-view="dataset">資料集</button>
+    <button class="nav-tab active" data-view="explore">探索分析</button>
+    <span class="spacer"></span>
+    <button class="ctl-btn" id="btn-more">更多</button>
+  </header>
 
-    <main class="center">
-      <div id="toolbar">
-        <button class="tbtn warn" id="btn-exclude" disabled>剔除圈選</button>
-        <button class="tbtn" id="btn-clear-sel" disabled>取消選取</button>
-        <button class="tbtn" id="btn-report" disabled>分析報表</button>
-        <button class="tbtn" id="btn-export" disabled>匯出 CSV</button>
-        <span id="stat-chip">—</span>
-      </div>
-      <div id="chart-wrap">
-        <canvas id="chart"></canvas>
-        <span id="chart-hint">上傳資料並勾選欄位；拖曳框選資料點後可剔除（記入編輯歷程）</span>
-      </div>
-      <div id="detail-wrap">
-        <canvas id="detail"></canvas>
-        <span id="detail-title">點欄位名稱看單變量分布；「圖表」頁可畫雙變量</span>
-      </div>
-    </main>
-
-    <aside class="right">
-      <div class="tabs">
-        <div class="tab active" data-tab="steps">編輯歷程</div>
-        <div class="tab" data-tab="chart2">圖表</div>
-        <div class="tab" data-tab="analysis">分析</div>
-        <div class="tab" data-tab="props">物性</div>
-      </div>
-
-      <div class="tab-body show" id="tab-steps">
-        <div id="step-list"><span class="hint">清理動作會記錄於此，可個別停用還原</span></div>
-        <div class="section-title">新增清理規則</div>
-        <div class="rule-row" id="rule-editor">
-          <select id="rule-kind">
-            <option value="range">值域（停機/冷態）</option>
-            <option value="jump">跳變・絕對值</option>
-            <option value="jump_pct">跳變・百分比</option>
-            <option value="quantile">分位離群</option>
-            <option value="flatline">凍結值（連續等值）</option>
-          </select>
-          <select id="rule-col"><option value="">欄位…</option></select>
-          <div class="rule-grid" id="rule-params"></div>
-          <button class="tbtn" id="btn-add-rule" style="width:100%;margin-top:8px" disabled>加入歷程</button>
-        </div>
-        <div class="section-title">時間聚合</div>
-        <div class="rule-row">
-          <select id="agg-freq">
-            <option value="">解析度…</option>
-            <option value="1h">每小時</option><option value="1D">每日</option>
-            <option value="1W">每週</option><option value="1ME">每月</option>
-          </select>
-          <select id="agg-fn"><option value="mean">平均 Mean</option><option value="sum">總和 Sum</option>
-            <option value="max">最大</option><option value="min">最小</option></select>
-          <button class="tbtn" id="btn-agg" style="width:100%;margin-top:8px" disabled>加入聚合</button>
-        </div>
-      </div>
-
-      <div class="tab-body" id="tab-chart2">
-        <div class="section-title">雙變量圖（自動選型）</div>
-        <select class="mini" id="bi-x"><option value="">X 欄位…</option></select>
-        <select class="mini" id="bi-y"><option value="">Y 欄位…</option></select>
-        <button class="tbtn" id="btn-bi" style="width:100%" disabled>繪製（顯示於下方圖區）</button>
-        <p class="hint">數值×數值→散佈圖、類別×數值→箱型圖（Tukey 自動選型同款）。</p>
-      </div>
-
-      <div class="tab-body" id="tab-analysis">
-        <div class="section-title">相關分析</div>
-        <select class="mini" id="corr-method">
-          <option value="pearson">Pearson</option>
-          <option value="spearman">Spearman</option>
-          <option value="kendall">Kendall</option>
-        </select>
-        <button class="tbtn" id="btn-corr" style="width:100%" disabled>計算（勾選欄位）</button>
-        <div id="corr-out" style="margin-top:10px"></div>
-        <div class="section-title">資料健檢</div>
-        <button class="tbtn" id="btn-health" style="width:100%" disabled>執行健檢</button>
-        <div id="health-out" style="margin-top:10px"></div>
-        <p class="hint">判準：ID-ness（不重複值>20%）、大量重複（>75%）、大量遺失（>30%）——
-          有警告的欄位不建議作自變數。</p>
-      </div>
-
-      <div class="tab-body" id="tab-props">
-        <p class="hint" style="margin:0 0 10px">CoolProp 物性引擎：合理性檢查標記超出
-          物性邊界的數據（記入編輯歷程），並可推算物性欄位。</p>
-        <select class="mini" id="props-fluid"></select>
-        <select class="mini" id="props-tcol"><option value="">溫度欄位…</option></select>
-        <select class="mini" id="props-tunit"><option value="C">°C</option><option value="K">K</option></select>
-        <select class="mini" id="props-pcol"><option value="">壓力欄位（選填）…</option></select>
-        <select class="mini" id="props-punit">
-          <option value="kgcm2">kg/cm²g</option><option value="bar">bar</option>
-          <option value="kPa">kPa</option><option value="Pa">Pa</option>
-        </select>
-        <button class="tbtn" id="btn-props-check" style="width:100%;margin-bottom:6px" disabled>物理合理性檢查</button>
-        <button class="tbtn" id="btn-props-derive" style="width:100%" disabled>推算物性欄位</button>
-        <div id="props-out"></div>
-      </div>
-    </aside>
+  <div id="more-menu">
+    <div class="mh">資料萃取樣板</div>
+    <button id="mm-template-dl">下載篩選歷程樣板</button>
+    <button id="mm-template-up">套用樣板（複用歷程）</button>
+    <hr>
+    <div class="mh">下載資料集</div>
+    <button id="mm-export">下載最新篩選資料集</button>
+    <button id="mm-export-raw">下載原始資料集</button>
+    <hr>
+    <div class="mh">下載資料報表</div>
+    <button id="mm-report">下載分析報表</button>
+    <hr>
+    <button id="mm-new">上傳新資料集</button>
   </div>
+
+  <nav id="subnav" style="display:none">
+    <span id="count-chip">—</span>
+    <select class="ctl" id="target-select">
+      <option value="">選擇預測目標進行二維分析</option>
+    </select>
+    <span class="spacer"></span>
+    <button class="ctl-btn primary" id="btn-drawer">資料預處理</button>
+  </nav>
+
+  <div id="upload-view">
+    <label class="drop" id="drop">
+      點擊或拖放上傳 CSV / Excel 資料集
+      <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.xlsm" />
+    </label>
+    <div id="upload-err"></div>
+    <div class="format-card">
+      <h3>上傳格式規定</h3>
+      <ul>
+        <li>CSV（UTF-8）或 Excel，檔案上限 50 MB，第一列為欄位名稱</li>
+        <li>必須包含一個<b>時間欄</b>（建議命名 time，ISO 格式：2025-06-01 00:00:00）</li>
+        <li>其餘欄位為數值型 tag（PI 位號），至少一欄；系統自動加入 __id__ 流水欄</li>
+      </ul>
+      <table>
+        <tr><th>time</th><th>8AR1_FIC70005</th><th>8AR1_TIC70016</th><th>…</th></tr>
+        <tr><td>2025-06-01 00:00:00</td><td>320.37</td><td>94.98</td><td>…</td></tr>
+        <tr><td>2025-06-01 01:00:00</td><td>320.45</td><td>94.99</td><td>…</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <main id="main-area" style="display:none">
+    <div id="explore-view">
+      <div id="card-wall"></div>
+      <div class="pager" id="wall-pager"></div>
+    </div>
+    <div id="dataset-view" style="display:none">
+      <div id="table-wrap"><table id="ds-table"></table></div>
+      <div class="pager" id="table-pager"></div>
+    </div>
+  </main>
+
+  <aside id="drawer">
+    <div class="drawer-tabs">
+      <button class="dtab active" data-d="history">專案編輯歷程</button>
+      <button class="dtab" data-d="editor">資料編輯器</button>
+      <button class="dtab" data-d="props">物性模組</button>
+    </div>
+    <div class="dbody show" id="d-history"></div>
+    <div class="dbody" id="d-editor">
+      <input class="search" id="col-search" placeholder="搜尋欄位…" />
+      <div id="col-mgr"></div>
+    </div>
+    <div class="dbody" id="d-props">
+      <p class="hint" style="margin-bottom:10px">CoolProp 物性引擎：物理合理性檢查
+        （超出物性邊界標記為清理步驟＝AI 外插柵欄）與物性欄位推算。</p>
+      <select class="mini" id="props-fluid"></select>
+      <select class="mini" id="props-tcol"><option value="">溫度欄位…</option></select>
+      <select class="mini" id="props-tunit"><option value="C">°C</option><option value="K">K</option></select>
+      <select class="mini" id="props-pcol"><option value="">壓力欄位（選填）…</option></select>
+      <select class="mini" id="props-punit">
+        <option value="kgcm2">kg/cm²g</option><option value="bar">bar</option>
+        <option value="kPa">kPa</option><option value="Pa">Pa</option>
+      </select>
+      <button class="dbtn" id="btn-props-check">物理合理性檢查</button>
+      <button class="dbtn" id="btn-props-derive">推算物性欄位</button>
+      <div id="props-out"></div>
+    </div>
+  </aside>
+
+  <div id="zoom-modal">
+    <div class="zoom-box">
+      <button class="zoom-close" id="zoom-close">×</button>
+      <h3 id="zoom-title"></h3>
+      <canvas id="zoom-canvas"></canvas>
+    </div>
+  </div>
+
+  <input type="file" id="template-input" accept=".json" style="display:none" />
   <script type="module" src="/static/js/data.js"></script>
 </body>
 </html>

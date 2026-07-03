@@ -298,6 +298,14 @@
     .md-chart.wide { grid-column: 1 / -1; }
     .md-chart h4 { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 8px; }
     .md-chart canvas { width: 100%; height: 300px; display: block; }
+    /* PHM 摘要卡 */
+    .sum-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 18px; }
+    .sum-card { border: 1px solid var(--bdr); border-radius: 8px; padding: 16px 20px; background: var(--white); }
+    .sum-card .sc-label { font-size: 13px; color: var(--text2); }
+    .sum-card .sc-big { font-size: 40px; font-weight: 600; line-height: 1.25;
+      font-variant-numeric: tabular-nums; }
+    .sum-card .sc-sub { font-size: 12.5px; color: var(--text2); }
+    .md-chart h4 .fdc-pick { float: right; width: auto; margin: -4px 0 0; font-size: 13px; }
     .md-app { margin-top: 16px; border: 1px solid var(--bdr); border-radius: 8px; padding: 14px 18px; }
     .md-app summary { font-size: 15px; font-weight: 500; color: var(--text); cursor: pointer; }
     .md-app summary:hover { color: var(--blue); }

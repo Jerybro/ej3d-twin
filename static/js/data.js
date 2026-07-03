@@ -715,7 +715,7 @@ async function openZoom(col) {
   $('zoom-modal').querySelector('.zl-bar').style.background =
     `linear-gradient(90deg, rgb(${lo.join(',')}), rgb(${hi.join(',')}))`;
   $('zoom-modal').classList.add('open');
-  requestAnimationFrame(() => drawCard($('zoom-canvas'), card, true));
+  drawCard($('zoom-canvas'), card, true);   // 同步繪製（rAF 在背景分頁不觸發）
 }
 bindBrush($('zoom-canvas'));
 $('zoom-close').addEventListener('click', () => $('zoom-modal').classList.remove('open'));
@@ -868,13 +868,14 @@ async function renderModels() {
 const METRIC_HEADS = {
   regression: ['RMSE', 'MAE', 'MAAPE', 'R²'],
   classification: ['Accuracy', 'F1', 'Precision', 'Recall'],
-  anomaly: ['風險門檻', '超標 %', '平均風險', '最大風險'],
+  anomaly: ['健康分數', '風險門檻', '超標 %', '事件數'],
 };
 const metricVals = (mt, kind) => kind === 'classification'
   ? [mt.accuracy, mt.f1, mt.precision, mt.recall]
   : kind === 'anomaly'
-    ? [mt.threshold, `${mt.exceed_pct}%`, mt.mean_risk, mt.max_risk]
+    ? [mt.health_now, mt.threshold, `${mt.exceed_pct}%`, mt.n_events]
     : [mt.rmse, mt.mae, mt.maape, mt.r2];
+const healthColor = (s) => s >= 70 ? 'var(--ok)' : s >= 40 ? '#D97706' : 'var(--danger)';
 const metricRow = (label, mt, kind) => `<tr><td>${label}</td>${
   metricVals(mt, kind === true ? 'classification' : kind || 'regression')
     .map((v) => `<td>${v}</td>`).join('')}</tr>`;
@@ -901,16 +902,50 @@ async function openModelDetail(mid) {
       <div class="md-chart"><h4>混淆矩陣 Confusion Matrix（驗證集）</h4><canvas id="md-cm"></canvas></div>
       <div class="md-chart"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>` : isTs ? `
       <div class="md-chart wide"><h4>時序預測——訓練脈絡＋外推 vs 實際</h4><canvas id="md-ts"></canvas></div>` : isAn ? `
-      <div class="md-chart wide"><h4>風險值監控——健康基準風險值＋門檻</h4><canvas id="md-risk"></canvas></div>
+      <div class="md-chart wide"><h4>健康分數趨勢（0–100）</h4><canvas id="md-health"></canvas></div>
+      <div class="md-chart wide"><h4><span>FDC 關鍵感測器管制圖（SPC）</span>
+        <select class="mini fdc-pick" id="fdc-sel"></select></h4><canvas id="md-fdc"></canvas></div>
+      <div class="md-chart wide"><h4>風險值監控——風險值＋門檻</h4><canvas id="md-risk"></canvas></div>
       <div class="md-chart wide"><h4>風險貢獻度——超標點各感測器偏離程度</h4><canvas id="md-fi"></canvas></div>` : `
       <div class="md-chart"><h4>模型準確度 Actual – Predicted</h4><canvas id="md-pa"></canvas></div>
       <div class="md-chart"><h4>模型準確度 Actual – Error</h4><canvas id="md-err"></canvas></div>
       <div class="md-chart wide"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>`;
+  // PHM 摘要卡（Tukey PHM Edge 同款：健康分數/故障事件/超標率）
+  const mcv = m.metrics_cv ?? {};
+  const sumCards = isAn ? `
+    <div class="sum-cards">
+      <div class="sum-card">
+        <div class="sc-label">AI 健康分數（近期）</div>
+        <div class="sc-big" style="color:${healthColor(mcv.health_now ?? 0)}">${mcv.health_now ?? '—'}</div>
+        <div class="sc-sub">${(mcv.health_now ?? 0) >= 70 ? '正常' : (mcv.health_now ?? 0) >= 40 ? '注意' : '危急'}｜0–100</div>
+      </div>
+      <div class="sum-card">
+        <div class="sc-label">故障事件</div>
+        <div class="sc-big" style="color:${(mcv.n_events ?? 0) ? 'var(--danger)' : 'var(--ok)'}">${mcv.n_events ?? 0}</div>
+        <div class="sc-sub">連續超標段（依峰值排序）</div>
+      </div>
+      <div class="sum-card">
+        <div class="sc-label">超標比例</div>
+        <div class="sc-big">${mcv.exceed_pct ?? '—'}%</div>
+        <div class="sc-sub">風險門檻 ${mcv.threshold ?? '—'}</div>
+      </div>
+    </div>` : '';
+  // 故障事件列表（Tukey：FDC 管制圖下方整合型故障事件列表）
+  const fmtEvT = (s) => new Date(s * 1000).toLocaleString('sv').slice(0, 16);
+  const eventsTable = isAn && m.events?.length ? `
+    <div class="md-chart wide" style="margin-top:20px"><h4>整合型故障事件列表</h4>
+      <table class="md-metrics" style="margin:0;width:100%">
+        <tr><th>開始</th><th>結束</th><th>持續（筆）</th><th>峰值風險</th><th>最低健康</th><th>主導感測器</th></tr>
+        ${m.events.map((e) => `<tr><td>${fmtEvT(e.t_start)}</td><td>${fmtEvT(e.t_end)}</td>
+          <td>${e.n}</td><td>${e.peak_risk}</td>
+          <td style="color:${healthColor(e.min_health)}">${e.min_health}</td><td>${e.top_sensor}</td></tr>`).join('')}
+      </table></div>` : '';
   const taskName = cls ? '分類' : isTs ? '時序預測（單變量）' : isAn ? '設備異常偵測（無監督）' : '迴歸';
   $('model-detail').innerHTML = `
     <h3>${m.name}</h3>
     <div class="md-sub">${algoName}｜${taskName}｜訓練資料 ${m.n_rows.toLocaleString()} 筆｜目標 ${m.target}</div>
     ${tuned}
+    ${sumCards}
     <table class="md-metrics">
       <tr><th>模型指標</th>${heads.map((h) => `<th>${h}</th>`).join('')}</tr>
       ${isAn ? metricRow(m.val_desc ?? '健康基準', m.metrics_cv, kind)
@@ -918,6 +953,7 @@ async function openModelDetail(mid) {
       <tbody id="ev-metric-row"></tbody>
     </table>
     <div class="md-charts">${charts}</div>
+    ${eventsTable}
     ${isAn ? `
     <details class="md-app" id="app-thresh">
       <summary>風險值門檻試算——為異常偵測模型計算合理門檻</summary>
@@ -968,17 +1004,29 @@ async function openModelDetail(mid) {
       <div id="opt-out"></div>
     </details>`}`;
   $('model-detail').style.display = '';
-  requestAnimationFrame(() => {
+  // 同步繪製（rAF 在背景分頁不會觸發，會整頁空圖）
+  (() => {
+    try {
     if (cls) drawCM($('md-cm'), m.plots.cm.labels, m.plots.cm.matrix);
     else if (isTs) drawTSF($('md-ts'), m.plots.tsf);
-    else if (isAn) drawRisk($('md-risk'), m.plots.risk);
-    else {
+    else if (isAn) {
+      if (m.plots.health) drawHealth($('md-health'), m.plots.health);
+      drawRisk($('md-risk'), m.plots.risk);
+      const fdc = m.plots.fdc;
+      if (fdc?.cols?.length) {
+        $('fdc-sel').innerHTML = fdc.cols.map((c, i) => `<option value="${i}">${c.name}</option>`).join('');
+        const drawSel = () => drawFDC($('md-fdc'), fdc.t, fdc.cols[+$('fdc-sel').value]);
+        $('fdc-sel').onchange = drawSel;
+        drawSel();
+      }
+    } else {
       drawXY($('md-pa'), m.plots.pa.actual, m.plots.pa.pred, '實際值', '預測值', true);
       drawXY($('md-err'), m.plots.err.actual, m.plots.err.error, '實際值', '誤差值', false, true);
     }
     if (m.plots.fi && $('md-fi')) drawFI($('md-fi'), m.plots.fi.names, m.plots.fi.values);
     if (m.evaluation) renderEvaluation(m, m.evaluation);
-  });
+    } catch (e) { console.error('detail charts:', e); }
+  })();
   bindModelApps(m);
   $('model-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -1000,11 +1048,99 @@ function renderEvaluation(m, ev) {
       cls ? '混淆矩陣（現行視圖）' : isTs ? '時序預測 vs 實際（現行視圖）'
         : isAn ? '風險值監控（現行視圖）' : 'Actual – Predicted（現行視圖）'}</h4>
       <canvas id="ev-chart"></canvas></div>`;
-  requestAnimationFrame(() => {
-    if (cls) drawCM($('ev-chart'), ev.cm.labels, ev.cm.matrix);
-    else if (isTs) drawTSF($('ev-chart'), ev.tsf);
-    else if (isAn) drawRisk($('ev-chart'), ev.risk);
-    else drawXY($('ev-chart'), ev.pa.actual, ev.pa.pred, '實際值', '預測值', true);
+  // 同步繪製（rAF 在背景分頁不觸發）
+  if (cls) drawCM($('ev-chart'), ev.cm.labels, ev.cm.matrix);
+  else if (isTs) drawTSF($('ev-chart'), ev.tsf);
+  else if (isAn) drawRisk($('ev-chart'), ev.risk);
+  else drawXY($('ev-chart'), ev.pa.actual, ev.pa.pred, '實際值', '預測值', true);
+}
+
+// 通用時間軸底圖（0 尺寸防呆）：回 {ctx,M,w,h,px,py,isTime}
+function _timeAxes(canvas, t, ylo, yhi, yTicks = 5) {
+  const dpr = devicePixelRatio;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return null;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '11px Inter';
+  const M = { l: 64, r: 16, t: 14, b: 44 };
+  const isTime = t.length && t[t.length - 1] > 1e9;
+  const xlo = Math.min(...t), xhi = Math.max(...t);
+  const px = (v) => M.l + ((v - xlo) / ((xhi - xlo) || 1)) * (w - M.l - M.r);
+  const py = (v) => h - M.b - ((v - ylo) / ((yhi - ylo) || 1)) * (h - M.t - M.b);
+  ctx.textAlign = 'right';
+  niceTicks(ylo, yhi, yTicks).forEach((tv) => {
+    const y = py(tv);
+    ctx.strokeStyle = C_GRID; ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(w - M.r, y); ctx.stroke();
+    ctx.fillStyle = C_LABEL; ctx.fillText(fmtTick(tv), M.l - 8, y + 3.5);
+  });
+  ctx.textAlign = 'left';
+  Array.from({ length: 6 }, (_, i) => xlo + ((xhi - xlo) * i) / 5).forEach((tv) => {
+    const x = px(tv);
+    ctx.strokeStyle = C_AXIS; ctx.beginPath(); ctx.moveTo(x, h - M.b); ctx.lineTo(x, h - M.b + 4); ctx.stroke();
+    ctx.fillStyle = C_LABEL;
+    const lb = isTime ? fmtTime(tv) : fmtTick(tv);
+    ctx.fillText(lb, x - ctx.measureText(lb).width / 2, h - M.b + 18);
+  });
+  ctx.strokeStyle = C_AXIS;
+  ctx.beginPath(); ctx.moveTo(M.l, M.t); ctx.lineTo(M.l, h - M.b); ctx.lineTo(w - M.r, h - M.b); ctx.stroke();
+  return { ctx, M, w, h, px, py, isTime };
+}
+
+// 健康分數趨勢（0–100，Tukey PHM Edge 同款：綠正常/黃注意/紅危急區帶）
+function drawHealth(canvas, hd) {
+  const g = _timeAxes(canvas, hd.t, 0, 100, 5);
+  if (!g) return;
+  const { ctx, M, w, px, py } = g;
+  // 三色狀態區帶（淡）
+  const band = (lo, hi, color) => {
+    ctx.fillStyle = color;
+    ctx.fillRect(M.l, py(hi), w - M.l - M.r, py(lo) - py(hi));
+  };
+  band(70, 100, 'rgba(24, 160, 88, 0.06)');
+  band(40, 70, 'rgba(217, 119, 6, 0.06)');
+  band(0, 40, 'rgba(208, 48, 80, 0.07)');
+  // 分數線（分段依狀態上色）
+  ctx.lineWidth = 1.6;
+  for (let i = 1; i < hd.score.length; i++) {
+    ctx.strokeStyle = healthColor(Math.min(hd.score[i - 1], hd.score[i]));
+    ctx.beginPath();
+    ctx.moveTo(px(hd.t[i - 1]), py(hd.score[i - 1]));
+    ctx.lineTo(px(hd.t[i]), py(hd.score[i]));
+    ctx.stroke();
+  }
+  ctx.lineWidth = 1;
+  ctx.fillStyle = C_LABEL;
+  ctx.fillText('≥70 正常｜40–70 注意｜<40 危急', M.l + 8, g.M.t + 12);
+}
+
+// FDC/SPC 管制圖：感測器數值＋UCL/LCL（紅）＋UWL/LWL（黃）＋超限紅點
+function drawFDC(canvas, t, col) {
+  const pad = (col.ucl - col.lcl) * 0.15 || 1;
+  const ylo = Math.min(col.lcl, ...col.y) - pad;
+  const yhi = Math.max(col.ucl, ...col.y) + pad;
+  const g = _timeAxes(canvas, t, ylo, yhi, 5);
+  if (!g) return;
+  const { ctx, M, w, px, py } = g;
+  const hline = (v, color, label) => {
+    ctx.strokeStyle = color; ctx.setLineDash([6, 4]);
+    ctx.beginPath(); ctx.moveTo(M.l, py(v)); ctx.lineTo(w - M.r, py(v)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = color;
+    ctx.fillText(label, w - M.r - ctx.measureText(label).width, py(v) - 4);
+  };
+  hline(col.ucl, '#d03050', `UCL ${col.ucl}`);
+  hline(col.lcl, '#d03050', `LCL ${col.lcl}`);
+  hline(col.uwl, '#D97706', 'UWL');
+  hline(col.lwl, '#D97706', 'LWL');
+  ctx.strokeStyle = theme().selL; ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  col.y.forEach((v, i) => { const x = px(t[i]), y = py(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.stroke(); ctx.lineWidth = 1;
+  ctx.fillStyle = '#d03050';
+  col.y.forEach((v, i) => {
+    if (v > col.ucl || v < col.lcl) { ctx.beginPath(); ctx.arc(px(t[i]), py(v), 2.5, 0, Math.PI * 2); ctx.fill(); }
   });
 }
 

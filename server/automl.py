@@ -510,8 +510,48 @@ THRESH_METHODS = {
 }
 
 
+def _health_from_risk(risk: np.ndarray, thr: float) -> np.ndarray:
+    """風險值 → 健康分數 0–100：risk=0 → 100、risk=門檻 → 50、risk≥2×門檻 → 0（線性）。"""
+    return np.clip(100.0 * (1.0 - risk / max(2.0 * thr, 1e-9)), 0, 100)
+
+
+def _anomaly_events(risk: np.ndarray, thr: float, t: np.ndarray,
+                    X: np.ndarray, features: list, mu, sd) -> list:
+    """連續超標段 → 故障事件列表（起訖、峰值風險、主導感測器）。"""
+    events = []
+    i = 0
+    while i < len(risk):
+        if risk[i] > thr:
+            j = i
+            while j + 1 < len(risk) and risk[j + 1] > thr:
+                j += 1
+            seg = slice(i, j + 1)
+            zi = np.abs((X[seg] - mu) / sd).mean(axis=0)
+            events.append({"t_start": float(t[i]), "t_end": float(t[j]),
+                           "n": int(j - i + 1),
+                           "peak_risk": round(float(risk[seg].max()), 5),
+                           "min_health": round(float(_health_from_risk(risk[seg], thr).min()), 1),
+                           "top_sensor": features[int(np.argmax(zi))]})
+            i = j + 1
+        else:
+            i += 1
+    events.sort(key=lambda e: -e["peak_risk"])
+    return events[:20]
+
+
+def _fdc_charts(X: np.ndarray, t: np.ndarray, features: list, mu, sd) -> dict:
+    """FDC/SPC 管制圖資料：各感測器序列＋管制界限（UCL/LCL=μ±3σ、UWL/LWL=μ±2σ）。"""
+    step = max(1, len(t) // 500)
+    return {"t": t[::step].tolist(),
+            "cols": [{"name": f,
+                      "y": np.round(X[::step, i], 5).tolist(),
+                      "ucl": round(float(mu[i] + 3 * sd[i]), 5), "lcl": round(float(mu[i] - 3 * sd[i]), 5),
+                      "uwl": round(float(mu[i] + 2 * sd[i]), 5), "lwl": round(float(mu[i] - 2 * sd[i]), 5)}
+                     for i, f in enumerate(features)]}
+
+
 def _run_anomaly(sid: str, rec: dict):
-    """異常偵測訓練：健康基準擬合→全段風險值→建議門檻（P99）＋貢獻度。"""
+    """異常偵測訓練：健康基準擬合→風險值→健康分數 0-100＋FDC 管制圖＋故障事件（PHM 呈現）。"""
     import joblib
     X, t = _anomaly_xt(sid, rec)
     if len(X) < 30:
@@ -520,22 +560,34 @@ def _run_anomaly(sid: str, rec: dict):
     risk = np.asarray(_anomaly_score(rec["algo"], meta, X), float)
     thr = THRESH_METHODS["p99"][1](risk)
     exceed = risk > thr
-    rec["metrics_cv"] = {"threshold": round(thr, 5), "exceed_pct": round(float(exceed.mean()) * 100, 3),
-                         "mean_risk": round(float(risk.mean()), 5), "max_risk": round(float(risk.max()), 5)}
+    health = _health_from_risk(risk, thr)
+    mu, sd = X.mean(axis=0), np.maximum(X.std(axis=0), 1e-9)
+    # 目前健康分數＝末端 5% 平均（近期狀態），全段最低為谷值
+    n_tail = max(5, len(health) // 20)
+    health_now = round(float(health[-n_tail:].mean()), 1)
+    events = _anomaly_events(risk, thr, t, X, rec["features"], mu, sd)
+    rec["metrics_cv"] = {"health_now": health_now, "threshold": round(thr, 5),
+                         "exceed_pct": round(float(exceed.mean()) * 100, 3),
+                         "n_events": len(events)}
     rec["metrics_train"] = rec["metrics_cv"]
     rec["val_desc"] = "健康基準＝現行視圖；預設門檻＝P99"
     step = max(1, len(risk) // 900)
-    rec["plots"] = {"risk": {"t": t[::step].tolist(), "risk": np.round(risk[::step], 5).tolist(),
-                             "threshold": round(thr, 5)}}
+    rec["plots"] = {
+        "risk": {"t": t[::step].tolist(), "risk": np.round(risk[::step], 5).tolist(),
+                 "threshold": round(thr, 5)},
+        "health": {"t": t[::step].tolist(), "score": np.round(health[::step], 1).tolist()},
+        "fdc": _fdc_charts(X, t, rec["features"], mu, sd),
+    }
+    rec["events"] = events
     # 貢獻度：超標點各欄位 |z| 平均（哪些感測器把風險推高）
-    mu, sd = X.mean(axis=0), np.maximum(X.std(axis=0), 1e-9)
     zi = np.abs((X[exceed] - mu) / sd) if exceed.any() else np.abs((X - mu) / sd)
     contrib = zi.mean(axis=0)
     order = np.argsort(contrib)[::-1][:15]
     rec["plots"]["fi"] = {"names": [rec["features"][i] for i in order],
                           "values": np.round(contrib[order], 4).tolist()}
     rec["n_rows"] = int(len(X))
-    joblib.dump({"algo": rec["algo"], "params": rec.get("params"), "meta": meta}, _pipe_path(sid, rec["id"]))
+    joblib.dump({"algo": rec["algo"], "params": rec.get("params"), "meta": meta,
+                 "mu": mu.tolist(), "sd": sd.tolist()}, _pipe_path(sid, rec["id"]))
     rec["status"] = "done"
 
 
@@ -838,16 +890,23 @@ def evaluate(sid: str, mid: str) -> dict:
         if len(X) < 5:
             raise HTTPException(422, f"現行視圖有效樣本僅 {len(X)} 筆，無法評估")
         risk = np.asarray(_anomaly_score(rec["algo"], pack["meta"], X), float)
-        thr = (rec.get("metrics_cv") or {}).get("threshold") or THRESH_METHODS["p99"][1](risk)
+        thr = float((rec.get("metrics_cv") or {}).get("threshold") or THRESH_METHODS["p99"][1](risk))
+        health = _health_from_risk(risk, thr)
+        mu = np.asarray(pack.get("mu") or X.mean(axis=0), float)
+        sd = np.maximum(np.asarray(pack.get("sd") or X.std(axis=0), float), 1e-9)
+        events = _anomaly_events(risk, thr, t, X, rec["features"], mu, sd)
+        n_tail = max(5, len(health) // 20)
         step = max(1, len(risk) // 900)
         ev = {"evaluated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
               "n_rows": int(len(X)),
-              "metrics": {"threshold": round(float(thr), 5),
+              "metrics": {"health_now": round(float(health[-n_tail:].mean()), 1),
+                          "threshold": round(thr, 5),
                           "exceed_pct": round(float((risk > thr).mean()) * 100, 3),
-                          "mean_risk": round(float(risk.mean()), 5),
-                          "max_risk": round(float(risk.max()), 5)},
+                          "n_events": len(events)},
               "risk": {"t": t[::step].tolist(), "risk": np.round(risk[::step], 5).tolist(),
-                       "threshold": round(float(thr), 5)}}
+                       "threshold": round(thr, 5)},
+              "health": {"t": t[::step].tolist(), "score": np.round(health[::step], 1).tolist()},
+              "events": events}
         rec["evaluation"] = ev
         _save(sid, rec)
         return ev
@@ -911,12 +970,25 @@ def threshold(sid: str, mid: str, body: dict) -> dict:
     name, fn = THRESH_METHODS[method]
     thr = fn(risk)
     exceed = risk > thr
-    # 套用：更新模型建議門檻並重繪風險圖
+    # 套用：更新模型建議門檻，並重算健康分數/事件（皆依門檻定義）
     if body.get("apply"):
-        rec["metrics_cv"] = {**(rec.get("metrics_cv") or {}), "threshold": round(thr, 5),
-                             "exceed_pct": round(float(exceed.mean()) * 100, 3)}
-        if "risk" in (rec.get("plots") or {}):
-            rec["plots"]["risk"]["threshold"] = round(thr, 5)
+        health = _health_from_risk(risk, thr)
+        mu = np.asarray(pack.get("mu") or X.mean(axis=0), float)
+        sd = np.maximum(np.asarray(pack.get("sd") or X.std(axis=0), float), 1e-9)
+        events = _anomaly_events(risk, thr, t, X, rec["features"], mu, sd)
+        n_tail = max(5, len(health) // 20)
+        rec["metrics_cv"] = {"health_now": round(float(health[-n_tail:].mean()), 1),
+                             "threshold": round(thr, 5),
+                             "exceed_pct": round(float(exceed.mean()) * 100, 3),
+                             "n_events": len(events)}
+        rec["metrics_train"] = rec["metrics_cv"]
+        rec["events"] = events
+        step = max(1, len(risk) // 900)
+        plots = rec.get("plots") or {}
+        plots["risk"] = {"t": t[::step].tolist(), "risk": np.round(risk[::step], 5).tolist(),
+                         "threshold": round(thr, 5)}
+        plots["health"] = {"t": t[::step].tolist(), "score": np.round(health[::step], 1).tolist()}
+        rec["plots"] = plots
         rec["val_desc"] = f"健康基準＝現行視圖；門檻＝{name}"
         _save(sid, rec)
     return {"method": method, "method_name": name, "threshold": round(thr, 5),

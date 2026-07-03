@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import io
 import json
 import threading
 import uuid
@@ -14,7 +15,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from .dataprep import DATA_DIR, _load_base, _load_steps, apply_steps
 
@@ -823,7 +825,19 @@ def get_model(sid: str, mid: str) -> dict:
 def delete_model(sid: str, mid: str) -> dict:
     _mpath(sid, mid).unlink(missing_ok=True)
     _pipe_path(sid, mid).unlink(missing_ok=True)
+    (_mdir(sid) / f"{mid}_batch.csv").unlink(missing_ok=True)
     return {"ok": True}
+
+
+@router.post("/{sid}/models/{mid}/rename")
+def rename_model(sid: str, mid: str, body: dict) -> dict:
+    name = (body.get("name") or "").strip()
+    if not name or len(name) > 60:
+        raise HTTPException(422, "模型名稱需為 1–60 字")
+    rec = _load(sid, mid)
+    rec["name"] = name
+    _save(sid, rec)
+    return {"ok": True, "name": name}
 
 
 @router.post("/{sid}/models")
@@ -1021,6 +1035,121 @@ def threshold(sid: str, mid: str, body: dict) -> dict:
     return {"method": method, "method_name": name, "threshold": round(thr, 5),
             "n_rows": int(len(risk)), "exceed": int(exceed.sum()),
             "exceed_pct": round(float(exceed.mean()) * 100, 3), "applied": bool(body.get("apply"))}
+
+
+def _batch_time_col(df: pd.DataFrame, skip: set):
+    """測試資料集的時間欄偵測：datetime dtype 或 ≥90% 可解析的字串欄。"""
+    for c in df.columns:
+        if c in skip:
+            continue
+        if pd.api.types.is_datetime64_any_dtype(df[c]):
+            return c, df[c]
+        if pd.api.types.is_string_dtype(df[c]) or df[c].dtype == object:
+            parsed = pd.to_datetime(df[c], errors="coerce")
+            if parsed.notna().mean() >= 0.9:
+                return c, parsed
+    return None, None
+
+
+@router.post("/{sid}/models/{mid}/batch")
+async def batch_calc(sid: str, mid: str, file: UploadFile = File(...)) -> dict:
+    """批次試算（品質結果試算）：上傳新測試資料集，以已訓練模型整批預測。
+    上傳檔含目標欄時併算實際 vs 預測；結果檔（原欄＋預測欄）可下載。"""
+    rec = _load(sid, mid)
+    if rec.get("task") not in ("regression", "classification"):
+        raise HTTPException(422, "批次試算僅支援迴歸／分類模型")
+    pipe = _load_pipe(sid, mid)
+    raw = await file.read()
+    if len(raw) > 50 * 1024 * 1024:
+        raise HTTPException(422, "檔案過大（>50MB）")
+    fname = file.filename or "upload"
+    try:
+        if fname.lower().endswith((".xlsx", ".xls", ".xlsm")):
+            df = pd.read_excel(io.BytesIO(raw))
+        else:
+            df = pd.read_csv(io.BytesIO(raw), encoding="utf-8-sig")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(422, f"測試資料解析失敗（{type(e).__name__}）") from None
+    missing = [c for c in rec["features"] if c not in df.columns]
+    if missing:
+        raise HTTPException(422, f"測試資料缺少模型特徵欄：{missing}")
+    cls = rec.get("task") == "classification"
+    feats = df[rec["features"]].apply(pd.to_numeric, errors="coerce")
+    ok = feats.notna().all(axis=1)
+    if not ok.any():
+        raise HTTPException(422, "沒有任何一列的特徵值完整可預測（檢查數值格式）")
+    X = feats[ok].to_numpy(dtype=float)
+    yhat = pipe.predict(X)
+    yhat = np.asarray(yhat) if cls else np.ravel(yhat).astype(float)
+    # 結果檔＝原欄位＋預測欄
+    pred_col = f"{rec['target']}_預測值"
+    out = df.copy()
+    out[pred_col] = None if cls else np.nan
+    out.loc[ok, pred_col] = yhat
+    out.to_csv(_mdir(sid) / f"{mid}_batch.csv", index=False, encoding="utf-8-sig")
+    # 實際值（上傳檔含目標欄）→ 指標
+    metrics = cm = None
+    actual = None
+    if rec["target"] in df.columns:
+        if cls:
+            a = df.loc[ok, rec["target"]]
+            valid = a.notna().to_numpy()
+            if valid.any():
+                y_true = np.asarray(a[a.notna()].astype(str).tolist(), dtype=object)
+                y_pred = yhat[valid]
+                metrics = _metrics_cls(y_true, y_pred)
+                from sklearn.metrics import confusion_matrix
+                labels = sorted(set(list(y_true) + list(y_pred)))
+                cm = {"labels": [str(l) for l in labels],
+                      "matrix": confusion_matrix(y_true, y_pred, labels=labels).tolist()}
+        else:
+            a = pd.to_numeric(df.loc[ok, rec["target"]], errors="coerce")
+            valid = a.notna().to_numpy()
+            if valid.any():
+                metrics = _metrics(a.to_numpy(dtype=float)[valid], yhat[valid])
+                actual = a.to_numpy(dtype=float)
+    # 時間欄（實際 vs 預測隨時間圖）
+    tcol, tparsed = _batch_time_col(df, set(rec["features"]) | {rec["target"]})
+    t = None
+    if tcol is not None:
+        tv = ((tparsed - pd.Timestamp(0)) / pd.Timedelta(seconds=1))[ok]
+        t = tv.to_numpy(dtype=float)
+    # 抽樣圖資（≤600 點；有時間依時間排序）
+    n = int(ok.sum())
+    order = np.argsort(t) if t is not None else np.arange(n)
+    step = max(1, n // 600)
+    sel = order[::step]
+    sample = {"pred": [None if (isinstance(v, float) and np.isnan(v)) else
+                       (str(v) if cls else round(float(v), 5)) for v in yhat[sel]]}
+    if t is not None:
+        sample["t"] = np.round(t[sel], 1).tolist()
+    if actual is not None:
+        sample["actual"] = [None if np.isnan(v) else round(float(v), 5) for v in actual[sel]]
+    if not cls:
+        sample["cols"] = {f: np.round(X[sel, i], 5).tolist() for i, f in enumerate(rec["features"])}
+    # 結果預覽（前 20 列）
+    prev_cols = ([tcol] if tcol else []) + [pred_col] + \
+                ([rec["target"]] if rec["target"] in df.columns else []) + rec["features"]
+    prev = out.loc[ok, prev_cols].head(20)
+    preview = {"cols": prev_cols,
+               "rows": [[("" if pd.isna(v) else (round(v, 5) if isinstance(v, float) else str(v)))
+                         for v in row] for row in prev.itertuples(index=False)]}
+    batch = {"at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "filename": fname,
+             "n_rows": int(len(df)), "n_pred": n, "metrics": metrics, "cm": cm,
+             "sample": sample, "preview": preview, "time_col": tcol}
+    rec["batch"] = batch
+    _save(sid, rec)
+    return batch
+
+
+@router.get("/{sid}/models/{mid}/batch/download")
+def batch_download(sid: str, mid: str):
+    p = _mdir(sid) / f"{mid}_batch.csv"
+    if not p.exists():
+        raise HTTPException(404, "尚無批次試算結果——請先執行批次試算")
+    rec = _load(sid, mid)
+    return FileResponse(p, filename=f"{rec.get('name', mid)}_批次試算結果.csv",
+                        media_type="text/csv")
 
 
 @router.post("/{sid}/models/{mid}/whatif")

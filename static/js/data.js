@@ -943,7 +943,9 @@ async function openModelDetail(mid) {
       </table></div>` : '';
   const taskName = cls ? '分類' : isTs ? '時序預測（單變量）' : isAn ? '設備異常偵測（無監督）' : '迴歸';
   $('model-detail').innerHTML = `
-    <h3>${m.name}</h3>
+    <h3 style="display:flex;align-items:center;gap:8px"><span id="md-name">${m.name}</span>
+      <button class="mini" id="btn-rename" title="改名"
+        style="width:auto;padding:2px 10px;font-size:12px;cursor:pointer">改名</button></h3>
     <div class="md-sub">${algoName}｜${taskName}｜訓練資料 ${m.n_rows.toLocaleString()} 筆｜目標 ${m.target}</div>
     ${tuned}
     ${sumCards}
@@ -982,11 +984,21 @@ async function openModelDetail(mid) {
     </details>
     ${(isTs || isAn) ? '' : `
     <details class="md-app" id="app-whatif">
-      <summary>操作差異試算——改變輸入條件，看預測怎麼變</summary>
+      <summary>操作差異試算——改變輸入條件，看預測怎麼變（單筆試算）</summary>
       <p class="hint" style="margin:8px 0">基準值＝現行視圖各特徵中位數；留空＝維持基準。</p>
       <div class="wiz-params" id="wi-grid"></div>
       <button class="dbtn" style="width:auto;padding:8px 22px;margin-top:10px" id="btn-whatif">試算</button>
       <div id="wi-out"></div>
+    </details>
+    <details class="md-app" id="app-batch" ${m.batch ? 'open' : ''}>
+      <summary>批次試算（品質結果試算）——上傳新資料整批預測</summary>
+      <p class="hint" style="margin:8px 0">上傳含模型特徵欄的 CSV／Excel；含目標欄（${m.target}）時併算實際 vs 預測準確度，
+        含時間欄時繪隨時間對比圖。完整結果（原欄＋預測欄）可下載。</p>
+      <div class="opt-row">
+        <input type="file" id="bt-file" accept=".csv,.xlsx,.xls,.xlsm" style="font-size:13px">
+        <button class="dbtn" style="width:auto;padding:8px 22px;margin:0" id="btn-batch">執行試算</button>
+      </div>
+      <div id="bt-out"></div>
     </details>`}
     ${(cls || isTs || isAn) ? '' : `
     <details class="md-app" id="app-opt">
@@ -1026,6 +1038,7 @@ async function openModelDetail(mid) {
     }
     if (m.plots.fi && $('md-fi')) drawFI($('md-fi'), m.plots.fi.names, m.plots.fi.values);
     if (m.evaluation) renderEvaluation(m, m.evaluation);
+    if (m.batch && $('bt-out')) renderBatch(m, m.batch);
     } catch (e) { console.error('detail charts:', e); }
   })();
   bindModelApps(m);
@@ -1054,6 +1067,79 @@ function renderEvaluation(m, ev) {
   else if (isTs) drawTSF($('ev-chart'), ev.tsf);
   else if (isAn) drawRisk($('ev-chart'), ev.risk);
   else drawXY($('ev-chart'), ev.pa.actual, ev.pa.pred, '實際值', '預測值', true);
+}
+
+// 批次試算結果（品質結果試算）：資訊列＋指標＋實際vs預測圖＋變數散佈＋預覽表＋下載
+function renderBatch(m, b) {
+  const cls = m.task === 'classification';
+  const kind = cls ? 'classification' : 'regression';
+  const s = b.sample ?? {};
+  const hasT = !!s.t?.length;
+  const hasA = !!s.actual?.length;
+  const charts = [];
+  if (!cls && hasT) charts.push(`<div class="md-chart wide"><h4>預測目標隨時間變化${hasA ? '——實際 vs 預測' : ''}</h4><canvas id="bt-ts"></canvas></div>`);
+  else if (!cls && hasA) charts.push('<div class="md-chart"><h4>實際值 vs 預測值</h4><canvas id="bt-avp"></canvas></div>');
+  if (cls && b.cm) charts.push('<div class="md-chart"><h4>混淆矩陣（測試資料）</h4><canvas id="bt-cm"></canvas></div>');
+  if (!cls && s.cols) charts.push(`<div class="md-chart wide"><h4><span>預測目標與變數關係</span>
+      <select class="mini fdc-pick" id="bt-xsel">${m.features.map((f, i) => `<option value="${i}">${f}</option>`).join('')}</select>
+    </h4><canvas id="bt-xy"></canvas></div>`);
+  $('bt-out').innerHTML = `
+    <div class="md-sub" style="margin-top:12px">測試資料 ${b.filename}｜${b.at}｜
+      ${b.n_rows.toLocaleString()} 筆（可預測 ${b.n_pred.toLocaleString()} 筆）</div>
+    ${b.metrics ? `<table class="md-metrics">
+      <tr><th>試算指標</th>${METRIC_HEADS[kind].map((h) => `<th>${h}</th>`).join('')}</tr>
+      ${metricRow('測試資料集', b.metrics, kind)}
+    </table>` : '<p class="hint" style="margin:8px 0">測試資料未含目標欄——僅輸出預測值，無準確度指標。</p>'}
+    <div class="md-charts">${charts.join('')}</div>
+    ${b.preview?.rows?.length ? `
+    <div class="md-chart wide" style="margin-top:16px"><h4>試算結果概覽（前 ${b.preview.rows.length} 列）</h4>
+      <div style="overflow-x:auto"><table class="md-metrics" style="margin:0;white-space:nowrap">
+        <tr>${b.preview.cols.map((c) => `<th>${c}</th>`).join('')}</tr>
+        ${b.preview.rows.map((r) => `<tr>${r.map((v) => `<td>${v}</td>`).join('')}</tr>`).join('')}
+      </table></div></div>` : ''}
+    <button class="dbtn" style="width:auto;padding:8px 22px;margin-top:12px" id="btn-bt-dl">下載完整試算結果</button>`;
+  $('btn-bt-dl').addEventListener('click', () => {
+    location.href = `/api/automl/${sid}/models/${m.id}/batch/download`;
+  });
+  try {
+    if ($('bt-ts')) drawBatchTS($('bt-ts'), s);
+    if ($('bt-avp')) drawXY($('bt-avp'), s.actual, s.pred, '實際值', '預測值', true);
+    if ($('bt-cm')) drawCM($('bt-cm'), b.cm.labels, b.cm.matrix);
+    if ($('bt-xy')) {
+      const drawSel = () => drawXY($('bt-xy'), s.cols[m.features[+$('bt-xsel').value]], s.pred,
+        m.features[+$('bt-xsel').value], '預測值', false);
+      $('bt-xsel').onchange = drawSel;
+      drawSel();
+    }
+  } catch (e) { console.error('batch charts:', e); }
+}
+
+// 批次試算時間圖：實際（深灰）vs 預測（主題色）
+function drawBatchTS(canvas, s) {
+  const ys = s.pred.concat(s.actual ?? []).filter((v) => v != null);
+  const lo = Math.min(...ys), hi = Math.max(...ys);
+  const pad = (hi - lo) * 0.08 || 1;
+  const g = _timeAxes(canvas, s.t, lo - pad, hi + pad, 5);
+  if (!g) return;
+  const { ctx, M, px, py } = g;
+  const line = (arr, color, wd) => {
+    ctx.strokeStyle = color; ctx.lineWidth = wd;
+    ctx.beginPath();
+    let started = false;
+    arr.forEach((v, i) => {
+      if (v == null) { started = false; return; }
+      const x = px(s.t[i]), y = py(v);
+      started ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      started = true;
+    });
+    ctx.stroke(); ctx.lineWidth = 1;
+  };
+  if (s.actual) line(s.actual, '#4a5560', 1.4);
+  line(s.pred, theme().selL, 1.6);
+  ctx.fillStyle = '#4a5560';
+  if (s.actual) ctx.fillText('— 實際值', M.l + 8, M.t + 12);
+  ctx.fillStyle = theme().selL;
+  ctx.fillText('— 預測值', M.l + (s.actual ? 70 : 8), M.t + 12);
 }
 
 // 通用時間軸底圖（0 尺寸防呆）：回 {ctx,M,w,h,px,py,isTime}
@@ -1315,13 +1401,64 @@ function drawTS(canvas, t, actual, pred) {
 
 function bindModelApps(m) {
   const cls = m.task === 'classification';
+  // 模型改名（Tukey ⋮ 對齊）：h3 內就地編輯，不用原生對話框（會凍 renderer）
+  $('btn-rename').addEventListener('click', async () => {
+    const span = $('md-name');
+    if (span.querySelector('input')) return;
+    const old = span.textContent;
+    span.innerHTML = `<input class="mini" value="${old.replace(/"/g, '&quot;')}"
+      style="width:260px;font-size:15px;font-weight:600">`;
+    const inp = span.querySelector('input');
+    inp.focus(); inp.select();
+    const commit = async () => {
+      const name = inp.value.trim();
+      if (!name || name === old) { span.textContent = old; return; }
+      try {
+        await apiML(`/models/${m.id}/rename`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        span.textContent = name;
+        await renderModels();
+      } catch (e) { span.textContent = old; console.error('rename:', e); }
+    };
+    inp.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') commit();
+      if (ev.key === 'Escape') span.textContent = old;
+    });
+    inp.addEventListener('blur', commit);
+  });
+
   $('btn-eval').addEventListener('click', async () => {
     $('btn-eval').disabled = true;
     try {
       const ev = await apiML(`/models/${m.id}/evaluate`, { method: 'POST' });
       renderEvaluation(m, ev);
-    } catch (e) { alert(`評估失敗：${e.message}`); } finally { $('btn-eval').disabled = false; }
+    } catch (e) {
+      $('ev-out').innerHTML = `<p class="hint" style="margin-top:8px;color:var(--danger)">評估失敗：${e.message}</p>`;
+    } finally { $('btn-eval').disabled = false; }
   });
+
+  // 批次試算（品質結果試算）：上傳測試資料集整批預測
+  if ($('btn-batch')) {
+    $('btn-batch').addEventListener('click', async () => {
+      const f = $('bt-file').files[0];
+      if (!f) {
+        $('bt-out').innerHTML = '<p class="hint" style="margin-top:8px">請先選擇測試資料檔（CSV／Excel）。</p>';
+        return;
+      }
+      $('btn-batch').disabled = true;
+      $('bt-out').innerHTML = '<p class="hint" style="margin-top:8px">試算中…</p>';
+      try {
+        const fd = new FormData();
+        fd.append('file', f);
+        const b = await apiML(`/models/${m.id}/batch`, { method: 'POST', body: fd });
+        renderBatch(m, b);
+      } catch (e) {
+        $('bt-out').innerHTML = `<p class="hint" style="margin-top:8px;color:var(--danger)">批次試算失敗：${e.message}</p>`;
+      } finally { $('btn-batch').disabled = false; }
+    });
+  }
 
   // 風險值門檻試算（異常偵測）
   if ($('app-thresh')) {
@@ -1339,7 +1476,9 @@ function bindModelApps(m) {
               <td>${r.exceed.toLocaleString()} / ${r.n_rows.toLocaleString()}</td><td>${r.exceed_pct}%</td></tr>
           </table>${r.applied ? '<p class="hint" style="margin-top:6px">已套用為模型建議門檻。</p>' : ''}`;
         if (apply) await openModelDetail(m.id);
-      } catch (e) { alert(`門檻試算失敗：${e.message}`); }
+      } catch (e) {
+        $('th-out').innerHTML = `<p class="hint" style="margin-top:8px;color:var(--danger)">門檻試算失敗：${e.message}</p>`;
+      }
       finally {
         if ($('btn-thresh')) { $('btn-thresh').disabled = $('btn-thresh-apply').disabled = false; }
       }

@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 from .pid_parse import (PID_DIR, PIPE_Y, _apply_dims, _push_apart,
-                        _uv_to_scene_pipes, parse_pid)
+                        _uv_to_scene_pipes, parse_pid, snap_pipes_to_equipment)
 
 MERGED_PIPES_PER_SHEET = None  # None=全收（渲染端已合併幾何，扛得住）
 BRIDGE_Y = 8.0     # 橋接管線高度（跨圖島，飛越一般管線與多數設備）
@@ -259,11 +259,13 @@ def merge_results(results: dict[str, dict]) -> dict:
                       "name": f"{stage}｜{stem.upper()}", "equipment": equipment})
         underlays.append({"image": tiles[stem], "x": round(ox, 2), "z": round(oz, 2),
                           "w": spans[stem][0], "h": spans[stem][1]})
-        # 管線 3D 化（extract_pipes 已按長度降冪；None=全收）
-        pipes += _uv_to_scene_pipes(
+        # 管線 3D 化（extract_pipes 已按長度降冪；None=全收）＋端點接設備
+        sheet_pipes = _uv_to_scene_pipes(
             results[stem]["geom"].get("pipes_uv", []),
             spans[stem][0], spans[stem][1], ox, oz,
             limit=MERGED_PIPES_PER_SHEET)
+        snap_pipes_to_equipment(sheet_pipes, equipment)
+        pipes += sheet_pipes
 
     # 跨圖橋接管線：接續標記配對點之間，高空跨接（縫合成一張廠區的「線」）
     def world(stem, uv):

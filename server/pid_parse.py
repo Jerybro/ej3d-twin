@@ -631,6 +631,37 @@ def _uv_to_scene_pipes(pipes_uv: list, tile_w: float, tile_h: float,
     return out
 
 
+def snap_pipes_to_equipment(pipes: list, equipment: list):
+    """管線端點鄰近設備時，端點加垂直立管＋水平短段接進設備身
+    （視覺上「插進」容器，不再懸空斷頭）。就地修改 pipes。"""
+    for pipe in pipes:
+        if pipe.get("bridge"):
+            continue
+        pts = pipe["pts"]
+        for endi in (0, -1):
+            ex, ey, ez = pts[endi]
+            best, best_d = None, float("inf")
+            for eq in equipment:
+                dims = eq.get("dims", {})
+                r = dims.get("r") or max(dims.get("w", 2.0), dims.get("d", 2.0)) / 2
+                qx, _, qz = eq["pos"]
+                d = math.hypot(ex - qx, ez - qz)
+                if d < r + 2.5 and d < best_d:
+                    best, best_d = eq, d
+            if best is None:
+                continue
+            dims = best.get("dims", {})
+            h = dims.get("h") or dims.get("len") or 2.0
+            y_conn = min(max(h * 0.55, 1.2), 6.0)  # 接進設備中腹（高塔封頂 6m）
+            qx, _, qz = best["pos"]
+            joint = [[round(ex, 2), round(y_conn, 2), round(ez, 2)],
+                     [round(qx, 2), round(y_conn, 2), round(qz, 2)]]
+            if endi == 0:
+                pts[:0] = joint[::-1]
+            else:
+                pts.extend(joint)
+
+
 def parse_pid(filename: str) -> dict:
     """主入口：P&ID 檔名 → 場景草稿 dict ＋解析統計。"""
     pdf_path = PID_DIR / Path(filename).name
@@ -685,6 +716,9 @@ def parse_pid(filename: str) -> dict:
         items.append({"tag": tag, "type": etype, "conf": round(conf, 2),
                       "dims_mm": list(dims_mm[tag]) if sized else None})
 
+    scene_pipes = _uv_to_scene_pipes(pipes_uv, TILE_W, tile_h)
+    snap_pipes_to_equipment(scene_pipes, equipment)
+
     scene = {
         "plant": {
             "id": Path(filename).stem.upper(),
@@ -692,7 +726,7 @@ def parse_pid(filename: str) -> dict:
             "units": [{"id": "U-PID", "name": "P&ID 解析", "equipment": equipment}],
         },
         # 管線 3D 化：向量抽取的主管線浮在圖紙上方（與地毯對位）
-        "pipes": _uv_to_scene_pipes(pipes_uv, TILE_W, tile_h),
+        "pipes": scene_pipes,
         "instruments": instruments,
         # 圖紙底圖：設備即站在圖面自己的位置上（像素保真佈局），直接對圖
         "underlays": [{"image": tile_url, "x": 0, "z": 0,

@@ -52,6 +52,12 @@ INST_UNIT = {"T": "°C", "P": "kg/cm²g", "F": "m³/h", "L": "%", "A": "ppm", "G
 # 常見誤抓黑名單（圖框/接續標記/公司字樣）
 BLACKLIST_RE = re.compile(r"^(DWG|REV|NO|PAGE|SHT|SH|ISO|ANSI|API|NPS|SCH)\d*$")
 
+# 設備位號最低信心：實測真正的設備大字（貼近容器繪圖的位號）信心穩定在
+# 0.99-1.0；本文敘述句中夾帶的設備參照字（如「…POSSIBLE TO E651」誤讀
+# 成「F651」）信心明顯偏低（~0.56）。用此門檻擋掉這類誤讀，儀錶不受影響
+# （儀錶圈本來字體小，信心天生較低，過濾會誤殺真儀錶）。
+EQUIP_MIN_CONF = 0.65
+
 _reader = None  # EasyOCR 模型延遲載入（首次 ~數秒）
 
 
@@ -117,12 +123,23 @@ _NUM_RE = re.compile(r"^\d{3,5}[A-Z]{0,2}$")
 
 
 def _dedupe_hits(hits):
-    """tile 交界的同文字重複命中 → 空間去重（距離 < 字高視為同一個，取高信心）。"""
+    """tile 交界的重複命中 → 空間去重：
+
+    1. 同文字近距 → 取高信心（除完全重複的幽靈）
+    2. 一者為另一者子字串且近距 → 丟棄短的那個（tile 邊界常把「65101」
+       部分截斷讀成獨立的「101」、把「FR」讀成獨立的「R」——這些殘缺
+       碎片會在後續合併階段被誤配對成幽靈設備，例如 R101（實為
+       FR65101 儀錶旁的殘缺碎片，非真實設備）。"""
+    # 長文字優先處理（子字串判斷需要「完整版先進 kept」，若按信心排序，
+    # 殘缺碎片信心有時反而更高（如「101」1.0 vs「65101」0.88），會讓
+    # 子字串判斷失效）；同長度時信心高者優先。
     kept = []
-    for cx, cy, t, conf, h in sorted(hits, key=lambda x: -x[3]):
+    for cx, cy, t, conf, h in sorted(hits, key=lambda x: (-len(x[2]), -x[3])):
         dup = False
         for cx2, cy2, t2, conf2, h2 in kept:
-            if t == t2 and abs(cx - cx2) < max(h, h2) * 1.5 and abs(cy - cy2) < max(h, h2) * 1.5:
+            if abs(cx - cx2) > max(h, h2) * 2.0 or abs(cy - cy2) > max(h, h2) * 2.0:
+                continue
+            if t == t2 or t in t2:
                 dup = True
                 break
         if not dup:
@@ -222,7 +239,7 @@ def _classify(hits):
         if INST_RE.match(t):
             if t not in insts or conf > insts[t][2]:
                 insts[t] = (cx, cy, conf)
-        elif EQUIP_RE.match(t):
+        elif EQUIP_RE.match(t) and conf >= EQUIP_MIN_CONF:
             if t not in equips or conf > equips[t][2]:
                 equips[t] = (cx, cy, conf)
     return equips, insts

@@ -81,6 +81,8 @@ if (urlSid) {
 // ------------------------------------------------------------ 狀態
 async function refreshState() {
   state = await api('/state');
+  // 資料視圖變更 → AI 助教既有評估標記過期（有評估結果才提示）
+  if ($('ai-data-out')?.querySelector('.ai-out')) $('ai-data-stale').style.display = '';
   $('count-chip').textContent = `${state.n_view.toLocaleString()} 筆 ${state.columns.filter((c) => !c.hidden && c.name !== '__id__').length} 欄`;
   // 二維目標下拉（數值欄＋時間欄——選時間欄＝整牆時序圖 X=time）
   const timeCols = state.columns.filter((c) => !c.hidden && c.dtype.startsWith('datetime'));
@@ -825,6 +827,7 @@ async function loadAlgoMeta() {
   return ALGO_META;
 }
 
+let aiWasTraining = false;
 async function renderModels() {
   if (!sid) return;
   clearTimeout(modelPollTimer);
@@ -879,15 +882,66 @@ async function renderModels() {
     }));
     $('model-table-wrap').querySelectorAll('tbody tr').forEach((tr) => tr.addEventListener('click', () =>
       openModelDetail(tr.dataset.id)));
-    if (models.some((m) => m.status === 'training')) modelPollTimer = setTimeout(renderModels, 2500);
+    // 訓練批次全部完成的那一刻 → AI 自動總評（每做一次操作即回饋目前狀態）
+    if (models.some((m) => m.status === 'training')) {
+      aiWasTraining = true;
+      modelPollTimer = setTimeout(renderModels, 2500);
+    } else if (aiWasTraining) {
+      aiWasTraining = false;
+      aiAdvise('models', null, $('ai-models-out'), $('btn-ai-models'));
+    }
   }
 }
+$('btn-ai-models').addEventListener('click', () =>
+  aiAdvise('models', null, $('ai-models-out'), $('btn-ai-models')));
+$('btn-ai-data').addEventListener('click', () => {
+  $('ai-data-stale').style.display = 'none';
+  aiAdvise('data', null, $('ai-data-out'), $('btn-ai-data'));
+});
 
 const METRIC_HEADS = {
   regression: ['RMSE', 'MAE', 'MAAPE', 'R²'],
   classification: ['Accuracy', 'F1', 'Precision', 'Recall'],
   anomaly: ['健康分數', '風險門檻', '超標 %', '事件數'],
 };
+
+// ------------------------------------------------------------ AI 助教（本機 LLM）
+const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let aiOk = null;       // null=未探測
+let aiBusy = false;    // 本機引擎單併發，忙碌時擋新請求
+async function aiStatus() {
+  if (aiOk !== null) return aiOk;
+  try { aiOk = (await fetch('/api/ai/status').then((r) => r.json())).ok; } catch { aiOk = false; }
+  return aiOk;
+}
+async function aiAdvise(scope, mid, outEl, btn) {
+  if (!outEl) return;
+  if (!(await aiStatus())) {
+    outEl.innerHTML = '<p class="hint">本機 AI 引擎未啟動——啟動後重新整理即可使用 AI 助教。</p>';
+    return;
+  }
+  if (aiBusy) {
+    outEl.innerHTML = '<p class="hint">AI 助教正在處理另一項評估——請稍候再點「重新評估」。</p>';
+    return;
+  }
+  aiBusy = true;
+  if (btn) btn.disabled = true;
+  outEl.innerHTML = '<p class="hint">AI 助教評估中…（本機引擎，約 5–20 秒）</p>';
+  try {
+    const res = await fetch('/api/ai/advise', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sid, scope, mid }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail ?? res.status);
+    const r = await res.json();
+    outEl.innerHTML = `<div class="ai-out">${escHtml(r.advice)}</div>`;
+  } catch (e) {
+    outEl.innerHTML = `<p class="hint" style="color:var(--danger)">AI 評估失敗：${escHtml(e.message)}</p>`;
+  } finally {
+    aiBusy = false;
+    if (btn) btn.disabled = false;
+  }
+}
 
 // 圓圈問號：qi(說明) 產生 span，泡泡由全域 delegation 定位（見檔尾 initQiTips）
 const qi = (tip) => tip ? `<span class="qi" data-tip="${String(tip).replace(/"/g, '&quot;')}">?</span>` : '';
@@ -1056,7 +1110,12 @@ async function openModelDetail(mid) {
       <div id="opt-knobs"></div>
       <button class="dbtn" style="width:auto;padding:8px 22px;margin-top:10px" id="btn-opt">執行優化</button>
       <div id="opt-out"></div>
-    </details>`}`;
+    </details>`}
+    <details class="md-app" id="app-ai" open>
+      <summary>AI 助教——模型狀態評估與下一步建議${qi('本機 AI 引擎讀取這個模型的指標、重要變數、評估與試算結果，用白話評估目前狀態（好壞、過擬合跡象、可信度）並給下一步建議。每次開啟詳情自動評估一次；做了評估/門檻/批次試算等操作後可點「重新評估」更新。')}</summary>
+      <div id="ai-model-out"></div>
+      <button class="dbtn" style="width:auto;padding:8px 22px;margin-top:10px" id="btn-ai-model">重新評估</button>
+    </details>`;
   $('model-detail').style.display = '';
   // 同步繪製（rAF 在背景分頁不會觸發，會整頁空圖）
   (() => {
@@ -1083,6 +1142,9 @@ async function openModelDetail(mid) {
     } catch (e) { console.error('detail charts:', e); }
   })();
   bindModelApps(m);
+  // AI 助教：開詳情自動評估一次（本機引擎不在就顯示提示）
+  $('btn-ai-model').addEventListener('click', () => aiAdvise('model', m.id, $('ai-model-out'), $('btn-ai-model')));
+  aiAdvise('model', m.id, $('ai-model-out'), $('btn-ai-model'));
   $('model-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 

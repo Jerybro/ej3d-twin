@@ -364,6 +364,10 @@ from .automl import router as automl_router  # noqa: E402
 
 app.include_router(automl_router)
 
+from .aiassist import router as aiassist_router  # noqa: E402
+
+app.include_router(aiassist_router)
+
 # --------------------------------------------------------- P&ID 圖面管理
 UPLOADS_DIR = BASE_DIR / "uploads"
 PID_DIR = UPLOADS_DIR / "pid"

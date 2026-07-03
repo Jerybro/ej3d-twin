@@ -264,6 +264,11 @@
       color: var(--bg); font-size: 12.5px; font-weight: 400; line-height: 1.75;
       padding: 10px 13px; border-radius: 6px; z-index: 500; pointer-events: none;
       white-space: normal; box-shadow: 0 6px 20px rgba(0, 0, 0, .35); }
+    /* AI 助教輸出 */
+    .ai-out { white-space: pre-wrap; font-size: 13.5px; line-height: 1.9; color: var(--text);
+      background: var(--bg); border: 1px solid var(--bdr); border-radius: 6px;
+      padding: 12px 14px; margin-top: 10px; }
+    #ai-models-out .ai-out { margin: 0 0 14px; }
     .sec-title { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 6px; }
     #props-adv { margin-top: 18px; border-top: 1px solid var(--bdr); padding-top: 12px; }
     #props-adv summary { font-size: 14px; font-weight: 500; color: var(--text);
@@ -276,9 +281,15 @@
     .scan-row .cnt { margin-left: auto; color: var(--text2); font-size: 13px; white-space: nowrap; }
 
     /* ---------- 模型分頁 ---------- */
-    #model-empty { text-align: center; padding: 90px 20px; }
+    #model-empty { text-align: center; padding: 60px 20px; }
     #model-empty h3 { font-size: 17px; font-weight: 500; color: var(--text); margin-bottom: 10px; }
     #model-empty p { font-size: 14px; color: var(--text2); margin-bottom: 20px; }
+    /* 建模指引卡（小白引導） */
+    .guide-card { max-width: 720px; margin: 36px auto 0; text-align: left;
+      background: var(--white); border: 1px solid var(--bdr); border-radius: 8px; padding: 20px 24px; }
+    .guide-card ol { margin: 8px 0 0 20px; }
+    .guide-card li { font-size: 13.5px; color: var(--text2); line-height: 1.9; margin-bottom: 10px; }
+    .guide-card li b { color: var(--text); }
     .model-head { display: flex; align-items: center; gap: 12px; padding: 4px 0 14px;
       font-size: 15px; color: var(--text); }
     .mgroup { background: var(--white); border: 1px solid var(--bdr);
@@ -544,13 +555,28 @@
         <h3>目前沒有預測模型</h3>
         <p>點擊「建立模型」，替你的資料集建立第一個預測模型（以目前篩選後的資料訓練）</p>
         <button class="ctl-btn" id="btn-model-empty">建立模型</button>
+        <div class="guide-card">
+          <div class="sec-title">第一次建模？照這四步走</div>
+          <ol>
+            <li><b>先把資料弄乾淨</b>——回「探索分析」看每個欄位的分布圖，用滑鼠框掉明顯異常的段落，
+              再到側邊欄「資料健檢」跑一次三判準：有警告的欄位先別當自變數。資料乾淨比選演算法重要得多。</li>
+            <li><b>想清楚你要預測什麼</b>——目標是連續數值（溫度、產率）＝迴歸；是類別（合格/不合格）＝分類；
+              想外推未來趨勢＝時序預測；沒有目標、想監控設備＝異常偵測。精靈的「任務型態」旁有詳細說明。</li>
+            <li><b>先用「全自動建立」</b>——一次把所有適用演算法各建一個，訓練完看排名表：
+              哪個演算法在你的資料上分數最好，一目了然，不用自己猜。</li>
+            <li><b>看懂分數再應用</b>——每個指標（RMSE、R²…）旁都有問號說明；驗證分數與訓練分數差很多＝過擬合警訊。
+              選定模型後進詳情頁做評估、試算、優化，或問 AI 助教下一步。</li>
+          </ol>
+        </div>
       </div>
       <div id="model-main" style="display:none">
         <div class="model-head">
-          <span>訓練模型比較——所有模型在 5 折交叉驗證下的表現</span>
+          <span>訓練模型比較——按預測目標分組，組內依驗證分數排名</span>
           <span class="spacer"></span>
+          <button class="ctl-btn" id="btn-ai-models">AI 總評</button>
           <button class="ctl-btn" id="btn-new-model">建立模型</button>
         </div>
+        <div id="ai-models-out"></div>
         <div id="model-table-wrap"></div>
         <div id="model-detail" style="display:none"></div>
       </div>
@@ -646,6 +672,7 @@
       <button class="dtab active" data-d="history">專案編輯歷程</button>
       <button class="dtab" data-d="editor">資料編輯器</button>
       <button class="dtab" data-d="check">資料健檢</button>
+      <button class="dtab" data-d="ai">AI 助教</button>
       <button id="drawer-close" title="收合側邊欄"
         style="margin-left:auto;border:none;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--text2);padding:0 6px">&times;</button>
     </div>
@@ -685,6 +712,14 @@
         <button class="dbtn" id="btn-props-derive">推算物性欄位</button>
         <div id="props-out"></div>
       </details>
+    </div>
+    <div class="dbody" id="d-ai">
+      <div class="sec-title">AI 助教</div>
+      <p class="hint" style="margin-bottom:8px">本機 AI 引擎讀取目前的資料視圖與處理歷程，
+        評估前處理狀態、指出建模前還該做什麼。資料操作後可隨時重新評估。</p>
+      <button class="dbtn" id="btn-ai-data">評估目前資料處理狀態</button>
+      <p class="hint" id="ai-data-stale" style="display:none;color:var(--blue)">資料已變更——點上方按鈕重新評估。</p>
+      <div id="ai-data-out"></div>
     </div>
   </aside>
 

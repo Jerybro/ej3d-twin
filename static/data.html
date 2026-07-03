@@ -254,6 +254,16 @@
     .props-result .bad { color: var(--danger); font-weight: 600; }
     .props-result .good { color: var(--ok); font-weight: 600; }
     .hint { font-size: 13px; color: var(--text2); line-height: 1.8; }
+    /* 圓圈問號＋懸浮說明（泡泡掛 body、fixed 定位，不被 overflow 容器裁切） */
+    .qi { display: inline-flex; align-items: center; justify-content: center; flex: none;
+      width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--bdr);
+      color: var(--text2); font-size: 10.5px; font-weight: 600; font-style: normal;
+      cursor: help; vertical-align: -2px; margin-left: 5px; user-select: none; }
+    .qi:hover { border-color: var(--blue); color: var(--blue); }
+    .qi-pop { position: fixed; display: none; max-width: 340px; background: var(--text);
+      color: var(--bg); font-size: 12.5px; font-weight: 400; line-height: 1.75;
+      padding: 10px 13px; border-radius: 6px; z-index: 500; pointer-events: none;
+      white-space: normal; box-shadow: 0 6px 20px rgba(0, 0, 0, .35); }
     .sec-title { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 6px; }
     #props-adv { margin-top: 18px; border-top: 1px solid var(--bdr); padding-top: 12px; }
     #props-adv summary { font-size: 14px; font-weight: 500; color: var(--text);
@@ -570,7 +580,7 @@
         <input class="mini" id="wiz-name" placeholder="留空自動命名" autocomplete="off" />
         <label>預測目標（應變數）</label>
         <select class="mini" id="wiz-target"></select>
-        <label>任務型態</label>
+        <label>任務型態<span class="qi" data-tip="要模型做哪一種事：迴歸＝預測連續數值（溫度、產率）；分類＝預測類別（合格/不合格）；時序預測＝只用目標欄自己的歷史值外推未來，需要時間欄；設備異常偵測＝不需要目標欄，用健康運轉資料建立基準，之後監控偏離程度。「自動判定」依目標欄型態自動選迴歸或分類。">?</span></label>
         <select class="mini" id="wiz-task">
           <option value="auto">自動判定（數值目標＝迴歸、類別目標＝分類）</option>
           <option value="timeseries">時序預測（ARIMA 等時序演算法，單變量）</option>
@@ -587,7 +597,7 @@
             <input class="mini" id="wiz-ts-test" type="number" min="5" max="50" value="20" style="margin:0"></div>
         </div>
         <div id="wiz-val-cfg">
-          <label>驗證方法</label>
+          <label>驗證方法<span class="qi" data-tip="模型分數怎麼算才可信：把一部分資料藏起來不給模型看，訓練後拿來考它。K 折＝資料分 K 份輪流當考題（最常用、最穩）；保留法＝切一段當考題（快）；時序切分＝永遠用過去訓練、未來考試（時間序列資料的正確做法，避免「偷看未來」高估分數）。">?</span></label>
           <div class="opt-row" style="margin-top:0">
             <select class="mini" id="wiz-val-method" style="width:auto;margin:0">
               <option value="kfold">K 折交叉驗證</option>
@@ -603,11 +613,15 @@
         <label id="wiz-feat-label">自變數（預設全選）</label>
         <div id="wiz-features"></div>
         <div id="wiz-manual-only">
-          <label>演算法</label>
+          <label>演算法<span class="qi" data-tip="用哪種數學方法從資料學規則。不確定選哪個：迴歸/分類先用梯度提升 (XGB) 或隨機森林 (RF)；想要能解讀的公式選線性家族（GLM/Ridge/Lasso）；時序先用 ARIMA；異常偵測先用 PCA 多變量監控。選定後下方會顯示該演算法的白話說明。也可以回上一步用「全自動」把所有適用演算法各建一個，直接比分數。">?</span></label>
           <select class="mini" id="wiz-algo"></select>
+          <p class="hint" id="wiz-algo-desc" style="margin-top:6px"></p>
           <div class="wiz-params-head">
-            <label style="margin:0">超參數（留空＝預設值）</label>
-            <label class="wiz-tune"><input type="checkbox" id="wiz-tune" /> 自動調參（隨機搜尋覆蓋手動值）</label>
+            <label style="margin:0">超參數（留空＝預設值）<span class="qi" data-tip="演算法的「旋鈕」：控制模型學多細、多保守。留空一律用經驗預設值，不確定就別動——每個欄位旁的問號會說明調大調小的效果。">?</span></label>
+            <span style="display:inline-flex;align-items:center">
+              <label class="wiz-tune"><input type="checkbox" id="wiz-tune" /> 自動調參</label>
+              <span class="qi" data-tip="勾選後系統自動幫這個演算法試多組超參數組合（隨機搜尋＋交叉驗證），選驗證分數最好的一組——不用自己調，但訓練時間會變長數倍。手動填的值會被搜尋結果覆蓋；訓練完成後模型詳情會顯示「自動調參結果」讓你看選中了哪組。">?</span>
+            </span>
           </div>
           <div id="wiz-params" class="wiz-params"></div>
         </div>

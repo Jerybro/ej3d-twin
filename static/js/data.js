@@ -841,8 +841,11 @@ async function renderModels() {
       return [c.rmse, c.mae, c.maape, c.r2];
     };
     $('model-table').innerHTML = `<thead><tr>
-      <th>排名</th><th>模型</th><th>目標</th><th>任務</th><th>演算法</th>
-      <th>RMSE｜Acc</th><th>MAE｜F1</th><th>MAAPE｜Prec</th><th>R²｜Recall</th>
+      <th>排名${qi(METRIC_TIPS['排名'])}</th><th>模型</th><th>目標</th><th>任務</th><th>演算法</th>
+      <th>RMSE｜Acc${qi(`依任務顯示不同指標——迴歸：${METRIC_TIPS.RMSE}｜分類：${METRIC_TIPS.Accuracy}｜異常偵測：${METRIC_TIPS['風險門檻']}`)}</th>
+      <th>MAE｜F1${qi(`迴歸：${METRIC_TIPS.MAE}｜分類：${METRIC_TIPS.F1}｜異常偵測：${METRIC_TIPS['超標 %']}`)}</th>
+      <th>MAAPE｜Prec${qi(`迴歸：${METRIC_TIPS.MAAPE}｜分類：${METRIC_TIPS.Precision}`)}</th>
+      <th>R²｜Recall${qi(`迴歸：${METRIC_TIPS['R²']}｜分類：${METRIC_TIPS.Recall}`)}</th>
       <th>狀態</th><th>建立時間</th><th></th></tr></thead><tbody>${
       models.map((m, i) => `<tr data-id="${m.id}">
         <td>${m.status === 'done' ? `#${i + 1}` : ''}</td>
@@ -870,6 +873,26 @@ const METRIC_HEADS = {
   classification: ['Accuracy', 'F1', 'Precision', 'Recall'],
   anomaly: ['健康分數', '風險門檻', '超標 %', '事件數'],
 };
+
+// 圓圈問號：qi(說明) 產生 span，泡泡由全域 delegation 定位（見檔尾 initQiTips）
+const qi = (tip) => tip ? `<span class="qi" data-tip="${String(tip).replace(/"/g, '&quot;')}">?</span>` : '';
+// 指標縮寫白話字典——全部表頭共用
+const METRIC_TIPS = {
+  RMSE: '均方根誤差：預測與實際平均差多少（與目標同單位），大誤差會被平方放大——特別怕大錯時看這個。越小越好。',
+  MAE: '平均絕對誤差：預測與實際平均差多少，每筆誤差等權、不放大離群。越小越好，跟 RMSE 一起看：RMSE 遠大於 MAE 代表有少數大錯。',
+  MAAPE: '平均反正切百分比誤差：「平均差了百分之幾」的穩健版——實際值接近 0 時一般百分比誤差會爆表，這個不會。0＝完美，越小越好。',
+  'R²': '判定係數：模型解釋了資料變化的多少比例。1＝完美、0＝跟直接猜平均值一樣、負值＝比猜平均還差（模型無效）。',
+  Accuracy: '準確率：整體答對的比例。類別數量懸殊時會失真（全猜多數類也能拿高分），要搭配 F1 看。',
+  F1: '精確率與召回率的調和平均：兩者都高才會高。類別不平衡時比 Accuracy 可靠。',
+  Precision: '精確率：模型說「是」的裡面，真的是的比例——抓出來的有多準（誤報率的反面）。',
+  Recall: '召回率：實際為「是」的裡面，被模型抓到的比例——該抓的抓到多少（漏報率的反面）。',
+  '健康分數': 'AI 健康分數 0–100：由風險值換算——100＝完全貼合健康基準、50＝風險剛好到門檻、0＝風險達門檻兩倍。「近期」取資料末端 5% 的平均。≥70 正常、40–70 注意、<40 危急。',
+  '風險門檻': '判定異常的風險值分界線，預設取健康資料風險值的第 99 百分位（P99）。可在下方「風險值門檻試算」換方法重算並套用。',
+  '超標 %': '風險值超過門檻的資料筆數比例——健康基準資料上通常應在 1% 上下（P99 門檻的定義使然）。',
+  '事件數': '連續超標段的數量：風險值連續多筆超過門檻算一次「故障事件」，詳見下方整合型故障事件列表。',
+  '排名': '完成的模型依驗證分數排序：迴歸看 RMSE 最小、分類看 Accuracy 最高。',
+};
+const mh = (h) => `<th>${h}${qi(METRIC_TIPS[h])}</th>`;
 const metricVals = (mt, kind) => kind === 'classification'
   ? [mt.accuracy, mt.f1, mt.precision, mt.recall]
   : kind === 'anomaly'
@@ -895,8 +918,9 @@ async function openModelDetail(mid) {
   const isAn = m.task === 'anomaly';
   const kind = cls ? 'classification' : isAn ? 'anomaly' : 'regression';
   const heads = METRIC_HEADS[kind];
-  const algoName = ALGO_META.find((a) => a.key === m.algo)?.name ?? m.algo;
-  const tuned = m.tuned_params ? `<div class="md-sub">自動調參結果：${
+  const algoMeta = ALGO_META.find((a) => a.key === m.algo);
+  const algoName = algoMeta?.name ?? m.algo;
+  const tuned = m.tuned_params ? `<div class="md-sub">自動調參結果${qi('系統自動嘗試多組超參數（隨機搜尋＋交叉驗證）後選出的最佳組合——這個模型實際使用的就是這組值。')}：${
     Object.entries(m.tuned_params).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('×') : v}`).join('、')}</div>` : '';
   const charts = cls ? `
       <div class="md-chart"><h4>混淆矩陣 Confusion Matrix（驗證集）</h4><canvas id="md-cm"></canvas></div>
@@ -915,18 +939,18 @@ async function openModelDetail(mid) {
   const sumCards = isAn ? `
     <div class="sum-cards">
       <div class="sum-card">
-        <div class="sc-label">AI 健康分數（近期）</div>
+        <div class="sc-label">AI 健康分數（近期）${qi(`${METRIC_TIPS['健康分數']} 「7 天後預測」＝以每日健康分數的穩健趨勢外推 7 天的估計值。`)}</div>
         <div class="sc-big" style="color:${healthColor(mcv.health_now ?? 0)}">${mcv.health_now ?? '—'}</div>
         <div class="sc-sub">${(mcv.health_now ?? 0) >= 70 ? '正常' : (mcv.health_now ?? 0) >= 40 ? '注意' : '危急'}｜0–100${
           mcv.health_7d != null ? `｜7 天後預測 <span style="color:${healthColor(mcv.health_7d)};font-weight:600">${mcv.health_7d}</span>` : ''}</div>
       </div>
       <div class="sum-card">
-        <div class="sc-label">故障事件</div>
+        <div class="sc-label">故障事件${qi(METRIC_TIPS['事件數'])}</div>
         <div class="sc-big" style="color:${(mcv.n_events ?? 0) ? 'var(--danger)' : 'var(--ok)'}">${mcv.n_events ?? 0}</div>
         <div class="sc-sub">連續超標段（依峰值排序）</div>
       </div>
       <div class="sum-card">
-        <div class="sc-label">超標比例</div>
+        <div class="sc-label">超標比例${qi(`${METRIC_TIPS['超標 %']} ${METRIC_TIPS['風險門檻']}`)}</div>
         <div class="sc-big">${mcv.exceed_pct ?? '—'}%</div>
         <div class="sc-sub">風險門檻 ${mcv.threshold ?? '—'}</div>
       </div>
@@ -946,11 +970,11 @@ async function openModelDetail(mid) {
     <h3 style="display:flex;align-items:center;gap:8px"><span id="md-name">${m.name}</span>
       <button class="mini" id="btn-rename" title="改名"
         style="width:auto;padding:2px 10px;font-size:12px;cursor:pointer">改名</button></h3>
-    <div class="md-sub">${algoName}｜${taskName}｜訓練資料 ${m.n_rows.toLocaleString()} 筆｜目標 ${m.target}</div>
+    <div class="md-sub">${algoName}${qi(algoMeta?.desc)}｜${taskName}｜訓練資料 ${m.n_rows.toLocaleString()} 筆｜目標 ${m.target}</div>
     ${tuned}
     ${sumCards}
     <table class="md-metrics">
-      <tr><th>模型指標</th>${heads.map((h) => `<th>${h}</th>`).join('')}</tr>
+      <tr><th>模型指標</th>${heads.map(mh).join('')}</tr>
       ${isAn ? metricRow(m.val_desc ?? '健康基準', m.metrics_cv, kind)
         : metricRow(m.val_desc ?? '交叉驗證集', m.metrics_cv, kind) + metricRow('訓練資料集', m.metrics_train, kind)}
       <tbody id="ev-metric-row"></tbody>
@@ -968,7 +992,7 @@ async function openModelDetail(mid) {
           <option value="p995">風險值 99.5 百分位</option>
           <option value="sigma3">平均 + 3 倍標準差</option>
           <option value="iqr">IQR 上界（Q3 + 1.5×IQR）</option>
-        </select>
+        </select>${qi('門檻取法：99／99.5 百分位＝假設訓練段幾乎全健康，把最高的 1%／0.5% 風險值當分界（門檻越高越不易誤報、但可能晚報）；平均+3σ＝常態假設下約 0.1% 誤報率的經典管制界限；IQR 上界＝箱型圖離群判準（Q3+1.5×IQR），對偏態分布較穩健。試算只顯示結果，「試算並套用」才會改掉模型的門檻並重算健康分數與事件。')}
         <button class="dbtn" style="width:auto;padding:8px 22px;margin:0" id="btn-thresh">試算</button>
         <button class="dbtn" style="width:auto;padding:8px 22px;margin:0" id="btn-thresh-apply">試算並套用</button>
       </div>
@@ -1055,7 +1079,7 @@ function renderEvaluation(m, ev) {
   $('ev-out').innerHTML = `
     <div class="md-sub" style="margin-top:10px">評估時間 ${ev.evaluated_at}｜${ev.n_rows.toLocaleString()} 筆</div>
     <table class="md-metrics">
-      <tr><th>評估指標</th>${METRIC_HEADS[kind].map((h) => `<th>${h}</th>`).join('')}</tr>
+      <tr><th>評估指標</th>${METRIC_HEADS[kind].map(mh).join('')}</tr>
       ${metricRow('現行視圖', ev.metrics, kind)}
     </table>
     <div class="md-chart" style="max-width:${(isTs || isAn) ? '100%' : '560px'}"><h4>${
@@ -1087,7 +1111,7 @@ function renderBatch(m, b) {
     <div class="md-sub" style="margin-top:12px">測試資料 ${b.filename}｜${b.at}｜
       ${b.n_rows.toLocaleString()} 筆（可預測 ${b.n_pred.toLocaleString()} 筆）</div>
     ${b.metrics ? `<table class="md-metrics">
-      <tr><th>試算指標</th>${METRIC_HEADS[kind].map((h) => `<th>${h}</th>`).join('')}</tr>
+      <tr><th>試算指標</th>${METRIC_HEADS[kind].map(mh).join('')}</tr>
       ${metricRow('測試資料集', b.metrics, kind)}
     </table>` : '<p class="hint" style="margin:8px 0">測試資料未含目標欄——僅輸出預測值，無準確度指標。</p>'}
     <div class="md-charts">${charts.join('')}</div>
@@ -1757,13 +1781,18 @@ $('wiz-mode-ok').addEventListener('click', () => {
   };
   const renderParams = () => {
     const meta = ALGO_META.find((a) => a.key === $('wiz-algo').value);
-    if (!meta) { $('wiz-params').innerHTML = ''; return; }
+    if (!meta) { $('wiz-params').innerHTML = ''; $('wiz-algo-desc').textContent = ''; return; }
+    $('wiz-algo-desc').textContent = meta.desc ?? '';
+    // 數值輸入的步進：後端 schema 指定 step（float），int 預設 1——step="any" 的箭頭是一次跳 1
     $('wiz-params').innerHTML = meta.params.length ? meta.params.map((p) => `
-      <div class="wp"><label>${p.label}</label>${
+      <div class="wp"><label>${p.label}${qi(p.desc)}</label>${
       p.type === 'choice'
         ? `<select data-key="${p.key}">${p.choices.map((c) => `<option ${c === p.default ? 'selected' : ''}>${c}</option>`).join('')}</select>`
-        : `<input data-key="${p.key}" type="${p.type === 'str' ? 'text' : 'number'}" step="any"
-             placeholder="預設 ${p.default ?? '自動'}">`}</div>`).join('')
+        : p.type === 'str'
+          ? `<input data-key="${p.key}" type="text" placeholder="預設 ${p.default ?? '自動'}">`
+          : `<input data-key="${p.key}" type="number" step="${p.step ?? (p.type === 'int' ? 1 : 'any')}"
+               ${p.min != null ? `min="${p.min}"` : ''} ${p.max != null ? `max="${p.max}"` : ''}
+               placeholder="預設 ${p.default ?? '自動'}">`}</div>`).join('')
       : '<p class="hint" style="grid-column:1/-1">此演算法無關鍵超參數（用預設即可）</p>';
     $('wiz-tune').disabled = !meta.tunable || taskKey() === 'timeseries';
   };
@@ -1868,6 +1897,28 @@ $('btn-scan').addEventListener('click', async () => {
     await refreshState();
   });
 });
+
+// ------------------------------------------------------------ 圓圈問號懸浮說明
+// 泡泡掛 body＋fixed 定位：不被表格/卡片的 overflow 裁切；事件 delegation 涵蓋動態內容
+(() => {
+  const pop = document.createElement('div');
+  pop.className = 'qi-pop';
+  document.body.appendChild(pop);
+  document.addEventListener('mouseover', (e) => {
+    const q = e.target.closest?.('.qi');
+    if (!q) { if (pop.style.display !== 'none') pop.style.display = 'none'; return; }
+    pop.textContent = q.dataset.tip ?? '';
+    pop.style.display = 'block';
+    const r = q.getBoundingClientRect();
+    const pw = pop.offsetWidth, ph = pop.offsetHeight;
+    let x = r.left + r.width / 2 - pw / 2;
+    x = Math.max(8, Math.min(x, innerWidth - pw - 8));
+    let y = r.top - ph - 9;
+    if (y < 8) y = r.bottom + 9;   // 上方放不下改下方
+    pop.style.left = `${x}px`;
+    pop.style.top = `${y}px`;
+  });
+})();
 
 // ------------------------------------------------------------ 流體物性（進階，選配）
 async function refreshPropsFluids() {

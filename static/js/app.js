@@ -400,9 +400,11 @@ for (const unit of plantData.plant.units) {
 // P&ID 自動抽取的管線可達數千段——合併成單一 BufferGeometry（一次 draw call），
 // 手繪少量管線走原路徑（個別 mesh 保留陰影品質）
 const pipeMat = std(0x646f7b);
+const bridgeMat = std(0x2e8ba8); // 跨圖橋接管：主題青，一眼辨識「這條是縫合線」
 {
   const manyPipes = plantData.pipes.length > 60;
   const geos = [];
+  const bridgeGeos = [];
   const up = new THREE.Vector3(0, 1, 0);
   for (const pipe of plantData.pipes) {
     const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
@@ -417,9 +419,9 @@ const pipeMat = std(0x646f7b);
       cylGeo.applyQuaternion(q);
       cylGeo.translate(mid.x, mid.y, mid.z);
       if (manyPipes) {
-        geos.push(cylGeo);
+        (pipe.bridge ? bridgeGeos : geos).push(cylGeo);
       } else {
-        const cyl = new THREE.Mesh(cylGeo, pipeMat);
+        const cyl = new THREE.Mesh(cylGeo, pipe.bridge ? bridgeMat : pipeMat);
         cyl.castShadow = true;
         plantGroup.add(cyl);
         const joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
@@ -428,8 +430,9 @@ const pipeMat = std(0x646f7b);
       }
     }
   }
-  if (geos.length) {
-    const merged = new THREE.Mesh(BufferGeometryUtils.mergeGeometries(geos, false), pipeMat);
+  for (const [gs, mat] of [[geos, pipeMat], [bridgeGeos, bridgeMat]]) {
+    if (!gs.length) continue;
+    const merged = new THREE.Mesh(BufferGeometryUtils.mergeGeometries(gs, false), mat);
     merged.castShadow = false; // 數千段的陰影貼圖成本不值得
     plantGroup.add(merged);
   }

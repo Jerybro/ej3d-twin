@@ -64,6 +64,10 @@ INST_UNIT = {"T": "°C", "P": "kg/cm²g", "F": "m³/h", "L": "%", "A": "ppm", "G
 # 常見誤抓黑名單（圖框/接續標記/公司字樣）
 BLACKLIST_RE = re.compile(r"^(DWG|REV|NO|PAGE|SHT|SH|ISO|ANSI|API|NPS|SCH)\d*$")
 
+# 跨圖接續標記（off-page connector）：「070-2/01」＝接到圖 C12070-2 的
+# 01 號接點；對側圖上有互指的「070-1/01」。C12070-1↔C12070-2 實測雙向成對。
+CONN_RE = re.compile(r"^(\d{3}-\d{1,2})/(\d{1,2}[A-Z]?)$")
+
 # 設備位號最低信心：實測真正的設備大字（貼近容器繪圖的位號）信心穩定在
 # 0.99-1.0；本文敘述句中夾帶的設備參照字（如「…POSSIBLE TO E651」誤讀
 # 成「F651」）信心明顯偏低（~0.56）。用此門檻擋掉這類誤讀，儀錶不受影響
@@ -115,7 +119,8 @@ def _ocr(img, tile=2200, overlap=200):
             crop = img.crop((tx, ty, min(tx + tile, W), min(ty + tile, H)))
             results = reader.readtext(
                 np.array(crop.convert("RGB")),
-                allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
+                # '/' 供跨圖接續標記（070-2/01）；位號不含 '/'，分類不受影響
+                allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/",
                 text_threshold=0.5, low_text=0.3,
             )
             for bbox, text, conf in results:
@@ -241,12 +246,27 @@ def _rescue_orphans(img, hits, used):
     return rescued
 
 
+def _extract_connectors(hits) -> list:
+    """OCR 命中 → 跨圖接續標記清單（同標記取信心最高者）。"""
+    conns = {}
+    for cx, cy, text, conf, _h in hits:
+        m = CONN_RE.match(text.replace(" ", ""))
+        if not m:
+            continue
+        label = m.group(0)
+        if label not in conns or conf > conns[label][2]:
+            conns[label] = (cx, cy, conf, m.group(1), m.group(2))
+    return [{"label": lb, "tgt": tgt, "cid": cid,
+             "cx": round(cx, 1), "cy": round(cy, 1), "conf": round(conf, 2)}
+            for lb, (cx, cy, conf, tgt, cid) in conns.items()]
+
+
 def _classify(hits):
     """OCR 命中 → 設備/儀錶清單（同 tag 取信心最高者）。"""
     equips, insts = {}, {}
     for cx, cy, text, conf, _h in hits:
         t = text.replace(" ", "").replace("-", "")  # 正規化去連字號（E-651≡E651）
-        if BLACKLIST_RE.match(t):
+        if BLACKLIST_RE.match(t) or "/" in t:
             continue
         if INST_RE.match(t):
             if t not in insts or conf > insts[t][2]:
@@ -452,6 +472,7 @@ def parse_pid(filename: str) -> dict:
     hits, used = _merge_fragments(raw)
     hits += _rescue_orphans(img, raw, used)
     equips, insts = _classify(hits)
+    connectors = _extract_connectors(hits)
     tile_url = _save_tiles(img, Path(filename).stem)
     pos, tile_h = _pixel_true_layout(equips, img.width, img.height)
     pipe_polys, page_w, page_h = extract_pipes(pdf_path)
@@ -515,5 +536,8 @@ def parse_pid(filename: str) -> dict:
             "px": {tag: [round(c[0], 1), round(c[1], 1)] for tag, c in equips.items()},
             "tile_lo": tile_url.replace(".jpg", "_lo.jpg"),
             "pipes_uv": pipes_uv,
+            # 跨圖接續標記（縫合用；cx/cy 為轉正後圖像像素）
+            "connectors": [{**c, "u": round(c["cx"] / img.width, 4),
+                            "v": round(c["cy"] / img.height, 4)} for c in connectors],
         },
     }

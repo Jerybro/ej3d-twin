@@ -19,9 +19,83 @@ import threading
 import time
 from pathlib import Path
 
-from .pid_parse import PID_DIR, _push_apart, _uv_to_scene_pipes, parse_pid
+from .pid_parse import PID_DIR, PIPE_Y, _push_apart, _uv_to_scene_pipes, parse_pid
 
 MERGED_PIPES_PER_SHEET = 80  # 整廠模式每張圖取最長 N 條（30 張全收會塞爆）
+BRIDGE_Y = 8.0     # 橋接管線高度（跨圖島，飛越一般管線與多數設備）
+BRIDGE_R = 0.16
+
+
+def _short_name(stem: str) -> str | None:
+    """圖檔名 → 接續標記使用的短圖名：C12070-1 → 070-1（PFD 無短名）。"""
+    m = re.match(r"^C12(\d{3}-\d{1,2})$", stem.upper())
+    return m.group(1) if m else None
+
+
+def _match_connectors(results: dict, order: list[str]) -> tuple[list, dict]:
+    """跨圖接續標記雙向配對 → [(stemA, uvA, stemB, uvB)] 橋接清單＋統計。
+
+    配對鍵＝(兩圖短名排序, 接點編號)：A 圖上的「070-2/01」與 C12070-2 圖上
+    的「070-1/01」互指（C12070-1↔C12070-2 實測成對）。單側缺漏（對側 OCR
+    沒抓到）不畫橋，只記統計。
+    """
+    by_short = {s: stem for stem in order if (s := _short_name(stem))}
+    sides: dict[tuple, dict] = {}
+    total = 0
+    for stem in order:
+        a_short = _short_name(stem)
+        if not a_short:
+            continue
+        for c in results[stem]["geom"].get("connectors", []):
+            if c["tgt"] not in by_short:   # 接到集外圖（他單元）
+                continue
+            total += 1
+            key = (*sorted((a_short, c["tgt"])), c["cid"])
+            sides.setdefault(key, {})[a_short] = (stem, c["u"], c["v"])
+    bridges = []
+    for key, ends in sides.items():
+        if len(ends) == 2:
+            (sa, ua, va), (sb, ub, vb) = ends.values()
+            bridges.append((sa, (ua, va), sb, (ub, vb)))
+    return bridges, {"refs": total, "paired": len(bridges) * 2}
+
+
+def _optimize_slots(order: list[str], edges: list[tuple], cols: int,
+                    slot_w: float, slot_h: float, sweeps: int = 20) -> list[str]:
+    """slot 交換爬山：讓有橋接的圖島盡量相鄰（初始＝製程流向序，保流向大局）。"""
+    def center(idx):
+        return ((idx % cols) * slot_w, (idx // cols) * slot_h)
+
+    pos = {stem: i for i, stem in enumerate(order)}
+    pair_w: dict[tuple, int] = {}
+    for sa, _, sb, _ in edges:
+        k = tuple(sorted((sa, sb)))
+        pair_w[k] = pair_w.get(k, 0) + 1
+
+    def cost():
+        c = 0.0
+        for (sa, sb), w in pair_w.items():
+            (xa, za), (xb, zb) = center(pos[sa]), center(pos[sb])
+            c += w * ((xa - xb) ** 2 + (za - zb) ** 2)
+        return c
+
+    cur = cost()
+    stems = list(order)
+    for _ in range(sweeps):
+        improved = False
+        for i in range(len(stems)):
+            for j in range(i + 1, len(stems)):
+                a, b = stems[i], stems[j]
+                pos[a], pos[b] = pos[b], pos[a]
+                nc = cost()
+                if nc < cur - 1e-9:
+                    cur = nc
+                    improved = True
+                else:
+                    pos[a], pos[b] = pos[b], pos[a]
+        if not improved:
+            break
+    return sorted(stems, key=lambda s: pos[s])
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATUS_PATH = BASE_DIR / "data" / "pid_batch_status.json"
@@ -142,26 +216,25 @@ def merge_results(results: dict[str, dict]) -> dict:
         spans[stem] = (TILE_W, round(tile_h, 2))
         tiles[stem] = geom["tile_lo"]
 
-    # 製程流向排序：階段 → 圖號
+    # 製程流向排序：階段 → 圖號（＝縫合佈局的初始解，保流向大局）
     order = sorted(sheets, key=lambda s: (_sheet_stage(s, sheet_tags[s]), s))
 
-    # shelf 佈局（tile 等寬，行高取該行最大縱深）
+    # 跨圖接續標記配對 → 連通性驅動佈局（有橋接的圖島拉相鄰）
+    bridges, conn_stat = _match_connectors(results, order)
     cols = max(1, math.ceil(math.sqrt(len(order) * 1.6)))
     gap = 6.0
+    slot_w = TILE_W + gap
+    slot_h = max(sh for _, sh in spans.values()) + gap
+    order = _optimize_slots(order, bridges, cols, slot_w, slot_h)
+
+    # 均勻 slot 佈局（等寬等高格）
     origins: dict[str, tuple] = {}
-    row_h = 0.0
-    cur_x, cur_z = 0.0, 0.0
-    total_w = 0.0
     for i, stem in enumerate(order):
-        sw, sh = spans[stem]
-        if i and i % cols == 0:
-            cur_z += row_h + gap
-            cur_x, row_h = 0.0, 0.0
-        origins[stem] = (cur_x + sw / 2, cur_z + sh / 2)
-        cur_x += sw + gap
-        row_h = max(row_h, sh)
-        total_w = max(total_w, cur_x - gap)
-    total_h = cur_z + row_h
+        origins[stem] = ((i % cols) * slot_w + TILE_W / 2,
+                         (i // cols) * slot_h + spans[stem][1] / 2)
+    rows = math.ceil(len(order) / cols)
+    total_w = min(len(order), cols) * slot_w - gap
+    total_h = rows * slot_h - gap
     off_x, off_z = -total_w / 2, -total_h / 2  # 全場置中
 
     units = []
@@ -188,11 +261,28 @@ def merge_results(results: dict[str, dict]) -> dict:
             spans[stem][0], spans[stem][1], ox, oz,
             limit=MERGED_PIPES_PER_SHEET)
 
+    # 跨圖橋接管線：接續標記配對點之間，高空跨接（縫合成一張廠區的「線」）
+    def world(stem, uv):
+        ox = origins[stem][0] + off_x
+        oz = origins[stem][1] + off_z
+        return ((uv[0] - 0.5) * spans[stem][0] + ox,
+                (uv[1] - 0.5) * spans[stem][1] + oz)
+
+    for sa, uva, sb, uvb in bridges:
+        (xa, za), (xb, zb) = world(sa, uva), world(sb, uvb)
+        pipes.append({"pts": [
+            [round(xa, 2), PIPE_Y, round(za, 2)],
+            [round(xa, 2), BRIDGE_Y, round(za, 2)],
+            [round(xb, 2), BRIDGE_Y, round(zb, 2)],
+            [round(xb, 2), PIPE_Y, round(zb, 2)],
+        ], "r": BRIDGE_R, "bridge": True})
+
     return {
         "plant": {"id": "TA32-FULL", "name": MERGED_NAME, "units": units},
         "pipes": pipes,
         "instruments": instruments,
         "underlays": underlays,
+        "stitch": {"bridges": len(bridges), **conn_stat},
     }
 
 
@@ -237,6 +327,7 @@ def run_batch(files: list[str] | None = None) -> dict:
             "equipment": sum(len(u["equipment"]) for u in merged["plant"]["units"]) if merged else 0,
             "instruments": len(merged.get("instruments", {})) if merged else 0,
             "sheets": len(results), "errors": errors,
+            "stitch": merged.get("stitch", {}) if merged else {},
         }
         _write_status(summary)
         return summary

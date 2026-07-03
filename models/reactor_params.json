@@ -1,15 +1,15 @@
 {
-  "description": "Tatoray R611 約束平衡模型參數（1004 天實測識別，2020-08~2023-01 訓練段）",
+  "description": "Tatoray R611 約束平衡模型參數（958 天穩態過濾實測識別，2020-08~2023-01 訓練段）",
   "K1_disproportionation": 0.2255,
-  "K2_transalkylation": 2.6659,
+  "K2_transalkylation": 2.6644,
   "ring_gain_per_molTOLfeed": 0.0518,
-  "methyl_gain_per_molTOLfeed": 0.0394,
+  "methyl_gain_per_molTOLfeed": 0.0395,
   "side_delta_per_molTOLfeed": {
-    "EB": 0.01002,
-    "MEB": -0.04997,
+    "EB": 0.01005,
+    "MEB": -0.04995,
     "PB": -0.01069,
     "Indane": -0.00529,
-    "C10p": -0.00972,
+    "C10p": -0.00967,
     "nonARO": 0.00046
   },
   "MW": {
@@ -32,6 +32,7 @@
       "XYL": 0.62,
       "TMB": 0.181
     },
-    "toluene_conversion_MAE_pct": 0.54
-  }
+    "toluene_conversion_MAE_pct": 0.516
+  },
+  "preprocessing": "五級穩態過濾（R0停車/R1重啟暫態3日/R2物料衡算±1%/R3溫度負荷跳變/R4平衡商0.5%雙尾）：1210→958天"
 }

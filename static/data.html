@@ -16,10 +16,10 @@
       font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", sans-serif; font-size: 14px; overflow: hidden; }
     .layout { display: flex; height: 100vh; }
     aside.left {
-      width: 260px; flex-shrink: 0; border-right: 1px solid var(--bdr);
-      padding: 16px; overflow-y: auto; background: var(--panel);
+      width: 264px; flex-shrink: 0; border-right: 1px solid var(--bdr);
+      padding: 14px; overflow-y: auto; background: var(--panel);
     }
-    .head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+    .head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
     .brand-home {
       display: inline-flex; align-items: center; justify-content: center;
       width: 26px; height: 26px; border-radius: 6px;
@@ -28,21 +28,32 @@
     }
     h1 { font-size: 15px; font-weight: 700; }
     .section-title { font-size: 11px; font-weight: 700; color: var(--accent);
-      letter-spacing: 1px; margin: 16px 0 8px; }
+      letter-spacing: 1px; margin: 14px 0 8px; }
     .drop {
-      border: 1.5px dashed var(--bdr); border-radius: 10px; padding: 16px;
+      border: 1.5px dashed var(--bdr); border-radius: 10px; padding: 14px;
       text-align: center; color: var(--dim); font-size: 12.5px; cursor: pointer;
     }
     .drop:hover, .drop.over { border-color: var(--accent); color: var(--text); }
     .drop input { display: none; }
     #file-meta { font-size: 12px; color: var(--dim); margin-top: 8px; line-height: 1.6; }
+    #col-search {
+      width: 100%; padding: 6px 9px; border-radius: 7px; margin-bottom: 6px;
+      background: var(--bg); border: 1px solid var(--bdr); color: var(--text);
+      font-family: inherit; font-size: 12.5px;
+    }
     .col-item {
-      display: flex; align-items: center; gap: 8px; padding: 5px 8px;
-      border-radius: 6px; cursor: pointer; font-size: 12.5px;
+      display: flex; align-items: center; gap: 7px; padding: 5px 6px;
+      border-radius: 6px; font-size: 12.5px;
     }
     .col-item:hover { background: rgba(70, 194, 224, 0.08); }
-    .col-item input { accent-color: var(--accent); }
-    .col-item .dtype { margin-left: auto; color: var(--dim); font-size: 10.5px; }
+    .col-item input { accent-color: var(--accent); flex-shrink: 0; }
+    .col-item .cname { cursor: pointer; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; flex: 1; }
+    .col-item .cname:hover { color: var(--accent); }
+    .col-item.is-hidden .cname { text-decoration: line-through; color: var(--dim); }
+    .col-item .warn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex-shrink: 0; }
+    .col-item .hide-btn { color: var(--dim); font-size: 10.5px; cursor: pointer; flex-shrink: 0; }
+    .col-item .hide-btn:hover { color: var(--text); }
     main.center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
     #toolbar {
       display: flex; align-items: center; gap: 8px; padding: 10px 14px;
@@ -54,7 +65,6 @@
     }
     .tbtn:hover { border-color: var(--accent); }
     .tbtn.warn { border-color: rgba(255, 170, 60, 0.5); color: var(--warn); }
-    .tbtn.warn:hover { background: rgba(255, 170, 60, 0.1); }
     .tbtn:disabled { opacity: 0.4; pointer-events: none; }
     #stat-chip { margin-left: auto; font-size: 12px; color: var(--dim); }
     #stat-chip b { color: var(--ok); }
@@ -62,43 +72,52 @@
     #chart { width: 100%; height: 100%; display: block; cursor: crosshair; }
     #chart-hint { position: absolute; top: 10px; left: 14px; font-size: 12px; color: var(--dim);
       background: rgba(14,20,27,0.8); padding: 4px 10px; border-radius: 8px; }
+    #detail-wrap { height: 220px; border-top: 1px solid var(--bdr); position: relative; flex-shrink: 0; }
+    #detail { width: 100%; height: 100%; display: block; }
+    #detail-title { position: absolute; top: 8px; left: 14px; font-size: 12px; color: var(--dim); }
     aside.right {
-      width: 320px; flex-shrink: 0; border-left: 1px solid var(--bdr);
+      width: 330px; flex-shrink: 0; border-left: 1px solid var(--bdr);
       background: var(--panel); display: flex; flex-direction: column;
     }
     .tabs { display: flex; border-bottom: 1px solid var(--bdr); }
     .tab {
-      flex: 1; padding: 11px 0; text-align: center; cursor: pointer;
-      font-size: 13px; color: var(--dim); border-bottom: 2px solid transparent;
+      flex: 1; padding: 10px 0; text-align: center; cursor: pointer;
+      font-size: 12.5px; color: var(--dim); border-bottom: 2px solid transparent;
     }
     .tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
-    .tab-body { flex: 1; overflow-y: auto; padding: 14px; display: none; }
+    .tab-body { flex: 1; overflow-y: auto; padding: 12px; display: none; }
     .tab-body.show { display: block; }
+    .step-row {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--panel2); border: 1px solid var(--bdr); border-radius: 8px;
+      padding: 8px 10px; margin-bottom: 6px; font-size: 12.5px;
+    }
+    .step-row.off { opacity: 0.45; }
+    .step-row input[type="checkbox"] { accent-color: var(--accent); }
+    .step-row .lbl { flex: 1; line-height: 1.4; }
+    .step-row .hits { color: var(--warn); font-size: 11.5px; white-space: nowrap; }
+    .step-row .del { color: var(--danger); cursor: pointer; font-size: 12px; }
     .rule-row {
       background: var(--panel2); border: 1px solid var(--bdr); border-radius: 8px;
       padding: 10px; margin-bottom: 8px; font-size: 12.5px;
     }
-    .rule-row select, .rule-row input {
+    .rule-row select, .rule-row input, select.mini, input.mini {
       width: 100%; margin-top: 5px; padding: 5px 8px; border-radius: 6px;
       background: var(--bg); border: 1px solid var(--bdr); color: var(--text);
       font-family: inherit; font-size: 12.5px;
     }
     .rule-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-    .rule-del { float: right; color: var(--danger); cursor: pointer; font-size: 12px; }
-    .reason-stat { font-size: 12.5px; padding: 6px 10px; border-radius: 6px;
-      background: var(--panel2); margin-bottom: 5px; display: flex; justify-content: space-between; }
-    .reason-stat b { color: var(--warn); }
+    select.mini, input.mini { margin: 0 0 7px; }
+    .hint { font-size: 11.5px; color: var(--dim); line-height: 1.7; margin-top: 8px; }
     #corr-grid { display: grid; gap: 1px; font-size: 10px; }
     .corr-cell { aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
-      border-radius: 2px; cursor: default; color: rgba(255,255,255,0.85); }
+      border-radius: 2px; color: rgba(255,255,255,0.85); }
     .corr-label { font-size: 10px; color: var(--dim); overflow: hidden; white-space: nowrap;
       display: flex; align-items: center; padding: 0 2px; }
-    .hint { font-size: 11.5px; color: var(--dim); line-height: 1.7; margin-top: 8px; }
-    select.mini, input.mini {
-      padding: 6px 8px; border-radius: 6px; background: var(--bg);
-      border: 1px solid var(--bdr); color: var(--text); font-family: inherit;
-      font-size: 12.5px; width: 100%; margin-bottom: 7px;
-    }
+    .health-item { background: var(--panel2); border: 1px solid rgba(255,170,60,0.4);
+      border-radius: 8px; padding: 9px 11px; margin-bottom: 6px; font-size: 12.5px; }
+    .health-item b { color: var(--warn); }
+    .health-item .w { color: var(--dim); font-size: 11.5px; line-height: 1.6; }
     .props-result { font-size: 12.5px; background: var(--panel2); border: 1px solid var(--bdr);
       border-radius: 8px; padding: 10px; margin-top: 10px; line-height: 1.8; }
     .props-result .bad { color: var(--danger); font-weight: 700; }
@@ -117,50 +136,92 @@
         <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.xlsm" />
       </label>
       <div id="file-meta"></div>
-      <div class="section-title">欄位（勾選繪圖）</div>
+      <div class="section-title">欄位（勾選繪圖・點名稱看分布）</div>
+      <input id="col-search" placeholder="搜尋欄位…" style="display:none" />
       <div id="col-list"><span style="color:var(--dim);font-size:12px">先上傳資料</span></div>
     </aside>
 
     <main class="center">
       <div id="toolbar">
         <button class="tbtn warn" id="btn-exclude" disabled>剔除圈選</button>
-        <button class="tbtn" id="btn-restore" disabled>復原圈選</button>
         <button class="tbtn" id="btn-clear-sel" disabled>取消選取</button>
-        <button class="tbtn" id="btn-export" disabled>匯出清洗後 CSV</button>
+        <button class="tbtn" id="btn-report" disabled>分析報表</button>
+        <button class="tbtn" id="btn-export" disabled>匯出 CSV</button>
         <span id="stat-chip">—</span>
       </div>
       <div id="chart-wrap">
         <canvas id="chart"></canvas>
-        <span id="chart-hint">上傳資料並勾選欄位；拖曳框選資料點後可剔除</span>
+        <span id="chart-hint">上傳資料並勾選欄位；拖曳框選資料點後可剔除（記入編輯歷程）</span>
+      </div>
+      <div id="detail-wrap">
+        <canvas id="detail"></canvas>
+        <span id="detail-title">點欄位名稱看單變量分布；「圖表」頁可畫雙變量</span>
       </div>
     </main>
 
     <aside class="right">
       <div class="tabs">
-        <div class="tab active" data-tab="rules">清洗規則</div>
-        <div class="tab" data-tab="corr">相關分析</div>
-        <div class="tab" data-tab="props">物性模組</div>
+        <div class="tab active" data-tab="steps">編輯歷程</div>
+        <div class="tab" data-tab="chart2">圖表</div>
+        <div class="tab" data-tab="analysis">分析</div>
+        <div class="tab" data-tab="props">物性</div>
       </div>
 
-      <div class="tab-body show" id="tab-rules">
-        <button class="tbtn" id="btn-add-rule" style="width:100%">新增規則</button>
-        <div id="rule-list" style="margin-top:10px"></div>
-        <button class="tbtn" id="btn-apply-rules" style="width:100%;margin-top:6px" disabled>套用規則</button>
-        <div class="section-title">剔除統計</div>
-        <div id="reason-stats"><span class="hint">尚未套用</span></div>
-        <p class="hint">規則引擎與 TA32 五級穩態過濾同源：值域（停機/冷態）、
-          跳變（非穩態）、分位離群、凍結值（儀錶卡死）。每筆剔除都有原因可審計。</p>
+      <div class="tab-body show" id="tab-steps">
+        <div id="step-list"><span class="hint">清理動作會記錄於此，可個別停用還原</span></div>
+        <div class="section-title">新增清理規則</div>
+        <div class="rule-row" id="rule-editor">
+          <select id="rule-kind">
+            <option value="range">值域（停機/冷態）</option>
+            <option value="jump">跳變・絕對值</option>
+            <option value="jump_pct">跳變・百分比</option>
+            <option value="quantile">分位離群</option>
+            <option value="flatline">凍結值（連續等值）</option>
+          </select>
+          <select id="rule-col"><option value="">欄位…</option></select>
+          <div class="rule-grid" id="rule-params"></div>
+          <button class="tbtn" id="btn-add-rule" style="width:100%;margin-top:8px" disabled>加入歷程</button>
+        </div>
+        <div class="section-title">時間聚合</div>
+        <div class="rule-row">
+          <select id="agg-freq">
+            <option value="">解析度…</option>
+            <option value="1h">每小時</option><option value="1D">每日</option>
+            <option value="1W">每週</option><option value="1ME">每月</option>
+          </select>
+          <select id="agg-fn"><option value="mean">平均 Mean</option><option value="sum">總和 Sum</option>
+            <option value="max">最大</option><option value="min">最小</option></select>
+          <button class="tbtn" id="btn-agg" style="width:100%;margin-top:8px" disabled>加入聚合</button>
+        </div>
       </div>
 
-      <div class="tab-body" id="tab-corr">
-        <button class="tbtn" id="btn-corr" style="width:100%" disabled>計算皮爾森相關（勾選欄位）</button>
-        <div id="corr-out" style="margin-top:12px"></div>
+      <div class="tab-body" id="tab-chart2">
+        <div class="section-title">雙變量圖（自動選型）</div>
+        <select class="mini" id="bi-x"><option value="">X 欄位…</option></select>
+        <select class="mini" id="bi-y"><option value="">Y 欄位…</option></select>
+        <button class="tbtn" id="btn-bi" style="width:100%" disabled>繪製（顯示於下方圖區）</button>
+        <p class="hint">數值×數值→散佈圖、類別×數值→箱型圖（Tukey 自動選型同款）。</p>
+      </div>
+
+      <div class="tab-body" id="tab-analysis">
+        <div class="section-title">相關分析</div>
+        <select class="mini" id="corr-method">
+          <option value="pearson">Pearson</option>
+          <option value="spearman">Spearman</option>
+          <option value="kendall">Kendall</option>
+        </select>
+        <button class="tbtn" id="btn-corr" style="width:100%" disabled>計算（勾選欄位）</button>
+        <div id="corr-out" style="margin-top:10px"></div>
+        <div class="section-title">資料健檢</div>
+        <button class="tbtn" id="btn-health" style="width:100%" disabled>執行健檢</button>
+        <div id="health-out" style="margin-top:10px"></div>
+        <p class="hint">判準：ID-ness（不重複值>20%）、大量重複（>75%）、大量遺失（>30%）——
+          有警告的欄位不建議作自變數。</p>
       </div>
 
       <div class="tab-body" id="tab-props">
-        <p class="hint" style="margin:0 0 10px">
-          CoolProp 物性引擎：物理合理性檢查標記超出物性邊界的數據
-          （AI 外插的物理柵欄），並可推算衍生物性欄位供建模。</p>
+        <p class="hint" style="margin:0 0 10px">CoolProp 物性引擎：合理性檢查標記超出
+          物性邊界的數據（記入編輯歷程），並可推算物性欄位。</p>
         <select class="mini" id="props-fluid"></select>
         <select class="mini" id="props-tcol"><option value="">溫度欄位…</option></select>
         <select class="mini" id="props-tunit"><option value="C">°C</option><option value="K">K</option></select>
@@ -172,7 +233,6 @@
         <button class="tbtn" id="btn-props-check" style="width:100%;margin-bottom:6px" disabled>物理合理性檢查</button>
         <button class="tbtn" id="btn-props-derive" style="width:100%" disabled>推算物性欄位</button>
         <div id="props-out"></div>
-        <p class="hint">物理約束建模案例：<a href="/static/../docs/reactor_model.md" style="color:var(--accent)" target="_blank">Tatoray 約束平衡模型</a>（守恆＋平衡商，實測 MAE 0.5%）</p>
       </div>
     </aside>
   </div>

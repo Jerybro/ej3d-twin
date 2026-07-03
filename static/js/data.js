@@ -108,6 +108,7 @@ document.querySelectorAll('.nav-tab[data-view]').forEach((t) => t.addEventListen
   $('target-select').style.display = v === 'explore' ? '' : 'none';
   $('perpage-wrap').style.display = v === 'dataset' ? 'flex' : 'none';
   if (v === 'model') renderModels();
+  if (v === 'explore' && wallDirty) { wallDirty = false; renderWall(); }
 }));
 
 $('perpage-select').addEventListener('change', async (e) => {
@@ -147,12 +148,15 @@ $('btn-theme').addEventListener('click', (e) => {
   markThemeMenu();
   $('theme-menu').classList.toggle('open');
 });
+let wallDirty = false;   // 主題在非探索視圖切換時，回到探索再重繪（隱藏 canvas 尺寸為 0 會畫空白）
 $('theme-menu').querySelectorAll('button').forEach((b) => b.addEventListener('click', async () => {
   themeKey = b.dataset.theme;
   localStorage.setItem('ej-chart-theme', themeKey);
   markThemeMenu();
   $('theme-menu').classList.remove('open');
-  if (sid) await renderWall();
+  if (!sid) return;
+  if ($('explore-view').style.display !== 'none') await renderWall();
+  else wallDirty = true;
 }));
 
 document.addEventListener('click', (e) => {
@@ -163,14 +167,10 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.brush-panel') && e.target.tagName !== 'CANVAS') closeBrushPanel();
 });
 $('mm-export').addEventListener('click', () => { if (sid) location.href = `/api/data/${sid}/export`; });
-$('mm-export-raw').addEventListener('click', async () => {
-  if (!sid) return;
-  // 原始=停用所有步驟的匯出：後端 export 走視圖——用樣板技巧：直接下載 base（透過 rows 全量成本高）
-  // 簡化：提示原始檔可由樣板還原（Tukey 也是分開下載）；此處給 export（篩選後）+ 說明
-  location.href = `/api/data/${sid}/export`;
-});
+$('mm-export-raw').addEventListener('click', () => { if (sid) location.href = `/api/data/${sid}/export?raw=1`; });
 $('mm-report').addEventListener('click', () => { if (sid) location.href = `/api/data/${sid}/report`; });
-$('mm-new').addEventListener('click', () => location.reload());
+// 上傳新資料集＝乾淨開始（reload 會帶著 ?sid 回到舊會話）
+$('mm-new').addEventListener('click', () => { location.href = '/data'; });
 $('mm-template-dl').addEventListener('click', async () => {
   if (!sid) return;
   const t = await api('/template');
@@ -195,7 +195,12 @@ $('template-input').addEventListener('change', async () => {
 
 // ------------------------------------------------------------ 卡片牆
 async function renderWall() {
+  // 隱藏狀態下 canvas 尺寸為 0，畫了也是空白——標記 dirty，切回探索分析時再畫
+  if ($('explore-view').style.display === 'none') { wallDirty = true; return; }
   const res = await api(`/cards?target=${encodeURIComponent(target)}&page=${wallPage}&per_page=${PER_WALL}`);
+  // 欄位數縮減後頁碼可能超界
+  const maxPage = Math.max(1, Math.ceil(res.total_cols / PER_WALL));
+  if (wallPage > maxPage) { wallPage = maxPage; return renderWall(); }
   res.cards.forEach((c) => { c.target = res.target; });   // 矩形框選 Y 欄
   const wall = $('card-wall');
   wall.innerHTML = res.cards.map((c, i) => `
@@ -403,6 +408,7 @@ function drawCard(canvas, card, big = false, selPx = null) {
     xlabel(card.col);
   } else if (card.mode === 'bar') {
     const maxC = Math.max(...card.counts, 1);
+    yhi = maxC;   // py() 閉包讀此變數——不先設定，格線/刻度會全部畫錯位置
     yAxis(niceTicks(0, maxC, 4).filter(Number.isInteger));
     axes();
     const bw = plotW / card.labels.length;
@@ -718,6 +724,9 @@ $('zoom-modal').addEventListener('click', (e) => { if (e.target === $('zoom-moda
 // ------------------------------------------------------------ 資料集表格（Tukey 多行欄頭）
 async function renderTable() {
   const res = await api(`/rows?page=${tablePage}&per_page=${perTable}`);
+  // 筆數縮減後頁碼可能超界
+  const maxPage = Math.max(1, Math.ceil(res.n_view / perTable));
+  if (tablePage > maxPage) { tablePage = maxPage; return renderTable(); }
   const table = $('ds-table');
   table.innerHTML = `<tr>${res.columns.map((c) => {
     const isId = c.name === '__id__';
@@ -872,7 +881,13 @@ const metricRow = (label, mt, kind) => `<tr><td>${label}</td>${
 
 async function openModelDetail(mid) {
   const m = await apiML(`/models/${mid}`);
-  if (m.status !== 'done') { alert(m.status === 'error' ? `訓練失敗：${m.error}` : '訓練中，請稍候'); return; }
+  if (m.status !== 'done') {
+    // 不用 alert（原生對話框會凍住頁面），錯誤直接顯示在詳情區
+    $('model-detail').style.display = '';
+    $('model-detail').innerHTML = `<h3>${m.name}</h3><p class="hint" style="margin-top:6px">${
+      m.status === 'error' ? `訓練失敗：${m.error}` : '訓練中，請稍候…（列表會自動更新）'}</p>`;
+    return;
+  }
   await loadAlgoMeta();
   const cls = m.task === 'classification';
   const isTs = m.task === 'timeseries';
@@ -1353,6 +1368,7 @@ let wizMode = 'auto';
 const openWizard = async () => {
   await loadAlgoMeta();
   wizMode = 'auto';
+  $('wiz-name').value = '';   // 清掉上次殘留的名稱
   $('model-wizard').classList.add('open');
   $('wiz-step-mode').style.display = '';
   $('wiz-step-form').style.display = 'none';

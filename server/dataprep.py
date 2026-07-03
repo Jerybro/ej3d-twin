@@ -138,8 +138,9 @@ def apply_steps(df: pd.DataFrame, steps: list):
         tcol = resample.get("time_col")
         if tcol in view.columns and pd.api.types.is_datetime64_any_dtype(view[tcol]):
             agg = resample.get("agg", "mean")
-            num_cols = view.select_dtypes(include="number").columns
+            num_cols = [c for c in view.select_dtypes(include="number").columns if c != "__id__"]
             view = view.set_index(tcol)[num_cols].resample(resample.get("freq", "1D")).agg(agg).reset_index()
+            view.insert(0, "__id__", range(1, len(view) + 1))  # 聚合後重編流水號（原 id 被平均沒有意義）
     if hidden:
         view = view.drop(columns=[c for c in hidden if c in view.columns])
     return view, reason, per_step, hidden, resample
@@ -568,7 +569,12 @@ td,th{{border:1px solid #cdd7de;padding:4px 10px;text-align:left}} th{{backgroun
 
 # ------------------------------------------------------------ 匯出
 @router.get("/{sid}/export")
-def export(sid: str) -> PlainTextResponse:
+def export(sid: str, raw: bool = False) -> PlainTextResponse:
+    """raw=1 匯出原始資料集（未套用任何步驟），預設匯出篩選後視圖。"""
+    if raw:
+        df = _load_base(sid)
+        return PlainTextResponse(df.to_csv(index=False), media_type="text/csv",
+                                 headers={"Content-Disposition": f"attachment; filename=raw_{sid}.csv"})
     _, _, view, *_ = _view(sid)
     return PlainTextResponse(view.to_csv(index=False), media_type="text/csv",
                              headers={"Content-Disposition": f"attachment; filename=cleaned_{sid}.csv"})

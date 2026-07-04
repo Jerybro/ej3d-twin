@@ -133,6 +133,185 @@ function syncNavTabs() {
   });
 }
 
+// ------------------------------------------------------------ 最佳化工作區（多目標配方最佳化）
+const OPT = { models: [], median: {}, prec: 'low' };
+async function renderOptimize() {
+  if (!sid) return;
+  const list = await apiML('/models');
+  const sel = list.filter((m) => m.status === 'done' && (m.task === 'regression' || m.task === 'hybrid'));
+  if (!sel.length) {
+    $('opt2-empty').style.display = ''; $('opt2-main').style.display = 'none'; return;
+  }
+  $('opt2-empty').style.display = 'none'; $('opt2-main').style.display = '';
+  // 取各模型完整記錄（features）與中位數（起始值預設）
+  OPT.models = await Promise.all(sel.map((m) => apiML(`/models/${m.id}`)));
+  OPT.median = {};
+  await Promise.all(OPT.models.map(async (m) => {
+    try {
+      const b = (await apiML(`/models/${m.id}/whatif`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"values":{}}',
+      })).baseline;
+      Object.entries(b).forEach(([f, v]) => { if (!(f in OPT.median)) OPT.median[f] = v; });
+    } catch { /* 忽略 */ }
+  }));
+  // 初始各一列
+  $('opt2-obj-table').innerHTML = `<tr><th>目標模型</th><th>條件</th><th>權重</th><th></th></tr>`;
+  $('opt2-knob-table').innerHTML = `<tr><th>可調參數</th><th>搜尋範圍</th><th></th></tr>`;
+  if (!$('opt2-obj-table').querySelectorAll('tr[data-row]').length) optAddObj();
+  if (!$('opt2-knob-table').querySelectorAll('tr[data-row]').length) optAddKnob();
+  optRefreshUnion();
+  $('opt2-out').innerHTML = '<p class="hint" style="text-align:center;padding:30px">設定最佳化目標與參數後，點「開始分析」顯示推薦的參數組合。</p>';
+}
+function optUnionFeatures() {
+  const mids = [...$('opt2-obj-table').querySelectorAll('select[data-obj-mid]')].map((s) => s.value);
+  const set = new Set();
+  OPT.models.filter((m) => mids.includes(m.id)).forEach((m) => (m.features || []).forEach((f) => set.add(f)));
+  return [...set].sort();
+}
+function optAddObj() {
+  const opts = OPT.models.map((m) => `<option value="${m.id}">${m.name}（目標 ${m.target}）</option>`).join('');
+  const tr = document.createElement('tr');
+  tr.dataset.row = '1';
+  tr.innerHTML = `
+    <td><select data-obj-mid>${opts}</select></td>
+    <td><select data-obj-type>
+        <option value="range">落在範圍</option><option value="max">最大化</option><option value="min">最小化</option>
+      </select>
+      <span data-obj-range><input type="number" step="any" data-obj-min placeholder="下限">
+      <span class="opt2-cond-op">～</span><input type="number" step="any" data-obj-max placeholder="上限"></span></td>
+    <td><input type="number" step="0.5" min="0" data-obj-w value="1" style="width:70px"></td>
+    <td><button class="opt2-del" data-obj-del>移除</button></td>`;
+  $('opt2-obj-table').appendChild(tr);
+  tr.querySelector('[data-obj-type]').addEventListener('change', (e) => {
+    tr.querySelector('[data-obj-range]').style.display = e.target.value === 'range' ? '' : 'none';
+  });
+  tr.querySelector('[data-obj-mid]').addEventListener('change', optRefreshUnion);
+  tr.querySelector('[data-obj-del]').addEventListener('click', () => {
+    if ($('opt2-obj-table').querySelectorAll('tr[data-row]').length > 1) { tr.remove(); optRefreshUnion(); }
+  });
+}
+function optAddKnob() {
+  const feats = optUnionFeatures();
+  const opts = feats.map((f) => `<option value="${f}">${f}</option>`).join('');
+  const tr = document.createElement('tr');
+  tr.dataset.row = '1';
+  tr.innerHTML = `
+    <td><select data-knob-name>${opts}</select></td>
+    <td><input type="number" step="any" data-knob-lo placeholder="自動下限">
+      <span class="opt2-cond-op">～</span><input type="number" step="any" data-knob-hi placeholder="自動上限"></td>
+    <td><button class="opt2-del" data-knob-del>移除</button></td>`;
+  $('opt2-knob-table').appendChild(tr);
+  tr.querySelector('[data-knob-name]').addEventListener('change', optRefreshRef);
+  tr.querySelector('[data-knob-del]').addEventListener('click', () => { tr.remove(); optRefreshRef(); });
+}
+function optRefreshUnion() {
+  // 目標變更→更新 knob 下拉候選（保留已選）＋重建起始值表
+  const feats = optUnionFeatures();
+  $('opt2-knob-table').querySelectorAll('select[data-knob-name]').forEach((s) => {
+    const cur = s.value;
+    s.innerHTML = feats.map((f) => `<option value="${f}" ${f === cur ? 'selected' : ''}>${f}</option>`).join('');
+  });
+  optRefreshRef();
+}
+function optRefreshRef() {
+  const feats = optUnionFeatures();
+  const knobs = new Set([...$('opt2-knob-table').querySelectorAll('select[data-knob-name]')].map((s) => s.value));
+  const refFeats = feats.filter((f) => !knobs.has(f));
+  if (!refFeats.length) {
+    $('opt2-ref-table').innerHTML = '<tr><td style="color:var(--text2);font-size:13px">所有特徵都設為可調參數，無其他起始值需設定。</td></tr>';
+    return;
+  }
+  $('opt2-ref-table').innerHTML = `<tr>${refFeats.map((f) => `<th>${f}</th>`).join('')}</tr>
+    <tr>${refFeats.map((f) => `<td><input type="number" step="any" data-ref="${f}" value="${OPT.median[f] ?? ''}" style="width:110px"></td>`).join('')}</tr>`;
+}
+function optGather() {
+  const objectives = [...$('opt2-obj-table').querySelectorAll('tr[data-row]')].map((tr) => {
+    const type = tr.querySelector('[data-obj-type]').value;
+    const cond = { type };
+    if (type === 'range') {
+      cond.min = parseFloat(tr.querySelector('[data-obj-min]').value);
+      cond.max = parseFloat(tr.querySelector('[data-obj-max]').value);
+    }
+    const midSel = tr.querySelector('[data-obj-mid]');
+    return { mid: midSel.value, name: OPT.models.find((m) => m.id === midSel.value)?.name,
+      condition: cond, weight: parseFloat(tr.querySelector('[data-obj-w]').value) || 1 };
+  });
+  const knobs = [...$('opt2-knob-table').querySelectorAll('tr[data-row]')].map((tr) => {
+    const k = { name: tr.querySelector('[data-knob-name]').value };
+    const lo = tr.querySelector('[data-knob-lo]').value, hi = tr.querySelector('[data-knob-hi]').value;
+    if (lo !== '' && hi !== '') { k.lo = parseFloat(lo); k.hi = parseFloat(hi); }
+    return k;
+  });
+  const reference = {};
+  $('opt2-ref-table').querySelectorAll('input[data-ref]').forEach((i) => {
+    if (i.value !== '') reference[i.dataset.ref] = parseFloat(i.value);
+  });
+  return { objectives, knobs, reference, precision: OPT.prec, top_n: 5 };
+}
+function optRenderResult(r) {
+  const objName = (o) => o.name;
+  const head = `<div class="md-sub" style="margin-bottom:10px">精準度 ${
+    { low: '低', med: '中', high: '高' }[r.precision]}｜可行樣本 ${r.feasible_count.toLocaleString()}${
+    r.warning ? `｜<span style="color:#B8860B">${r.warning}</span>` : ''}</div>`;
+  const note = r.note ? `<div class="opt2-note">${r.note}</div>` : '';
+  const objMeta = Object.fromEntries(r.objectives.map((o) => [o.mid, o]));
+  const cards = r.recommendations.map((rec) => {
+    const rows = rec.objectives.map((ob) => {
+      const meta = objMeta[ob.mid] || {};
+      const cond = meta.type === 'range' ? `範圍 ${meta.min}～${meta.max}`
+        : meta.type === 'max' ? '最大化' : '最小化';
+      const dCls = ob.desirability < 0.5 ? ' class="d-lo"' : '';
+      const inr = ob.in_range === null ? '—' : (ob.in_range ? '✓ 達標' : `✗ 差 ${Math.abs(ob.margin)}`);
+      return `<tr><td>${ob.name}</td><td style="color:var(--text2)">${cond}</td>
+        <td><b>${ob.pred}</b></td><td${dCls}>${(ob.desirability * 100).toFixed(0)}%</td>
+        <td style="color:${ob.in_range === false ? 'var(--danger)' : 'var(--text2)'}">${inr}</td></tr>`;
+    }).join('');
+    return `<div class="opt2-rec${rec.rank === 1 ? ' best' : ''}">
+      <div class="opt2-rec-head"><span class="opt2-rank">${rec.rank}</span>
+        <span class="opt2-score">綜合分 <b>${(rec.score * 100).toFixed(0)}</b>／100</span>
+        <span class="opt2-badge ${rec.feasible ? 'ok' : 'bad'}">${rec.feasible ? '全目標達標' : '未全達標'}</span></div>
+      <div class="opt2-kv">${Object.entries(rec.knobs).map(([k, v]) => `<span class="kv">${k}：<b>${v}</b></span>`).join('')}</div>
+      <table class="opt2-otbl"><tr><th>目標</th><th>條件</th><th>預測值</th><th>滿意度</th><th>達標</th></tr>${rows}</table>
+    </div>`;
+  }).join('');
+  // 起始值對照
+  const b = r.baseline;
+  const bRows = b.objectives.map((ob) => `<tr><td>${ob.name}</td><td><b>${ob.pred}</b></td><td>${(ob.desirability * 100).toFixed(0)}%</td></tr>`).join('');
+  const baseline = `<div class="opt2-rec" style="opacity:.85">
+    <div class="opt2-rec-head"><span class="opt2-score" style="font-weight:600">起始值（目前操作點）</span>
+      <span class="opt2-score" style="margin-left:auto">綜合分 <b>${(b.score * 100).toFixed(0)}</b>／100</span></div>
+    <div class="opt2-kv">${Object.entries(b.knobs).map(([k, v]) => `<span class="kv">${k}：<b>${v}</b></span>`).join('')}</div>
+    <table class="opt2-otbl"><tr><th>目標</th><th>預測值</th><th>滿意度</th></tr>${bRows}</table></div>`;
+  $('opt2-out').innerHTML = head + note + cards + baseline;
+}
+$('opt2-add-obj').addEventListener('click', () => { optAddObj(); optRefreshUnion(); });
+$('opt2-add-knob').addEventListener('click', () => { optAddKnob(); optRefreshRef(); });
+$('opt2-goto-model').addEventListener('click', () => document.querySelector('.nav-tab[data-view="model"]').click());
+document.querySelectorAll('.opt2-p').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('.opt2-p').forEach((x) => x.classList.toggle('on', x === b));
+  OPT.prec = b.dataset.prec;
+}));
+$('opt2-run').addEventListener('click', async () => {
+  const body = optGather();
+  if (!body.objectives.length) { $('opt2-out').innerHTML = '<p class="hint" style="padding:20px">請至少新增一個最佳化目標。</p>'; return; }
+  // 前端先擋範圍條件缺值
+  for (const o of body.objectives) {
+    if (o.condition.type === 'range' && (Number.isNaN(o.condition.min) || Number.isNaN(o.condition.max))) {
+      $('opt2-out').innerHTML = `<p class="hint" style="padding:20px;color:var(--danger)">目標「${o.name}」的範圍條件需要填下限與上限。</p>`; return;
+    }
+  }
+  $('opt2-run').disabled = true;
+  $('opt2-out').innerHTML = '<p class="hint" style="text-align:center;padding:30px">搜尋最佳參數組合中…（多目標運算，請稍候）</p>';
+  try {
+    const r = await apiML('/optimize2', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    optRenderResult(r);
+  } catch (e) {
+    $('opt2-out').innerHTML = `<p class="hint" style="padding:20px;color:var(--danger)">最佳化失敗：${e.message}</p>`;
+  } finally { $('opt2-run').disabled = false; }
+});
+
 // 登入身分顯示與登出（AUTH_DISABLED 時顯示未啟用）
 fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((me) => {
   if (!me) return;
@@ -196,11 +375,15 @@ document.querySelectorAll('.nav-tab[data-view]').forEach((t) => t.addEventListen
   const v = t.dataset.view;
   // 「我的資料集」是獨立畫面（不需要工作階段）：蓋掉上傳頁與工作區；
   // 其餘分頁屬於工作區（有 sid 才會顯示這些分頁）
+  // 「我的資料集」與「最佳化」是獨立畫面；其餘分頁屬於工作區（有 sid 才顯示）
   const isMy = v === 'mysets';
+  const isOpt = v === 'optimize';
+  const standalone = isMy || isOpt;
   $('mysets-view').style.display = isMy ? '' : 'none';
-  $('upload-view').style.display = (isMy || sid) ? 'none' : '';
-  $('main-area').style.display = (!isMy && sid) ? '' : 'none';
-  $('subnav').style.display = (!isMy && sid) ? '' : 'none';
+  $('optimize-view').style.display = isOpt ? '' : 'none';
+  $('upload-view').style.display = (standalone || sid) ? 'none' : '';
+  $('main-area').style.display = (!standalone && sid) ? '' : 'none';
+  $('subnav').style.display = (!standalone && sid) ? '' : 'none';
   $('explore-view').style.display = v === 'explore' ? '' : 'none';
   $('dataset-view').style.display = v === 'dataset' ? '' : 'none';
   $('model-view').style.display = v === 'model' ? '' : 'none';
@@ -209,6 +392,7 @@ document.querySelectorAll('.nav-tab[data-view]').forEach((t) => t.addEventListen
   $('perpage-wrap').style.display = v === 'dataset' ? 'flex' : 'none';
   if (v === 'model') renderModels();
   if (isMy) renderMySets();
+  if (isOpt) renderOptimize();
   if (v === 'explore' && wallDirty) { wallDirty = false; renderWall(); }
 }));
 

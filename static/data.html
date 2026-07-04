@@ -264,6 +264,43 @@
       color: var(--bg); font-size: 12.5px; font-weight: 400; line-height: 1.75;
       padding: 10px 13px; border-radius: 6px; z-index: 500; pointer-events: none;
       white-space: normal; box-shadow: 0 6px 20px rgba(0, 0, 0, .35); }
+    /* 最佳化工作區 */
+    #optimize-view { padding: 20px 16px 40px; }
+    .opt2-empty { text-align: center; padding: 80px 20px; }
+    .opt2-empty h3 { font-size: 17px; font-weight: 500; margin-bottom: 10px; }
+    .opt2-empty p { font-size: 14px; color: var(--text2); margin-bottom: 20px; }
+    .opt2-sec { background: var(--white); border: 1px solid var(--bdr); border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; }
+    .opt2-h { font-size: 15px; font-weight: 600; color: var(--text); display: flex; align-items: center; margin-bottom: 12px; }
+    .opt2-add { margin-left: auto; font-size: 13px; padding: 5px 14px; border: 1px solid var(--bdr); border-radius: 6px;
+      background: var(--white); color: var(--blue); cursor: pointer; font-family: inherit; }
+    .opt2-add:hover { border-color: var(--blue); }
+    .opt2-table { border-collapse: collapse; width: 100%; font-size: 13.5px; white-space: nowrap; }
+    .opt2-table th { text-align: left; padding: 9px 12px; color: var(--text2); font-weight: 500; font-size: 12.5px; border-bottom: 1px solid var(--bdr); }
+    .opt2-table td { padding: 9px 12px; border-bottom: 1px solid var(--bdr); vertical-align: middle; }
+    .opt2-table tr:last-child td { border-bottom: none; }
+    .opt2-table select, .opt2-table input { padding: 6px 9px; border: 1px solid var(--bdr); border-radius: 5px; font-size: 13px; font-family: inherit; background: var(--white); }
+    .opt2-table input[type="number"] { width: 92px; }
+    .opt2-cond-op { color: var(--text2); font-size: 13px; padding: 0 6px; }
+    .opt2-del { color: var(--danger); cursor: pointer; font-size: 13px; border: none; background: none; font-family: inherit; }
+    .opt2-prec { display: flex; gap: 10px; flex-wrap: wrap; }
+    .opt2-p { padding: 8px 16px; border: 1px solid var(--bdr); border-radius: 7px; background: var(--white); color: var(--text2); cursor: pointer; font-size: 13.5px; font-family: inherit; }
+    .opt2-p.on { border-color: var(--blue); color: var(--blue); background: rgba(4,106,251,.06); font-weight: 600; }
+    .opt2-rec { border: 1px solid var(--bdr); border-radius: 9px; padding: 14px 16px; margin-bottom: 12px; }
+    .opt2-rec.best { border-color: var(--blue); box-shadow: 0 2px 12px rgba(4,106,251,.08); }
+    .opt2-rec-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .opt2-rank { width: 24px; height: 24px; border-radius: 50%; background: var(--blue); color: #fff; font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+    .opt2-score { font-size: 13px; color: var(--text2); }
+    .opt2-score b { color: var(--text); font-size: 15px; }
+    .opt2-badge { margin-left: auto; font-size: 12px; padding: 2px 9px; border-radius: 5px; }
+    .opt2-badge.ok { background: rgba(5,150,105,.12); color: var(--green); }
+    .opt2-badge.bad { background: rgba(192,57,43,.10); color: var(--danger); }
+    .opt2-kv { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 10px; }
+    .opt2-kv .kv { font-size: 13px; } .opt2-kv .kv b { color: var(--blue); }
+    .opt2-otbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .opt2-otbl th, .opt2-otbl td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--bg); }
+    .opt2-otbl td.d-lo { color: var(--danger); }
+    .opt2-note { padding: 11px 14px; background: #FFF7E6; border: 1px solid #F0D9A8; border-radius: 8px; color: #7A5B10; font-size: 13px; margin-bottom: 12px; line-height: 1.7; }
+
     /* AI 助教輸出 */
     .ai-out { white-space: pre-wrap; font-size: 13.5px; line-height: 1.9; color: var(--text);
       background: var(--bg); border: 1px solid var(--bdr); border-radius: 6px;
@@ -483,6 +520,9 @@
     <button class="nav-tab" data-view="model">
       <svg class="ic" viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v10"/></svg>
       模型</button>
+    <button class="nav-tab" data-view="optimize">
+      <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>
+      最佳化</button>
     <button class="nav-tab" data-view="mysets">
       <svg class="ic" viewBox="0 0 24 24"><path d="M3 8a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
       我的資料集</button>
@@ -618,6 +658,48 @@
       </div>
     </div>
   </main>
+
+  <!-- 最佳化工作區（多目標配方最佳化） -->
+  <div id="optimize-view" style="display:none">
+    <div class="opt2-empty" id="opt2-empty" style="display:none">
+      <h3>多目標配方最佳化</h3>
+      <p>先在「模型」分頁建立至少一個迴歸或混合模型，再回來這裡設定最佳化目標。</p>
+      <button class="ctl-btn" id="opt2-goto-model">前往建立模型</button>
+    </div>
+    <div id="opt2-main" style="display:none">
+      <div class="opt2-sec">
+        <div class="opt2-h">選擇最佳化目標
+          <span class="qi" data-tip="每個目標＝一個已訓練的迴歸／混合模型，加上你要它達成的條件（落在某範圍／最大化／最小化）與相對權重。可加多個目標同時最佳化——系統會找同時讓所有目標盡量滿足的參數組合。權重越大代表該目標越重要。">?</span>
+          <button class="opt2-add" id="opt2-add-obj">＋ 新增目標</button></div>
+        <div style="overflow-x:auto"><table class="opt2-table" id="opt2-obj-table"></table></div>
+      </div>
+      <div class="opt2-sec">
+        <div class="opt2-h">選擇最佳化參數
+          <span class="qi" data-tip="可調參數＝你在現場真的能調的操作變數（回流比、進料溫度等）。為每個參數設定搜尋範圍，系統只在範圍內找解。這些參數必須是某個目標模型的自變數。">?</span>
+          <button class="opt2-add" id="opt2-add-knob">＋ 新增參數</button></div>
+        <div style="overflow-x:auto"><table class="opt2-table" id="opt2-knob-table"></table></div>
+      </div>
+      <div class="opt2-sec">
+        <div class="opt2-h">設定其他參數的起始值
+          <span class="qi" data-tip="非可調參數（不在上方參數表的其他特徵）在搜尋時固定在這個起始值。預設為現行資料的中位數，可依實際操作點調整——這會影響最佳化的基準情境。">?</span></div>
+        <div style="overflow-x:auto"><table class="opt2-table" id="opt2-ref-table"></table></div>
+      </div>
+      <div class="opt2-sec">
+        <div class="opt2-h">設定最佳化精準度
+          <span class="qi" data-tip="控制搜尋的取樣密度：低＝運算快（秒級）、高＝搜得更細但較久。目標多時建議先用「低」試方向，再用「高」精算。">?</span></div>
+        <div class="opt2-prec">
+          <button class="opt2-p on" data-prec="low">低 · 運算時間短</button>
+          <button class="opt2-p" data-prec="med">中 · 運算時間適中</button>
+          <button class="opt2-p" data-prec="high">高 · 運算時間長</button>
+        </div>
+      </div>
+      <div style="text-align:center;margin:22px 0"><button class="dbtn" style="width:auto;padding:10px 40px;margin:0" id="opt2-run">開始分析</button></div>
+      <div class="opt2-sec">
+        <div class="opt2-h">推薦組合</div>
+        <div id="opt2-out"><p class="hint" style="text-align:center;padding:30px">設定最佳化目標與參數後，點「開始分析」顯示推薦的參數組合。</p></div>
+      </div>
+    </div>
+  </div>
 
   <!-- 我的資料集：獨立畫面（不需工作階段，未開資料集也能進） -->
   <div id="mysets-view" style="display:none;padding:20px 16px 24px">
@@ -791,6 +873,6 @@
   </div>
 
   <input type="file" id="template-input" accept=".json" style="display:none" />
-  <script type="module" src="/static/js/data.js?v=20260704b"></script>
+  <script type="module" src="/static/js/data.js?v=20260704c"></script>
 </body>
 </html>

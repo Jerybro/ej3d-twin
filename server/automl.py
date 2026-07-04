@@ -1444,3 +1444,272 @@ def optimize(sid: str, mid: str, body: dict) -> dict:
         "pred": round(float(all_preds[best_i]), 5),
         "baseline_pred": round(baseline_pred, 5),
     }
+
+
+# ------------------------------------------------------ 多目標配方最佳化（optimize2）
+# 設計＝三份獨立設計合成＋對抗批判修正（Derringer–Suich desirability 正規化、
+# range 硬約束＋軟斜坡並用、欄名對齊防靜默錯位、貪婪最遠點去重）。
+# 批判修正全部內建：①錨點用現行視圖 y 的 P1-P99（非不存在的訓練 y）②range 軟斜坡
+# 分母加 1e-9 下限＋界外歸零＋nan_to_num ③單輪細化（不做語意未閉合的多輪）
+# ④驗證順序固定 ⑤去重距離分母加下限。
+OPT2_BUDGET = {"low": {"n": 1500, "M": 20, "K": 25},
+               "med": {"n": 3000, "M": 50, "K": 40},
+               "high": {"n": 8000, "M": 100, "K": 60}}
+
+
+def _desirability(p: np.ndarray, ctype: str, lo: float, hi: float,
+                  rmin: float = None, rmax: float = None) -> np.ndarray:
+    """單目標無量綱慾望度 d∈[0,1]（越大越好）。lo/hi=正規化錨點（現行視圖 y P1-P99）。"""
+    span = hi - lo
+    if span < 1e-9:               # 常數目標：不影響排序
+        return np.ones_like(p, dtype=float)
+    if ctype == "max":
+        d = np.clip((p - lo) / span, 0, 1)
+    elif ctype == "min":
+        d = np.clip((hi - p) / span, 0, 1)
+    else:                          # range：區間內=1，兩側軟斜坡（分母下限＋界外歸零）
+        d = np.ones_like(p, dtype=float)
+        left = p < rmin
+        if rmin <= lo:            # 左界貼齊/超出錨點：界外無梯度空間→歸零
+            d[left] = 0.0
+        else:
+            d[left] = np.clip((p[left] - lo) / max(rmin - lo, 1e-9), 0, 1)
+        right = p > rmax
+        if rmax >= hi:
+            d[right] = 0.0
+        else:
+            d[right] = np.clip((hi - p[right]) / max(hi - rmax, 1e-9), 0, 1)
+    return np.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+@router.post("/{sid}/optimize2")
+def optimize2(sid: str, body: dict) -> dict:
+    """多目標配方最佳化：多個模型當目標（各帶範圍/最大/最小條件＋權重）、
+    可調參數自訂搜尋範圍、其餘特徵起始值、精準度→輸出推薦參數組合。"""
+    # ── 步驟 1：純語法驗證 ─────────────────────────────
+    objectives = body.get("objectives") or []
+    knobs_in = body.get("knobs") or []
+    if not objectives:
+        raise HTTPException(422, "至少需要一個最佳化目標")
+    if not knobs_in:
+        raise HTTPException(422, "至少需要一個最佳化參數")
+    if len(objectives) > 8:
+        raise HTTPException(422, "最佳化目標最多 8 個")
+    weights = []
+    for o in objectives:
+        if not o.get("mid"):
+            raise HTTPException(422, "每個目標都需要指定模型")
+        cond = o.get("condition") or {}
+        ct = cond.get("type", "max")
+        if ct not in ("range", "max", "min"):
+            raise HTTPException(422, f"未知的目標條件 {ct}")
+        if ct == "range":
+            if cond.get("min") is None or cond.get("max") is None:
+                raise HTTPException(422, "範圍條件需要 min 與 max")
+            if float(cond["min"]) >= float(cond["max"]):
+                raise HTTPException(422, "範圍條件的 min 須小於 max")
+        w = float(o.get("weight", 1.0))
+        if w < 0:
+            raise HTTPException(422, "權重須為正數")
+        weights.append(w)
+    warning = None
+    if sum(weights) <= 0:
+        weights = [1.0] * len(objectives)
+        warning = "所有權重為 0，已改用等權重"
+    knob_names = []
+    knob_range = {}
+    for k in knobs_in:
+        nm = k.get("name")
+        if not nm:
+            raise HTTPException(422, "每個最佳化參數都需要名稱")
+        knob_names.append(nm)
+        if k.get("lo") is not None and k.get("hi") is not None:
+            if float(k["lo"]) >= float(k["hi"]):
+                raise HTTPException(422, f"參數 {nm} 的範圍 min 須小於 max")
+            knob_range[nm] = [float(k["lo"]), float(k["hi"])]
+
+    # ── 步驟 2：逐目標載入、擋非迴歸、驗缺欄 ──────────────
+    import joblib
+    recs, packs, yscale = [], [], []
+    for o in objectives:
+        rec = _load(sid, o["mid"])
+        if rec.get("task") not in ("regression", "hybrid"):
+            raise HTTPException(422, f"目標「{rec.get('name') or o['mid']}」是 {rec.get('task')} 模型，"
+                                     "配方最佳化僅支援迴歸／混合模型")
+        Xk, yk = _current_xy(sid, rec)      # 缺欄會 422；y 供正規化錨點
+        p1, p99 = float(np.percentile(yk, 1)), float(np.percentile(yk, 99))
+        yscale.append([p1, p99])
+        recs.append(rec)
+        packs.append(joblib.load(_pipe_path(sid, o["mid"])) if _pipe_path(sid, o["mid"]).exists()
+                     else _load_pipe(sid, o["mid"]))
+
+    # ── 步驟 3：建共同搜尋空間 U、ucol、中位數/起始值 ────────
+    U = sorted(set().union(*[r["features"] for r in recs]))
+    ucol = {name: j for j, name in enumerate(U)}
+    if len(U) > 30:
+        raise HTTPException(422, f"目標模型的特徵聯集共 {len(U)} 欄（上限 30）")
+    median_map = {}
+    for rec in recs:
+        for f, v in _baseline(sid, rec).items():
+            median_map.setdefault(f, v)
+    reference = dict(median_map)
+    for f, v in (body.get("reference") or {}).items():
+        if f in ucol and v is not None and v != "":
+            reference[f] = float(v)
+
+    # ── 步驟 4：驗 knob∈U、範圍非常數 ─────────────────
+    for nm in knob_names:
+        if nm not in ucol:
+            raise HTTPException(422, f"參數 {nm} 不屬於任何目標模型的特徵")
+        if nm not in knob_range:            # 未給範圍→退回現行視圖 P1-P99
+            col = np.array([median_map.get(nm, 0.0)])
+            # 從第一個含此特徵的模型視圖取分位數
+            for rec in recs:
+                if nm in rec["features"]:
+                    Xk, _ = _current_xy(sid, rec)
+                    col = Xk[:, rec["features"].index(nm)]
+                    break
+            lo_k, hi_k = float(np.percentile(col, 1)), float(np.percentile(col, 99))
+            if hi_k - lo_k < 1e-9:
+                raise HTTPException(422, f"參數 {nm} 在現行視圖幾乎無變化，無法作為可調參數（請指定範圍）")
+            knob_range[nm] = [lo_k, hi_k]
+
+    prec = body.get("precision", "med")
+    B = OPT2_BUDGET.get(prec, OPT2_BUDGET["med"])
+    n, M, K = B["n"], B["M"], B["K"]
+    top_n = int(body.get("top_n") or 5)
+    top_n = max(1, min(10, top_n))
+    seed = int(body.get("seed") or 0)
+    rng = np.random.RandomState(seed)
+    kidx = [ucol[nm] for nm in knob_names]
+
+    # ── 步驟 5：取樣＋評分 helper ─────────────────────
+    ref_row = np.array([reference.get(U[j], median_map.get(U[j], 0.0)) for j in range(len(U))], float)
+
+    def sample(m, centers=None, spread=1.0):
+        pts = np.tile(ref_row, (m, 1))
+        for nm, j in zip(knob_names, kidx):
+            lo_k, hi_k = knob_range[nm]
+            if centers is None:
+                pts[:, j] = rng.uniform(lo_k, hi_k, m)
+            else:
+                sp = (hi_k - lo_k) * 0.08 * spread
+                pts[:, j] = np.clip(rng.normal(centers[nm], sp or 1e-9, m), lo_k, hi_k)
+        return pts
+
+    def evaluate(S):
+        """回 (preds_by_obj[list of arr], d_by_obj[list], score[arr], feasible[bool arr], nviol[arr])."""
+        preds_by, d_by = [], []
+        feas = np.ones(len(S), bool)
+        nviol = np.zeros(len(S), int)
+        for i, rec in enumerate(recs):
+            Xk = S[:, [ucol[f] for f in rec["features"]]]
+            p = np.ravel(_predict_any(packs[i], Xk)).astype(float)
+            p = np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0)
+            preds_by.append(p)
+            cond = objectives[i].get("condition") or {}
+            ct = cond.get("type", "max")
+            lo_k, hi_k = yscale[i]
+            if hi_k - lo_k < 1e-9:          # 常數錨點→退回本批 min/max
+                lo_k, hi_k = float(p.min()), float(p.max())
+            rmin = float(cond["min"]) if ct == "range" else None
+            rmax = float(cond["max"]) if ct == "range" else None
+            d_by.append(_desirability(p, ct, lo_k, hi_k, rmin, rmax))
+            if ct == "range":
+                ok = (p > rmin) & (p < rmax)
+                nviol += (~ok).astype(int)
+                feas &= ok
+        wsum = sum(weights)
+        score = np.zeros(len(S))
+        for i in range(len(recs)):
+            score += (weights[i] / wsum) * d_by[i]
+        return preds_by, d_by, score, feas, nviol
+
+    # 初始取樣 → 細化（單輪，top-M 鄰域）→ 併池
+    S = sample(n)
+    _, _, sc, _, _ = evaluate(S)
+    order = np.argsort(-sc)[:M]
+    refined = np.vstack([sample(K, centers={nm: S[i, ucol[nm]] for nm in knob_names})
+                         for i in order]) if M else np.empty((0, len(U)))
+    pool = np.vstack([S, refined]) if len(refined) else S
+    preds_by, d_by, score, feas, nviol = evaluate(pool)
+
+    # ── 步驟 6：選 top-N（feasible 優先，貪婪最遠點去重）────
+    feasible_any = bool(feas.any())
+    if feasible_any:
+        cand = np.where(feas)[0]
+        cand = cand[np.argsort(-score[cand])]
+    else:                                   # 無可行解：先比違反數、再比分數
+        cand = np.lexsort((-score, nviol))
+
+    # 去重距離（knob 空間正規化，分母加下限）
+    kspan = np.array([max(knob_range[nm][1] - knob_range[nm][0], 1e-9) for nm in knob_names])
+
+    def kvec(i):
+        return np.array([pool[i, ucol[nm]] for nm in knob_names])
+    picked, tau = [], 0.15
+    while len(picked) < top_n and tau > 1e-4:
+        for i in cand:
+            if len(picked) >= top_n:
+                break
+            if any(np.sqrt((((kvec(i) - kvec(j)) / kspan) ** 2).sum()) / np.sqrt(len(kidx)) <= tau
+                   for j in picked):
+                continue
+            picked.append(int(i))
+        if len(picked) < top_n:
+            tau /= 2                         # 湊不滿放寬門檻重掃
+            picked = [int(cand[0])] if len(cand) else []
+    note = None if feasible_any else "沒有參數組合能同時滿足所有範圍條件，以下為最接近可行區的建議。"
+
+    def obj_row(i, pt_idx):
+        cond = objectives[i].get("condition") or {}
+        ct = cond.get("type", "max")
+        p = float(preds_by[i][pt_idx])
+        row = {"mid": objectives[i]["mid"], "name": objectives[i].get("name") or recs[i]["target"],
+               "pred": round(p, 5), "desirability": round(float(d_by[i][pt_idx]), 3),
+               "in_range": None, "margin": None}
+        if ct == "range":
+            rmin, rmax = float(cond["min"]), float(cond["max"])
+            row["in_range"] = bool(rmin < p < rmax)
+            row["margin"] = round(min(p - rmin, rmax - p), 5)
+        return row
+
+    recs_out = []
+    for rank, i in enumerate(picked, 1):
+        recs_out.append({
+            "rank": rank, "score": round(float(score[i]), 3), "feasible": bool(feas[i]),
+            "violated_objectives": [objectives[j].get("name") or recs[j]["target"]
+                                    for j in range(len(recs))
+                                    if (objectives[j].get("condition") or {}).get("type") == "range"
+                                    and not obj_row(j, i)["in_range"]],
+            "knobs": {nm: round(float(pool[i, ucol[nm]]), 5) for nm in knob_names},
+            "objectives": [obj_row(j, i) for j in range(len(recs))],
+        })
+
+    # baseline（起始值那組）供對照
+    bpool = ref_row.reshape(1, -1)
+    bpb, bdb, bsc, bfe, _ = evaluate(bpool)
+    baseline = {"knobs": {nm: round(float(ref_row[ucol[nm]]), 5) for nm in knob_names},
+                "score": round(float(bsc[0]), 3), "feasible": bool(bfe[0]),
+                "objectives": [obj_row(j, 0) if False else {
+                    "mid": objectives[j]["mid"], "name": objectives[j].get("name") or recs[j]["target"],
+                    "pred": round(float(bpb[j][0]), 5), "desirability": round(float(bdb[j][0]), 3)}
+                    for j in range(len(recs))]}
+
+    return {
+        "feasible": feasible_any, "feasible_count": int(feas.sum()),
+        "precision": prec, "top_n": top_n, "note": note, "warning": warning,
+        "knobs": knob_names,
+        "bounds": {nm: [round(knob_range[nm][0], 5), round(knob_range[nm][1], 5)] for nm in knob_names},
+        "reference": {f: round(float(v), 5) for f, v in reference.items()},
+        "objectives": [{
+            "mid": objectives[i]["mid"], "name": objectives[i].get("name") or recs[i]["target"],
+            "target": recs[i]["target"], "type": (objectives[i].get("condition") or {}).get("type", "max"),
+            "min": (objectives[i].get("condition") or {}).get("min"),
+            "max": (objectives[i].get("condition") or {}).get("max"),
+            "weight": weights[i], "scale": [round(yscale[i][0], 4), round(yscale[i][1], 4)],
+            "ignored_knobs": [nm for nm in knob_names if nm not in recs[i]["features"]],
+        } for i in range(len(recs))],
+        "recommendations": recs_out,
+        "baseline": baseline,
+    }

@@ -92,7 +92,7 @@
       <div class="section-title">3D 場景建置</div>
       <div class="roadmap" style="margin-bottom:10px">
         <p>依 P&amp;ID 規劃設備配置後，使用
-          <a href="/twin/editor" style="color:var(--accent)">3D 模塊編輯器</a>
+          <a href="/studio" style="color:var(--accent)">3D 設計工作室</a>
           放置對應的工業素材，即可產生可接數據的孿生場景。</p>
       </div>
       <div class="roadmap">
@@ -124,7 +124,7 @@
              </div>
              <div class="file-actions">
                <button class="mini-btn parse-btn" data-name="${f.name}">${f.scene_id ? '重新解析' : '解析建模'}</button>
-               ${f.scene_id ? `<a class="mini-btn" href="/twin/editor?scene=${f.scene_id}">編輯器開啟</a>
+               ${f.scene_id ? `<a class="mini-btn" href="/studio?scene=${f.scene_id}">設計工作室開啟</a>
                <a class="mini-btn" href="/twin?scene=${f.scene_id}" target="_blank">孿生檢視</a>` : ''}
              </div>
            </div>
@@ -170,7 +170,7 @@
           OCR 命中 ${res.ocr_hits}｜抓到 <b style="color:var(--accent)">${res.equipment} 台設備</b>、
           ${res.instruments} 個儀錶位號（已自動掛最近設備）</p>
         <div style="display:flex;gap:10px;margin-bottom:16px">
-          <a class="mini-btn primary" href="/twin/editor?scene=${res.scene_id}">在編輯器開啟草稿（修改/刪誤抓）</a>
+          <a class="mini-btn primary" href="/studio?scene=${res.scene_id}">在設計工作室開啟草稿（修改/刪誤抓）</a>
           <a class="mini-btn" href="/twin?scene=${res.scene_id}" target="_blank">孿生檢視</a>
         </div>
         <table style="border-collapse:collapse;font-size:12.5px;width:100%">
@@ -208,7 +208,7 @@
           if (st.merged_scene_id) {
             mergedEl.style.display = 'flex';
             mergedEl.innerHTML =
-              `<a class="mini-btn primary" href="/twin/editor?scene=${st.merged_scene_id}">整廠場景：編輯器開啟</a>
+              `<a class="mini-btn primary" href="/studio?scene=${st.merged_scene_id}">整廠場景：設計工作室開啟</a>
                <a class="mini-btn" href="/twin?scene=${st.merged_scene_id}" target="_blank">孿生檢視</a>`;
           }
         } else {

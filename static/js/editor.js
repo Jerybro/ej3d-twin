@@ -2060,7 +2060,7 @@ function exportISO() {
     <text x="12" y="${H - 90}" font-size="13" font-weight="700" fill="#12283a">ISOMETRIC｜管線 #${selected.index + 1}</text>
     ${bomRows}${more}
     <text x="${W - 12}" y="${H - 90}" font-size="10" fill="#5b6b7a" text-anchor="end">Spec ${pipe.spec ?? '—'}｜${pipe.dn ?? `r${pipe.r}`}｜總長 ${pipeLength(pipe).toFixed(2)} m｜尺寸 mm／高程 EL.mm</text>
-    <text x="${W - 12}" y="${H - 74}" font-size="9.5" fill="#5b6b7a" text-anchor="end">J.S Process Intelligence｜E3D 工作區交付</text>
+    <text x="${W - 12}" y="${H - 74}" font-size="9.5" fill="#5b6b7a" text-anchor="end">J.S Process Intelligence｜J.S_3D Studio 交付</text>
   </g>
 </svg>`;
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));

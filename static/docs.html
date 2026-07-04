@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>操作說明｜J.S Process Intelligence</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root { --blue:#046AFB; --bg:#F6F7FA; --white:#fff; --bdr:#DBDDE0; --text:#061027; --text2:#555; --green:#059669; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html,body { background:var(--bg); color:var(--text); font-family:Inter,"Noto Sans TC","Microsoft JhengHei",sans-serif; font-size:15px; }
+    .wrap { max-width:860px; margin:0 auto; padding:28px 32px 64px; }
+    .top { display:flex; align-items:center; gap:12px; margin-bottom:22px; }
+    .top a.back { color:var(--text2); text-decoration:none; font-size:13.5px; display:inline-flex; align-items:center; gap:6px; }
+    .top a.back:hover { color:var(--blue); }
+    .top a.back svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+    .top .sp { margin-left:auto; }
+    .lang button { padding:5px 11px; border:1px solid var(--bdr); border-radius:6px; background:var(--white); font-size:12.5px; color:var(--text2); cursor:pointer; font-family:inherit; }
+    .lang button.on { border-color:var(--blue); color:var(--blue); font-weight:600; }
+    h1 { font-size:24px; font-weight:600; margin-bottom:6px; }
+    .sub { color:var(--text2); font-size:14px; margin-bottom:28px; }
+    section { background:var(--white); border:1px solid var(--bdr); border-radius:10px; padding:20px 24px; margin-bottom:16px; }
+    section h2 { font-size:17px; font-weight:600; margin-bottom:4px; display:flex; align-items:center; gap:9px; }
+    section h2 .n { width:26px; height:26px; border-radius:50%; background:var(--blue); color:#fff; font-size:13px; display:inline-flex; align-items:center; justify-content:center; flex:none; }
+    section h2 .n.g { background:var(--green); }
+    section p { color:var(--text2); font-size:14px; line-height:1.85; margin:10px 0 0 35px; }
+    section ul { margin:8px 0 0 52px; }
+    section li { color:var(--text2); font-size:13.5px; line-height:1.85; }
+    section li b { color:var(--text); }
+    .tip { margin:12px 0 0 35px; padding:11px 14px; background:var(--bg); border:1px solid var(--bdr); border-radius:7px; font-size:13px; color:var(--text2); line-height:1.8; }
+    .tip b { color:var(--text); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <a class="back" href="/"><svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg><span data-i18n="back">回首頁</span></a>
+      <span class="sp"></span>
+      <span class="lang"><button data-lang="zh">繁體中文</button><button data-lang="en">English</button></span>
+    </div>
+    <h1 data-i18n="title">操作說明</h1>
+    <p class="sub" data-i18n="sub">從上傳資料到數位孿生的完整流程指引。不懂統計也能照著走。</p>
+
+    <section>
+      <h2><span class="n">1</span><span data-i18n="d1.h">上傳與探索資料</span></h2>
+      <p data-i18n="d1.p">在「資料工作台」拖放上傳 CSV 或 Excel。製程歷史資料建議含時間欄；模擬／DOE 資料集可無時間欄。上傳後每欄會顯示成一張分布卡片。</p>
+      <ul>
+        <li data-i18n="d1.l1"><b>框選排除</b>：在分布圖或散佈圖上用滑鼠框住異常段，選「排除」剔除、或「萃取」只留下——非破壞式，隨時在編輯歷程還原。</li>
+        <li data-i18n="d1.l2"><b>資料健檢</b>：側邊欄跑三判準（過度唯一值／大量重複／大量遺失），有警告的欄位不建議當自變數。</li>
+      </ul>
+      <div class="tip" data-i18n="d1.tip"><b>重點</b>：資料乾淨比選演算法重要得多。花時間清資料，模型自然好。</div>
+    </section>
+
+    <section>
+      <h2><span class="n">2</span><span data-i18n="d2.h">建立模型</span></h2>
+      <p data-i18n="d2.p">切到「模型」分頁點「建立模型」。選「全自動」會一次用所有適用演算法各建一個、訓練完依驗證分數排名——不用自己猜要選哪個。</p>
+      <ul>
+        <li data-i18n="d2.l1"><b>任務型態</b>：迴歸（預測數值）、分類（預測類別）、時序預測、設備異常偵測、混合模型（物理模擬＋AI 殘差）。每個選項旁有問號詳解。</li>
+        <li data-i18n="d2.l2"><b>看懂分數</b>：每個指標（RMSE、R²…）旁都有白話說明；驗證分數與訓練分數差很多＝過擬合警訊。</li>
+        <li data-i18n="d2.l3"><b>AI 助教</b>：右下角小精靈與模型詳情的 AI 助教會依你目前的資料與模型狀態給建議。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2><span class="n">3</span><span data-i18n="d3.h">混合模型（整合 ASPEN 等物理模擬）</span></h2>
+      <p data-i18n="d3.p">若你有製程模擬軟體（ASPEN Plus 等）的產出，把模擬值併成資料裡的一欄上傳，建模時選「混合模型」並指定該欄為模擬基準。</p>
+      <ul>
+        <li data-i18n="d3.l1"><b>原理</b>：預測＝代理模型（學模擬，把物理知識蒸餾進 AI）＋殘差模型（學實際與模擬的差，補現場效應）。</li>
+        <li data-i18n="d3.l2"><b>可信度</b>：詳情頁的三方對比（純模擬／純 AI／混合）讓你看到混合是否同時勝過兩者——物理基準有認證軟體背書。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2><span class="n">4</span><span data-i18n="d4.h">模型應用與最佳化</span></h2>
+      <p data-i18n="d4.p">模型建好後可以：模型評估（現行資料重評）、操作差異試算（改輸入看預測變化）、批次試算（上傳新資料整批預測）、參數最佳化（多目標配方優化，見最佳化工作區）。</p>
+      <ul>
+        <li data-i18n="d4.l1"><b>最佳化工作區</b>：設定多個目標（各帶範圍條件與權重）、可調參數的搜尋範圍、其餘參數的起始值、運算精準度，輸出推薦參數組合。</li>
+        <li data-i18n="d4.l2"><b>設備健康度</b>：異常偵測模型提供 0–100 健康分數、FDC 管制圖、故障事件列表與 7 天預測。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2><span class="n g">5</span><span data-i18n="d5.h">數位孿生（數據上 3D）</span></h2>
+      <p data-i18n="d5.p">從 P&amp;ID 圖面自動建廠（OCR 解析位號→3D 草稿）、在編輯器精修場景，最後在孿生檢視把即時數據熱力圖疊上廠區、做異常注入比對與工安模擬。</p>
+    </section>
+
+    <section>
+      <h2><span class="n">6</span><span data-i18n="d6.h">帳號與權限</span></h2>
+      <p data-i18n="d6.p">以 Google 帳號登入；第一個登入者為管理員。你上傳的資料集依帳號隔離（只有你與管理員可見）。管理員可在「權限管理」調整成員角色與啟用狀態。</p>
+    </section>
+  </div>
+  <script src="/static/js/i18n.js"></script>
+  <script>
+    JSI18N.register({
+      'back': { en: 'Home' },
+      'title': { en: 'User Guide' },
+      'sub': { en: 'A full walkthrough from uploading data to the digital twin — follow along even without a statistics background.' },
+      'd1.h': { en: 'Upload & explore data' },
+      'd1.p': { en: 'Drag-and-drop a CSV or Excel into the Data Workbench. Process-history data should include a time column; simulation/DOE datasets may omit it. Each column becomes a distribution card.' },
+      'd1.l1': { en: '<b>Box-select</b>: draw a box over an anomalous segment on a chart, then Exclude or Extract — non-destructive, undoable any time from the edit history.' },
+      'd1.l2': { en: '<b>Data health</b>: the sidebar runs three checks (over-unique / heavily duplicated / heavily missing); flagged columns are not recommended as predictors.' },
+      'd1.tip': { en: '<b>Key point</b>: clean data matters far more than the choice of algorithm. Invest in cleaning and the model follows.' },
+      'd2.h': { en: 'Build models' },
+      'd2.p': { en: 'Go to the Models tab and click Build Model. "Auto" builds one model per applicable algorithm and ranks them by validation score — no guessing which to pick.' },
+      'd2.l1': { en: '<b>Task type</b>: regression (numeric), classification (category), time-series, equipment anomaly detection, hybrid (physical simulation + AI residual). Each has a ⓘ explainer.' },
+      'd2.l2': { en: '<b>Read the scores</b>: every metric (RMSE, R²…) has a plain-language note; a large gap between validation and training scores signals overfitting.' },
+      'd2.l3': { en: '<b>AI tutor</b>: the bottom-right assistant and the in-detail AI tutor give advice based on your current data and model state.' },
+      'd3.h': { en: 'Hybrid model (integrating ASPEN and other physical simulation)' },
+      'd3.p': { en: 'If you have output from process-simulation software (ASPEN Plus etc.), add the simulated value as a column and choose "Hybrid" at build time, pointing to that column as the simulation baseline.' },
+      'd3.l1': { en: '<b>How it works</b>: prediction = surrogate model (learns the simulation, distilling physics into AI) + residual model (learns the actual-vs-simulated gap, capturing field effects).' },
+      'd3.l2': { en: '<b>Credibility</b>: the three-way comparison in the detail page (pure simulation / pure AI / hybrid) shows whether the hybrid beats both — the physical baseline is backed by certified software.' },
+      'd4.h': { en: 'Model applications & optimization' },
+      'd4.p': { en: 'Once built, a model supports: evaluation (re-score on current data), what-if analysis (change inputs, see prediction shift), batch scoring (upload new data), parameter optimization (multi-objective recipe optimization — see the optimization workspace).' },
+      'd4.l1': { en: '<b>Optimization workspace</b>: set multiple objectives (each with a range condition and weight), search ranges for tunable parameters, starting values for the rest, and a precision level — output recommended parameter combinations.' },
+      'd4.l2': { en: '<b>Equipment health</b>: anomaly-detection models provide a 0–100 health score, FDC control charts, a fault-event list and a 7-day forecast.' },
+      'd5.h': { en: 'Digital twin (data on 3D)' },
+      'd5.p': { en: 'Auto-build the plant from P&ID drawings (OCR tags → 3D draft), refine the scene in the editor, then overlay live data heatmaps on the plant in the twin view with anomaly-injection matching and EHS simulation.' },
+      'd6.h': { en: 'Account & access' },
+      'd6.p': { en: 'Sign in with a Google account; the first to sign in becomes administrator. Your uploaded datasets are isolated by account (visible only to you and admins). Admins adjust member roles and active status under Access Control.' },
+    });
+    JSI18N.apply();
+    document.querySelectorAll('.lang button').forEach((b) => b.addEventListener('click', () => {
+      JSI18N.set(b.dataset.lang);
+      document.querySelectorAll('.lang button').forEach((x) => x.classList.toggle('on', x.dataset.lang === b.dataset.lang));
+    }));
+    document.querySelector(`.lang button[data-lang="${JSI18N.lang()}"]`)?.classList.add('on');
+  </script>
+</body>
+</html>

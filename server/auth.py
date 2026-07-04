@@ -15,7 +15,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -84,7 +84,7 @@ def current_user(request: Request) -> dict | None:
 
 # ------------------------------------------------------ 守衛 middleware
 # 未登入可及的路徑前綴（登入流程本身＋靜態資源）
-PUBLIC_PREFIXES = ("/login", "/logout", "/static/", "/favicon", "/api/me")
+PUBLIC_PREFIXES = ("/login", "/logout", "/static/", "/favicon", "/api/me", "/docs")
 
 
 async def auth_guard(request: Request, call_next):
@@ -170,3 +170,56 @@ def me(request: Request):
         return JSONResponse({"detail": "未登入"}, status_code=401)
     return {"email": u["email"], "name": u.get("name"), "role": u.get("role", "user"),
             "auth_disabled": AUTH_DISABLED}
+
+
+# ------------------------------------------------------ 權限管理（admin only）
+def _require_admin(request: Request) -> dict:
+    u = current_user(request)
+    if not u or u.get("role") != "admin":
+        raise HTTPException(403, "需要管理員權限")
+    return u
+
+
+@router.get("/api/admin/users")
+def admin_list_users(request: Request):
+    _require_admin(request)
+    users = _load_users()
+    return {"auth_disabled": AUTH_DISABLED,
+            "users": [{"email": e, "name": v.get("name"), "role": v.get("role", "user"),
+                       "is_active": v.get("is_active", True), "created": v.get("created")}
+                      for e, v in sorted(users.items(), key=lambda kv: kv[1].get("created") or "")]}
+
+
+@router.post("/api/admin/users/{email}")
+def admin_update_user(email: str, request: Request, body: dict):
+    me_u = _require_admin(request)
+    users = _load_users()
+    if email not in users:
+        raise HTTPException(404, "使用者不存在")
+    # 防呆：不能把自己降權或停用（避免鎖死唯一管理員）
+    if email == me_u.get("email"):
+        if body.get("role") and body["role"] != "admin":
+            raise HTTPException(422, "不能移除自己的管理員權限")
+        if body.get("is_active") is False:
+            raise HTTPException(422, "不能停用自己的帳號")
+    if "role" in body:
+        if body["role"] not in ("admin", "user"):
+            raise HTTPException(422, "角色只能是 admin 或 user")
+        users[email]["role"] = body["role"]
+    if "is_active" in body:
+        users[email]["is_active"] = bool(body["is_active"])
+    _save_users(users)
+    return {"ok": True, "email": email, **users[email]}
+
+
+@router.delete("/api/admin/users/{email}")
+def admin_delete_user(email: str, request: Request):
+    me_u = _require_admin(request)
+    if email == me_u.get("email"):
+        raise HTTPException(422, "不能刪除自己的帳號")
+    users = _load_users()
+    if email not in users:
+        raise HTTPException(404, "使用者不存在")
+    del users[email]
+    _save_users(users)
+    return {"ok": True}

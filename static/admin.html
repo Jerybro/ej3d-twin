@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>權限管理｜J.S Process Intelligence</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root { --blue:#046AFB; --bg:#F6F7FA; --white:#fff; --bdr:#DBDDE0; --text:#061027; --text2:#555; --green:#059669; --danger:#C0392B; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html,body { background:var(--bg); color:var(--text); font-family:Inter,"Noto Sans TC","Microsoft JhengHei",sans-serif; font-size:15px; }
+    .wrap { max-width:960px; margin:0 auto; padding:28px 32px 64px; }
+    .top { display:flex; align-items:center; gap:12px; margin-bottom:22px; }
+    .top a.back { color:var(--text2); text-decoration:none; font-size:13.5px; display:inline-flex; align-items:center; gap:6px; }
+    .top a.back:hover { color:var(--blue); }
+    .top a.back svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+    .top .sp { margin-left:auto; }
+    .lang button { padding:5px 11px; border:1px solid var(--bdr); border-radius:6px; background:var(--white); font-size:12.5px; color:var(--text2); cursor:pointer; font-family:inherit; }
+    .lang button.on { border-color:var(--blue); color:var(--blue); font-weight:600; }
+    h1 { font-size:24px; font-weight:600; margin-bottom:6px; }
+    .sub { color:var(--text2); font-size:14px; margin-bottom:24px; }
+    .card { background:var(--white); border:1px solid var(--bdr); border-radius:10px; overflow:hidden; }
+    table { border-collapse:collapse; width:100%; font-size:14px; }
+    th { text-align:left; padding:13px 16px; color:var(--text2); font-weight:500; font-size:13px; border-bottom:1px solid var(--bdr); background:var(--bg); white-space:nowrap; }
+    td { padding:13px 16px; border-bottom:1px solid var(--bdr); vertical-align:middle; }
+    tr:last-child td { border-bottom:none; }
+    .u-name { font-weight:600; }
+    .u-email { font-size:12.5px; color:var(--text2); margin-top:2px; word-break:break-all; }
+    .pill { display:inline-block; font-size:12px; padding:2px 9px; border-radius:5px; }
+    .pill.admin { background:rgba(4,106,251,.10); color:var(--blue); }
+    .pill.user { background:var(--bg); color:var(--text2); }
+    .pill.on { background:rgba(5,150,105,.12); color:var(--green); }
+    .pill.off { background:rgba(192,57,43,.10); color:var(--danger); }
+    select.role { padding:5px 8px; border:1px solid var(--bdr); border-radius:6px; font-size:13px; font-family:inherit; background:var(--white); }
+    button.act { padding:5px 12px; border:1px solid var(--bdr); border-radius:6px; background:var(--white); font-size:13px; color:var(--text); cursor:pointer; font-family:inherit; margin-right:6px; }
+    button.act:hover { border-color:var(--blue); color:var(--blue); }
+    button.act.danger:hover { border-color:var(--danger); color:var(--danger); }
+    button.act:disabled { opacity:.4; cursor:not-allowed; }
+    .me-tag { font-size:11px; color:var(--blue); margin-left:6px; }
+    .empty { padding:40px; text-align:center; color:var(--text2); font-size:14px; }
+    .banner { padding:12px 16px; background:#FFF7E6; border:1px solid #F0D9A8; border-radius:8px; color:#7A5B10; font-size:13.5px; margin-bottom:16px; line-height:1.7; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <a class="back" href="/"><svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg><span data-i18n="back">回首頁</span></a>
+      <span class="sp"></span>
+      <span class="lang"><button data-lang="zh">繁體中文</button><button data-lang="en">English</button></span>
+    </div>
+    <h1 data-i18n="title">權限管理</h1>
+    <p class="sub" data-i18n="sub">管理平台成員的角色與啟用狀態。成員以 Google 帳號登入後自動出現在此。</p>
+    <div class="banner" id="banner" style="display:none"></div>
+    <div class="card"><div id="tablewrap"><div class="empty" data-i18n="loading">載入中…</div></div></div>
+  </div>
+  <script src="/static/js/i18n.js"></script>
+  <script>
+    JSI18N.register({
+      'back': { en: 'Home' }, 'title': { en: 'Access Control' },
+      'sub': { en: 'Manage member roles and active status. Members appear here automatically after signing in with Google.' },
+      'loading': { en: 'Loading…' },
+      'th.user': { en: 'User' }, 'th.role': { en: 'Role' }, 'th.status': { en: 'Status' }, 'th.created': { en: 'Joined' }, 'th.act': { en: 'Actions' },
+      'role.admin': { en: 'Administrator' }, 'role.user': { en: 'Member' },
+      'st.on': { en: 'Active' }, 'st.off': { en: 'Disabled' },
+      'act.disable': { en: 'Disable' }, 'act.enable': { en: 'Enable' }, 'act.delete': { en: 'Delete' }, 'act.confirm': { en: 'Confirm?' },
+      'me': { en: 'you' }, 'noauth': { en: 'Login is currently disabled (demo mode) — every visitor has full access, so there are no accounts to manage. Enable login to manage members here.' },
+      'forbidden': { en: 'Administrator privileges required.' },
+    });
+    JSI18N.apply();
+    document.querySelectorAll('.lang button').forEach((b) => b.addEventListener('click', () => {
+      JSI18N.set(b.dataset.lang);
+      document.querySelectorAll('.lang button').forEach((x) => x.classList.toggle('on', x.dataset.lang === b.dataset.lang));
+      render();
+    }));
+    document.querySelector(`.lang button[data-lang="${JSI18N.lang()}"]`)?.classList.add('on');
+
+    let data = null, myEmail = null;
+    const T = (k, zh) => JSI18N.t(k, zh);
+
+    async function load() {
+      const meR = await fetch('/api/me'); if (meR.ok) { const me = await meR.json(); myEmail = me.email; }
+      const r = await fetch('/api/admin/users');
+      if (r.status === 403) { document.getElementById('tablewrap').innerHTML = `<div class="empty">${T('forbidden','需要管理員權限。')}</div>`; return; }
+      data = await r.json();
+      if (data.auth_disabled) { document.getElementById('banner').style.display=''; document.getElementById('banner').textContent = T('noauth','目前為免登入模式（demo）——所有訪客都有完整權限，沒有帳號可管理。啟用登入後即可在此管理成員。'); }
+      render();
+    }
+
+    function render() {
+      if (!data) return;
+      const wrap = document.getElementById('tablewrap');
+      if (!data.users.length) { wrap.innerHTML = `<div class="empty">${data.auth_disabled ? T('noauth','') : '—'}</div>`; return; }
+      wrap.innerHTML = `<table><thead><tr>
+        <th>${T('th.user','使用者')}</th><th>${T('th.role','角色')}</th><th>${T('th.status','狀態')}</th><th>${T('th.created','加入時間')}</th><th>${T('th.act','操作')}</th>
+      </tr></thead><tbody>${data.users.map(rowHtml).join('')}</tbody></table>`;
+      wrap.querySelectorAll('select.role').forEach((s) => s.addEventListener('change', () => updateUser(s.dataset.email, { role: s.value })));
+      wrap.querySelectorAll('button[data-toggle]').forEach((b) => b.addEventListener('click', () => updateUser(b.dataset.email, { is_active: b.dataset.toggle === 'enable' })));
+      wrap.querySelectorAll('button[data-del]').forEach((b) => b.addEventListener('click', () => delUser(b, b.dataset.del)));
+    }
+
+    function rowHtml(u) {
+      const isMe = u.email === myEmail;
+      const active = u.is_active !== false;
+      return `<tr>
+        <td><div class="u-name">${u.name || u.email}${isMe ? `<span class="me-tag">(${T('me','你')})</span>` : ''}</div><div class="u-email">${u.email}</div></td>
+        <td><select class="role" data-email="${u.email}" ${isMe ? 'disabled' : ''}>
+          <option value="admin" ${u.role==='admin'?'selected':''}>${T('role.admin','管理員')}</option>
+          <option value="user" ${u.role!=='admin'?'selected':''}>${T('role.user','一般成員')}</option>
+        </select></td>
+        <td><span class="pill ${active?'on':'off'}">${active?T('st.on','啟用'):T('st.off','已停用')}</span></td>
+        <td style="color:var(--text2);font-size:13px;white-space:nowrap">${u.created || '—'}</td>
+        <td style="white-space:nowrap">
+          ${isMe ? '' : `<button class="act" data-toggle="${active?'disable':'enable'}" data-email="${u.email}">${active?T('act.disable','停用'):T('act.enable','啟用')}</button>
+          <button class="act danger" data-del="${u.email}">${T('act.delete','刪除')}</button>`}
+        </td></tr>`;
+    }
+
+    async function updateUser(email, body) {
+      const r = await fetch(`/api/admin/users/${encodeURIComponent(email)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+      if (!r.ok) { alert((await r.json()).detail || 'error'); }
+      await load();
+    }
+    async function delUser(btn, email) {
+      if (btn.dataset.armed !== '1') { btn.dataset.armed='1'; btn.textContent=T('act.confirm','確認？'); setTimeout(()=>{btn.dataset.armed='0';btn.textContent=T('act.delete','刪除');},3000); return; }
+      const r = await fetch(`/api/admin/users/${encodeURIComponent(email)}`, { method:'DELETE' });
+      if (!r.ok) { alert((await r.json()).detail || 'error'); }
+      await load();
+    }
+    load();
+  </script>
+</body>
+</html>

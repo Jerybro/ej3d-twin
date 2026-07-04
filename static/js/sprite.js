@@ -56,7 +56,7 @@ export function initSprite({ page = 'twin', bottom = 56, context = () => ({}) } 
         <button data-sp="close" title="收合">${IC_CLOSE}</button>
       </div>
       <div class="sp-body">點右上重新整理取得建議</div>
-      <div class="sp-foot"><span>Qwen3.6｜資料不出這台機器</span><span class="sp-when"></span></div>
+      <div class="sp-foot"><span></span><span class="sp-when"></span></div>
     </div>
     <button class="sp-fab" title="AI 助手（本機模型情境建議）">${IC_SPARK}<span class="sp-dot"></span></button>`;
   document.body.appendChild(root);

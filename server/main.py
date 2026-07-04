@@ -178,7 +178,9 @@ async def lifespan(app: FastAPI):
     await SOURCE.stop()
 
 
-app = FastAPI(title="EJ_3D 數位孿生平台 MVP", lifespan=lifespan)
+# /docs 保留給操作說明頁（見 PAGES），FastAPI 內建 Swagger 移到 /api-docs
+app = FastAPI(title="J.S Process Intelligence API", lifespan=lifespan,
+              docs_url="/api-docs", redoc_url="/api-redoc")
 
 # ------------------------------------------------------------------- REST API
 
@@ -454,6 +456,8 @@ PAGES = {
     "/twin/editor": "editor.html",  # 產品3：3D 模塊編輯器
     "/twin/pid": "pid.html",   # 產品3：P&ID 管理
     "/data": "data.html",      # 產品2：資料前處理
+    "/docs": "docs.html",      # 操作說明（雙語）
+    "/admin": "admin.html",    # 權限管理（admin）
 }
 for route, fname in PAGES.items():
     def _page(fname=fname) -> FileResponse:

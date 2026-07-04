@@ -1275,6 +1275,95 @@ builders.cageladder = function ({ h }) {
   return g;
 };
 
+// -------------------------------------------------- 管線支撐＋儀電橋架（elec discipline）
+builders.psupport = function ({ h, r }) {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.06, 0.36), std(0x55606c));
+  base.position.y = 0.03;
+  const postH = Math.max(h - 0.05, 0.1);
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, postH, 0.12), std(0x6b7683));
+  post.position.y = postH / 2 + 0.06;
+  const saddle = new THREE.Mesh(new THREE.TorusGeometry(Math.max(r * 1.1, 0.07), 0.035, 6, 14, Math.PI), std(0x8d99a6));
+  saddle.rotation.z = Math.PI;                    // 開口朝上承管；管沿 Z 通過（放置時 rot_y 對齊管向）
+  saddle.position.y = h + 0.01;
+  g.add(base, post, saddle);
+  return g;
+};
+
+builders.cabletray = function ({ w, len, elev }) {
+  const g = new THREE.Group();
+  const m = std(0x7f8a96, { metalness: 0.4, roughness: 0.5 });
+  for (const sz of [-1, 1]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 0.09, 0.04), m);
+    rail.position.set(0, elev + 0.045, sz * (w / 2));
+    g.add(rail);
+  }
+  const n = Math.max(2, Math.floor(len / 0.35));
+  for (let i = 0; i <= n; i++) {
+    const rung = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.03, w), m);
+    rung.position.set(-len / 2 + (len * i) / n, elev + 0.02, 0);
+    g.add(rung);
+  }
+  return g;
+};
+
+builders.traybend = function ({ w, elev }) {
+  const g = new THREE.Group();
+  const m = std(0x7f8a96, { metalness: 0.4, roughness: 0.5 });
+  const L = w * 2.2;
+  const armX = new THREE.Mesh(new THREE.BoxGeometry(L, 0.05, w), m);
+  armX.position.set(L / 2 - w / 2, elev + 0.025, 0);
+  const armZ = new THREE.Mesh(new THREE.BoxGeometry(w, 0.05, L), m);
+  armZ.position.set(0, elev + 0.025, L / 2 - w / 2);
+  g.add(armX, armZ);
+  return g;
+};
+
+builders.trayriser = function ({ w, h }) {
+  const g = new THREE.Group();
+  const m = std(0x7f8a96, { metalness: 0.4, roughness: 0.5 });
+  for (const sx of [-1, 1]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.04, h, 0.09), m);
+    rail.position.set(sx * (w / 2), h / 2, 0);
+    g.add(rail);
+  }
+  const n = Math.max(2, Math.floor(h / 0.35));
+  for (let i = 0; i <= n; i++) {
+    const rung = new THREE.Mesh(new THREE.BoxGeometry(w, 0.035, 0.03), m);
+    rung.position.set(0, Math.max((h * i) / n, 0.02), 0);
+    g.add(rung);
+  }
+  return g;
+};
+
+builders.jbox = function ({ w, h, d }) {
+  const g = new THREE.Group();
+  const mount = 0.8;                               // 掛桿安裝高度
+  const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), std(0x8b95a1, { metalness: 0.3, roughness: 0.55 }));
+  box.position.y = mount + h / 2;
+  const pole = new THREE.Mesh(new THREE.BoxGeometry(0.07, mount + h / 2, 0.07), std(0x55606c));
+  pole.position.y = (mount + h / 2) / 2;
+  const door = new THREE.Mesh(new THREE.BoxGeometry(w * 0.86, h * 0.86, 0.02), std(0x707c88));
+  door.position.set(0, mount + h / 2, d / 2 + 0.012);
+  g.add(box, pole, door);
+  return g;
+};
+
+builders.lightpole = function ({ h }) {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, h, 10), std(0x6b7683));
+  pole.position.y = h / 2;
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.1, 8), std(0x6b7683));
+  arm.rotation.z = Math.PI / 2;
+  arm.position.set(0.5, h - 0.15, 0);
+  const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.1, 0.24), std(0xdfe6ee));
+  lamp.position.set(1.0, h - 0.2, 0);
+  const basePl = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.08, 10), std(0x55606c));
+  basePl.position.y = 0.04;
+  g.add(pole, arm, lamp, basePl);
+  return g;
+};
+
 // -------------------------------------------------- 管線元件（Piping Components）
 // E3D Component Editor：閥/法蘭對/異徑管/止回閥，沿管線弧長定位
 export function buildPipeComponent(kind, r) {
@@ -1441,7 +1530,15 @@ export const ASSET_CATEGORIES = [
     { type: 'stairs', name: '樓梯', dims: { w: 1.0, h: 3, run: 3.6 }, prefix: 'STR' },
     { type: 'srail', name: '扶手欄杆', dims: { len: 4 }, prefix: 'HR' },
     { type: 'cageladder', name: '籠式直爬梯', dims: { h: 6 }, prefix: 'LD' },
+    { type: 'psupport', name: '管線支撐', dims: { h: 1.2, r: 0.12 }, prefix: 'PS' },
     { type: 'splat', name: '平台', dims: { w: 3, d: 2.4, elev: 3 }, prefix: 'PF' },
+  ]},
+  { name: '儀電橋架', discipline: 'elec', items: [
+    { type: 'cabletray', name: '電纜橋架（直線）', dims: { w: 0.45, len: 6, elev: 3 }, prefix: 'CT' },
+    { type: 'traybend', name: '橋架水平彎', dims: { w: 0.45, elev: 3 }, prefix: 'CT' },
+    { type: 'trayriser', name: '橋架垂直段', dims: { w: 0.45, h: 3 }, prefix: 'CT' },
+    { type: 'jbox', name: '接線箱', dims: { w: 0.6, h: 0.8, d: 0.3 }, prefix: 'JB' },
+    { type: 'lightpole', name: '廠區照明燈桿', dims: { h: 6 }, prefix: 'LP' },
   ]},
   { name: '基元（自建設備）', items: [
     { type: 'assembly', name: '自建設備', dims: {},

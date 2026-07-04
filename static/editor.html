@@ -298,6 +298,7 @@
           <option value="pipe" selected>管線 PIPING</option>
           <option value="equip">設備 EQUIPMENT</option>
           <option value="struct">結構 STRUCTURES</option>
+          <option value="elec">儀電 ELECTRICAL</option>
           <option value="none">通用 GENERAL</option>
         </select>
         <span id="scene-name" style="margin-left:auto">未儲存場景</span>
@@ -361,6 +362,9 @@
               <button class="rbtn xf-btn active" data-m="translate" title="移動（W）"><span class="ric" data-ic="move"></span>移動</button>
               <button class="rbtn xf-btn" data-m="rotate" title="旋轉（E）"><span class="ric" data-ic="rotate"></span>旋轉</button>
               <button class="rbtn xf-btn" data-m="scale" title="縮放（R）"><span class="ric" data-ic="scale"></span>縮放</button>
+              <button class="rbtn warn" id="btn-nozzle" title="在設備表面點擊放置管嘴（口徑取管線 tab 目前 Bore；繪管自動吸附嘴端）"><span class="ric" data-ic="nozzle"></span>管嘴</button>
+              <button class="rbtn" id="btn-array" title="陣列複製選取設備（方向／間距／數量）"><span class="ric" data-ic="array"></span>陣列</button>
+              <button class="rbtn" id="btn-mirror" title="鏡射複製選取設備（指定軸線位置）"><span class="ric" data-ic="mirror"></span>鏡射</button>
             </div>
             <div class="rgroup-label">修改</div>
           </div>
@@ -387,6 +391,7 @@
           <div class="rgroup">
             <div class="rgroup-tools">
               <button class="rbtn warn" id="pipe-node-btn" title="選中管線後編輯節點：拖曳移動、Delete 刪節點"><span class="ric" data-ic="node"></span>節點編輯</button>
+              <button class="rbtn" id="btn-supports" title="沿選中管線的高架水平段每 4m 自動生成管線支撐（入結構圖層）"><span class="ric" data-ic="support"></span>生成支撐</button>
             </div>
             <div class="rgroup-label">修改</div>
           </div>
@@ -407,6 +412,8 @@
               <button class="rbtn active" id="btn-lay-eq" title="設備圖層顯示切換"><span class="ric" data-ic="laycube"></span>設備</button>
               <button class="rbtn active" id="btn-lay-pipe" title="管線圖層顯示切換"><span class="ric" data-ic="laypipe"></span>管線</button>
               <button class="rbtn active" id="btn-lay-struct" title="結構圖層顯示切換"><span class="ric" data-ic="laybeam"></span>結構</button>
+              <button class="rbtn active" id="btn-lay-elec" title="儀電圖層顯示切換"><span class="ric" data-ic="layelec"></span>儀電</button>
+              <button class="rbtn" id="btn-elev" title="標高基準面：顯示 EL 網格＋管理標高清單（屬性面板）"><span class="ric" data-ic="elev"></span>標高</button>
             </div>
             <div class="rgroup-label">內容</div>
           </div>

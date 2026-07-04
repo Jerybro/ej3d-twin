@@ -55,6 +55,12 @@ const ICONS = {
   laycube: '<path d="M12 3l7 4v10l-7 4-7-4V7l7-4z"/><path d="M12 11l7-4M12 11L5 7M12 11v10"/>',
   laypipe: '<path d="M4 6h7a7 7 0 0 1 7 7v5"/><path d="M4 11h7a2 2 0 0 1 2 2v5"/>',
   laybeam: '<path d="M6 4h12M6 20h12M12 4v16"/>',
+  nozzle: '<path d="M3 12h7"/><path d="M10 7v10M14 7v10"/><path d="M14 12h7"/>',
+  array: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  mirror: '<path d="M12 3v18"/><path d="M9 7L4 12l5 5"/><path d="M15 7l5 5-5 5"/>',
+  support: '<path d="M7 9a5 5 0 0 1 10 0"/><path d="M12 9v9M7 18h10"/>',
+  layelec: '<path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/>',
+  elev: '<path d="M3 19h18M3 13h12M3 7h12"/><path d="M19 16V6M16 9l3-3 3 3"/>',
 };
 document.querySelectorAll('.ric[data-ic]').forEach((el) => {
   const d = ICONS[el.dataset.ic];
@@ -225,9 +231,14 @@ const pipeObjects = [];       // index 對齊 sceneData.pipes → { group }
 const hiddenTags = new Set(); // 模型樹「隱藏」的設備（UI 狀態，不入存檔）
 
 // ---------------------------------------------------------------- 圖層顯示（設備/管線/結構）
-const LAYERS = { equip: true, pipe: true, struct: true };
-const STRUCT_TYPES = new Set(['scolumn', 'sbeam', 'stairs', 'srail', 'splat', 'cageladder']);
-function eqLayerOn(def) { return STRUCT_TYPES.has(def.type) ? LAYERS.struct : LAYERS.equip; }
+const LAYERS = { equip: true, pipe: true, struct: true, elec: true };
+const STRUCT_TYPES = new Set(['scolumn', 'sbeam', 'stairs', 'srail', 'splat', 'cageladder', 'psupport']);
+const ELEC_TYPES = new Set(['cabletray', 'traybend', 'trayriser', 'jbox', 'lightpole']);
+function eqLayerOn(def) {
+  if (STRUCT_TYPES.has(def.type)) return LAYERS.struct;
+  if (ELEC_TYPES.has(def.type)) return LAYERS.elec;
+  return LAYERS.equip;
+}
 function applyLayers() {
   for (const entry of eqObjects.values()) {
     entry.group.visible = !hiddenTags.has(entry.def.tag) && eqLayerOn(entry.def);
@@ -259,6 +270,7 @@ function buildEquipment(def) {
   markShadow(body);
   body.traverse((o) => { if (o.isMesh) { o.userData.eqTag = def.tag; } });
   group.add(body);
+  renderNozzles(group, def);
   group.position.set(...def.pos);
   group.rotation.y = def.rot_y ?? 0;
 
@@ -374,6 +386,7 @@ function loadSceneData(data, id) {
   for (const eq of allEquipment()) buildEquipment(eq);
   sceneData.pipes.forEach((pipe, i) => buildPipe(pipe, i));
   rebuildUnderlays(sceneData.underlays);
+  rebuildElevs();
   fitGround([...allEquipment()], sceneData.underlays);
   updateTopbar();
   rebuildTree();
@@ -393,7 +406,7 @@ function updateTopbar() {
 }
 
 // ------------------------------------------------------------ 模式與選取
-let mode = 'idle'; // idle | placing | pipe | measure | pipenode
+let mode = 'idle'; // idle | placing | pipe | measure | pipenode | nozzle
 let placingAsset = null;  // ASSET_CATALOG 項
 let ghost = null;
 let selected = null;      // { kind: 'eq', def } | { kind: 'pipe', index }
@@ -414,6 +427,7 @@ function setMode(m) {
   document.getElementById('btn-measure').classList.remove('active');
   document.getElementById('btn-measure-angle').classList.remove('active');
   document.getElementById('pipe-node-btn').classList.remove('active');
+  document.getElementById('btn-nozzle').classList.remove('active');
   if (ghost) { scene.remove(ghost); ghost = null; }
   if (compGhost) { scene.remove(compGhost); compGhost = null; }
   pendingComp = null;
@@ -990,7 +1004,7 @@ document.querySelectorAll('.rtab').forEach((tab) => {
 // 結構 STRUCTURES：只帶出設備 tab，且素材群組過濾為結構鋼構
 document.getElementById('qat-discipline').addEventListener('change', (e) => {
   const v = e.target.value;
-  const show = { pipe: ['equip', 'pipe'], equip: ['equip'], struct: ['equip'], none: [] }[v];
+  const show = { pipe: ['equip', 'pipe'], equip: ['equip'], struct: ['equip'], elec: ['equip'], none: [] }[v];
   document.querySelectorAll('.ctx-tab').forEach((t) => {
     const on = show.includes(t.dataset.tab);
     t.classList.toggle('hidden', !on);
@@ -998,12 +1012,12 @@ document.getElementById('qat-discipline').addEventListener('change', (e) => {
       document.querySelector('.rtab[data-tab="home"]').click();
     }
   });
+  const disc = v === 'struct' ? 'struct' : v === 'elec' ? 'elec' : 'general';
   equipRibbon.querySelectorAll('.rgroup').forEach((g) => {
-    g.style.display =
-      (v === 'struct') === (g.dataset.disc === 'struct') ? '' : 'none';
+    g.style.display = g.dataset.disc === disc ? '' : 'none';
   });
   const equipTab = document.querySelector('.rtab[data-tab="equip"]');
-  equipTab.textContent = v === 'struct' ? '結構 STRUCTURES' : '設備 EQUIPMENT';
+  equipTab.textContent = { struct: '結構 STRUCTURES', elec: '儀電 ELECTRICAL' }[v] ?? '設備 EQUIPMENT';
 });
 
 // QAT 迷你鈕鏡射主要功能
@@ -1046,7 +1060,7 @@ for (const cat of ASSET_CATEGORIES) {
 }
 
 // 預設 discipline＝管線：結構鋼構群組先隱藏（切 STRUCTURES 才亮）
-equipRibbon.querySelectorAll('.rgroup[data-disc="struct"]').forEach((g) => { g.style.display = 'none'; });
+equipRibbon.querySelectorAll('.rgroup[data-disc="struct"], .rgroup[data-disc="elec"]').forEach((g) => { g.style.display = 'none'; });
 
 function startPlacing(asset, btn) {
   setMode('placing');
@@ -1103,6 +1117,16 @@ function orthoLock(pt, e) {
 }
 
 function snapToEquipment(pt) {
+  // 管嘴優先：1.5m 內吸附最近 nozzle 端點（含高度）——配管接嘴
+  let bestNz = null, bestNzD = 1.5;
+  for (const { def } of eqObjects.values()) {
+    for (const nz of def.nozzles ?? []) {
+      const w = nozzleWorld(def, nz);
+      const d = Math.hypot(w.x - pt.x, w.z - pt.z);
+      if (d < bestNzD) { bestNzD = d; bestNz = w; }
+    }
+  }
+  if (bestNz) return bestNz;
   // 2m 內吸附最近設備的接管點（y=0.9）
   let best = null, bestD = 2;
   for (const { def } of eqObjects.values()) {
@@ -1215,6 +1239,20 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     rebuildTree();
     updateTopbar();
     selectEquipment(def.tag);
+    return;
+  }
+
+  if (mode === 'nozzle') {
+    setPointer(e);
+    raycaster.setFromCamera(pointer, camera);
+    for (const hit of raycaster.intersectObjects(scene.children, true)) {
+      let o = hit.object;
+      while (o && !o.userData?.eqTag) o = o.parent;
+      if (!o?.userData?.eqTag || hiddenTags.has(o.userData.eqTag)) continue;
+      addNozzleAt(o.userData.eqTag, hit);
+      return;
+    }
+    setHint('加管嘴：請點擊<b>設備表面</b>（Esc 結束）');
     return;
   }
 
@@ -2125,7 +2163,7 @@ document.getElementById('btn-clipcap').addEventListener('click', (e) => {
 });
 
 // ------------------------------------------------------------ 圖層顯示切換（檢視 tab）
-for (const [btnId, key] of [['btn-lay-eq', 'equip'], ['btn-lay-pipe', 'pipe'], ['btn-lay-struct', 'struct']]) {
+for (const [btnId, key] of [['btn-lay-eq', 'equip'], ['btn-lay-pipe', 'pipe'], ['btn-lay-struct', 'struct'], ['btn-lay-elec', 'elec']]) {
   document.getElementById(btnId).addEventListener('click', (e) => {
     LAYERS[key] = !LAYERS[key];
     e.currentTarget.classList.toggle('active', LAYERS[key]);
@@ -2182,6 +2220,246 @@ function exportMTO() {
   setHint(`材料表已輸出：管線 ${sceneData.pipes.length} 條、設備 ${eqN} 台（CSV）`);
 }
 document.getElementById('btn-mto').addEventListener('click', exportMTO);
+
+// ------------------------------------------------------------ 設備管嘴（Nozzle：點表面放置、畫管吸附嘴端）
+const nozzleMat = std(0x2e6da8, { metalness: 0.4, roughness: 0.45 });
+function renderNozzles(group, def) {
+  for (const nz of def.nozzles ?? []) {
+    const r = PIPE_BORES.find((b) => b.dn === nz.dn)?.r ?? 0.08;
+    const stub = new THREE.Group();
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.32, 12), nozzleMat);
+    neck.position.y = 0.16;
+    const flange = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.7, r * 1.7, 0.05, 14), nozzleMat);
+    flange.position.y = 0.32;
+    stub.add(neck, flange);
+    stub.position.set(...nz.pos);
+    stub.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...nz.dir).normalize());
+    stub.traverse((o) => { if (o.isMesh) o.userData.eqTag = def.tag; });
+    group.add(stub);
+  }
+}
+
+function nozzleWorld(def, nz) {
+  const dir = new THREE.Vector3(...nz.dir).normalize();
+  const p = new THREE.Vector3(...nz.pos).add(dir.multiplyScalar(0.32));
+  p.applyAxisAngle(new THREE.Vector3(0, 1, 0), def.rot_y ?? 0);
+  return p.add(new THREE.Vector3(...def.pos));
+}
+
+function rebuildOneEquipment(def) {
+  const entry = eqObjects.get(def.tag);
+  if (entry) {
+    if (transform.object === entry.group) transform.detach();
+    scene.remove(entry.group);
+    eqObjects.delete(def.tag);
+  }
+  buildEquipment(def);
+}
+
+function addNozzleAt(tag, hit) {
+  const entry = eqObjects.get(tag);
+  if (!entry) return;
+  pushUndo();
+  const def = entry.def;
+  // 法向 → 世界主軸向（管嘴軸向正交慣例），再轉設備局部（反轉 rot_y）
+  const n = hit.face?.normal
+    ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
+    : new THREE.Vector3(1, 0, 0);
+  const comps = [Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)];
+  const k = comps.indexOf(Math.max(...comps));
+  const dirW = new THREE.Vector3(0, 0, 0);
+  dirW.setComponent(k, Math.sign(n.getComponent(k)) || 1);
+  const yAxis = new THREE.Vector3(0, 1, 0);
+  const local = hit.point.clone().sub(new THREE.Vector3(...def.pos)).applyAxisAngle(yAxis, -(def.rot_y ?? 0));
+  const dirL = dirW.clone().applyAxisAngle(yAxis, -(def.rot_y ?? 0));
+  def.nozzles = def.nozzles ?? [];
+  const nzId = `N${def.nozzles.length + 1}`;
+  const dn = document.getElementById('pipe-bore').value || 'DN100';
+  def.nozzles.push({
+    id: nzId, dn,
+    pos: [+local.x.toFixed(2), +local.y.toFixed(2), +local.z.toFixed(2)],
+    dir: [+dirL.x.toFixed(3), +dirL.y.toFixed(3), +dirL.z.toFixed(3)],
+  });
+  rebuildOneEquipment(def);
+  setHint(`已加管嘴 <b>${def.tag}/${nzId}</b>（${dn}）——繪管時 1.5m 內自動吸附嘴端；可續點加嘴，Esc 結束`);
+}
+
+document.getElementById('btn-nozzle').addEventListener('click', () => {
+  if (mode === 'nozzle') { setMode('idle'); return; }
+  setMode('nozzle');
+  document.getElementById('btn-nozzle').classList.add('active');
+  setHint('加管嘴：點擊<b>設備表面</b>放置（口徑取管線 tab 目前 Bore），Esc 結束');
+});
+
+// ------------------------------------------------------------ 管線支撐自動生成（高架水平段每 4m）
+document.getElementById('btn-supports').addEventListener('click', () => {
+  if (selected?.kind !== 'pipe') { setHint('先選取一條管線再<b>生成支撐</b>'); return; }
+  const pipe = sceneData.pipes[selected.index];
+  const SPAN = 4;
+  const spots = [];
+  const pts = pipe.pts;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, ay, az] = pts[i], [bx, by, bz] = pts[i + 1];
+    if (Math.abs(by - ay) > 0.01) continue;              // 只支撐水平段
+    if (ay - pipe.r < 0.4) continue;                     // 貼地管免支撐
+    const len = Math.hypot(bx - ax, bz - az);
+    for (let s = SPAN / 2; s < len; s += SPAN) {
+      const t = s / len;
+      spots.push({ x: ax + (bx - ax) * t, z: az + (bz - az) * t, y: ay, yaw: Math.atan2(bx - ax, bz - az) });
+    }
+  }
+  if (!spots.length) { setHint('此管線沒有可支撐的高架水平段（貼地或垂直）'); return; }
+  pushUndo();
+  let unit = sceneData.plant.units.find((u) => u.id === 'U-SUP');
+  if (!unit) { unit = { id: 'U-SUP', name: '管線支撐', equipment: [] }; sceneData.plant.units.push(unit); }
+  for (const sp of spots) {
+    const def = {
+      tag: nextTag('PS'), type: 'psupport', name: '管線支撐',
+      dims: { h: +(sp.y - pipe.r).toFixed(2), r: Math.max(pipe.r, 0.05) },
+      pos: [+sp.x.toFixed(2), 0, +sp.z.toFixed(2)], rot_y: +sp.yaw.toFixed(3),
+      design: {}, instruments: [], pid_ref: '',
+    };
+    unit.equipment.push(def);
+    buildEquipment(def);
+  }
+  rebuildTree();
+  updateTopbar();
+  setHint(`已沿管線 #${selected.index + 1} 生成 <b>${spots.length}</b> 支管線支撐（間距 ${SPAN}m，入結構圖層）；重複點擊會再生成一組`);
+});
+
+// ------------------------------------------------------------ 陣列／鏡射複製（佔右側屬性面板）
+const PP_ROW = 'display:flex;align-items:center;gap:8px;margin:7px 0;font-size:12px;color:var(--dim)';
+const PP_INP = 'flex:1;border:1px solid var(--bdr);border-radius:6px;padding:5px 8px;font-family:inherit;font-size:12.5px;color:var(--text);background:var(--panel)';
+const PP_BTN = 'width:100%;margin-top:8px;padding:7px 0;border:none;border-radius:7px;background:var(--accent);color:#fff;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer';
+const PP_GHOST = 'width:100%;margin-top:6px;padding:6px 0;border:1px solid var(--bdr);border-radius:7px;background:none;color:var(--dim);font-family:inherit;font-size:12px;cursor:pointer';
+
+function renderArrayPanel(kind) {
+  if (selected?.kind !== 'eq') { setHint(`先選取設備再使用<b>${kind === 'array' ? '陣列' : '鏡射'}</b>`); return; }
+  const src = selected.def;
+  const isArr = kind === 'array';
+  document.getElementById('prop-title').textContent = `${isArr ? '陣列' : '鏡射'}｜${src.tag}`;
+  propBody.innerHTML = isArr ? `
+    <div style="${PP_ROW}"><span style="width:52px">方向</span><select id="ap-dir" style="${PP_INP}">
+      <option value="E+">東（E＋）</option><option value="E-">西（E−）</option>
+      <option value="N+">北（N＋）</option><option value="N-">南（N−）</option></select></div>
+    <div style="${PP_ROW}"><span style="width:52px">間距 m</span><input id="ap-gap" type="number" step="0.5" value="5" style="${PP_INP}"></div>
+    <div style="${PP_ROW}"><span style="width:52px">複製數</span><input id="ap-n" type="number" min="1" max="30" value="2" style="${PP_INP}"></div>
+    <button id="ap-go" style="${PP_BTN}">生成陣列</button>
+    <button id="ap-done" style="${PP_GHOST}">返回屬性</button>` : `
+    <div style="${PP_ROW}"><span style="width:52px">鏡射軸</span><select id="ap-axis" style="${PP_INP}">
+      <option value="E">南北向軸（左右翻）</option><option value="N">東西向軸（前後翻）</option></select></div>
+    <div style="${PP_ROW}"><span style="width:52px">軸位置</span><input id="ap-at" type="number" step="0.5" value="${src.pos[0]}" style="${PP_INP}"></div>
+    <button id="ap-go" style="${PP_BTN}">生成鏡射</button>
+    <button id="ap-done" style="${PP_GHOST}">返回屬性</button>`;
+  document.getElementById('ap-done').addEventListener('click', () => selectEquipment(src.tag));
+  if (!isArr) {
+    document.getElementById('ap-axis').addEventListener('change', (e) => {
+      document.getElementById('ap-at').value = e.target.value === 'E' ? src.pos[0] : src.pos[2];
+    });
+  }
+  document.getElementById('ap-go').addEventListener('click', () => {
+    const prefix = (src.tag.match(/^[A-Z]+/i)?.[0] ?? 'X').toUpperCase();
+    const unit = sceneData.plant.units.find((u) => u.equipment.includes(src)) ?? sceneData.plant.units[0];
+    pushUndo();
+    let lastTag = src.tag;
+    if (isArr) {
+      const [dx, dz] = { 'E+': [1, 0], 'E-': [-1, 0], 'N+': [0, 1], 'N-': [0, -1] }[document.getElementById('ap-dir').value];
+      const gap = +document.getElementById('ap-gap').value || 5;
+      const n = Math.min(30, Math.max(1, Math.round(+document.getElementById('ap-n').value || 1)));
+      for (let i = 1; i <= n; i++) {
+        const d2 = JSON.parse(JSON.stringify(src));
+        d2.tag = nextTag(prefix);
+        d2.pos = [src.pos[0] + dx * gap * i, src.pos[1] ?? 0, src.pos[2] + dz * gap * i];
+        d2.instruments = [];
+        unit.equipment.push(d2);
+        buildEquipment(d2);
+        lastTag = d2.tag;
+      }
+      setHint(`陣列完成：自 <b>${src.tag}</b> 新增 ${n} 台`);
+    } else {
+      const axis = document.getElementById('ap-axis').value;
+      const at = +document.getElementById('ap-at').value || 0;
+      const d2 = JSON.parse(JSON.stringify(src));
+      d2.tag = nextTag(prefix);
+      d2.instruments = [];
+      if (axis === 'E') { d2.pos[0] = +(2 * at - src.pos[0]).toFixed(2); d2.rot_y = -(src.rot_y ?? 0); }
+      else { d2.pos[2] = +(2 * at - src.pos[2]).toFixed(2); d2.rot_y = Math.PI - (src.rot_y ?? 0); }
+      unit.equipment.push(d2);
+      buildEquipment(d2);
+      lastTag = d2.tag;
+      setHint(`鏡射完成：<b>${src.tag}</b> → <b>${d2.tag}</b>`);
+    }
+    rebuildTree();
+    updateTopbar();
+    selectEquipment(lastTag);
+  });
+}
+document.getElementById('btn-array').addEventListener('click', () => renderArrayPanel('array'));
+document.getElementById('btn-mirror').addEventListener('click', () => renderArrayPanel('mirror'));
+
+// ------------------------------------------------------------ 標高基準面（EL Datum：sceneData.elevs 持久化）
+const elevGroup = new THREE.Group();
+elevGroup.visible = false;
+scene.add(elevGroup);
+let elevOn = false;
+
+function rebuildElevs() {
+  for (const c of [...elevGroup.children]) {
+    if (c.isCSS2DObject) c.element.remove();
+    elevGroup.remove(c);
+  }
+  for (const h of sceneData.elevs ?? []) {
+    const grid = new THREE.GridHelper(60, 30, 0x7fa8e8, 0xd4e2f4);
+    grid.position.y = h;
+    const el = document.createElement('div');
+    el.style.cssText = 'padding:1px 7px;border-radius:4px;background:rgba(4,106,251,.88);color:#fff;font-size:10.5px;font-weight:700;white-space:nowrap;';
+    el.textContent = `EL.${h >= 0 ? '+' : ''}${(h * 1000).toFixed(0)}`;
+    const lbl = new CSS2DObject(el);
+    lbl.position.set(-29, h + 0.05, -29);
+    elevGroup.add(grid, lbl);
+  }
+}
+
+function renderElevPanel() {
+  document.getElementById('prop-title').textContent = '標高基準面';
+  const elevs = sceneData.elevs ?? [];
+  const rows = elevs.map((h, i) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid var(--bdr);font-size:12.5px">
+      <span style="flex:1;color:var(--text);font-weight:600">EL.${h >= 0 ? '+' : ''}${(h * 1000).toFixed(0)}</span>
+      <button data-edel="${i}" style="border:none;background:none;color:#d03050;cursor:pointer;font-size:11.5px;font-family:inherit">刪除</button>
+    </div>`).join('');
+  propBody.innerHTML = `
+    <div style="${PP_ROW}"><span style="width:64px">標高 m</span><input id="el-h" type="number" step="0.5" value="3" style="${PP_INP}"></div>
+    <button id="el-add" style="${PP_BTN}">加入基準面</button>
+    <div style="margin-top:12px">${rows || '<div style="color:var(--dim);font-size:12px;padding:6px 0">尚無基準面——輸入標高後加入（EL.0 為地坪）</div>'}</div>`;
+  document.getElementById('el-add').addEventListener('click', () => {
+    const h = +document.getElementById('el-h').value;
+    if (!Number.isFinite(h)) return;
+    pushUndo();
+    sceneData.elevs = sceneData.elevs ?? [];
+    if (!sceneData.elevs.includes(h)) sceneData.elevs.push(h);
+    sceneData.elevs.sort((a, b) => a - b);
+    rebuildElevs();
+    renderElevPanel();
+  });
+  propBody.querySelectorAll('[data-edel]').forEach((b) => b.addEventListener('click', () => {
+    pushUndo();
+    sceneData.elevs.splice(+b.dataset.edel, 1);
+    rebuildElevs();
+    renderElevPanel();
+  }));
+}
+
+document.getElementById('btn-elev').addEventListener('click', (e) => {
+  elevOn = !elevOn;
+  e.currentTarget.classList.toggle('active', elevOn);
+  elevGroup.visible = elevOn;
+  if (elevOn) {
+    rebuildElevs();
+    renderElevPanel();
+    setHint('標高基準面：屬性面板管理標高清單；再按一次<b>標高</b>隱藏');
+  }
+});
 
 // ------------------------------------------------------------ Clash 檢測面板（工具 tab）
 const clashDock = document.getElementById('clash-dock');

@@ -99,7 +99,7 @@ async function renderMySets() {
     <div class="ds-item${s.sid === sid ? ' cur' : ''}">
       <div class="ds-ic">${DS_ICON}</div>
       <div class="ds-info">
-        <div class="ds-fn">${s.filename ?? s.sid}</div>
+        <div class="ds-fn">${escHtml(s.filename ?? s.sid)}</div>
         <div class="ds-meta">${meta(s)}</div>
       </div>
       <div class="ds-acts">
@@ -169,7 +169,7 @@ function optUnionFeatures() {
   return [...set].sort();
 }
 function optAddObj() {
-  const opts = OPT.models.map((m) => `<option value="${m.id}">${m.name}（目標 ${m.target}）</option>`).join('');
+  const opts = OPT.models.map((m) => `<option value="${escHtml(m.id)}">${escHtml(m.name)}（目標 ${escHtml(m.target)}）</option>`).join('');
   const tr = document.createElement('tr');
   tr.dataset.row = '1';
   tr.innerHTML = `
@@ -190,13 +190,17 @@ function optAddObj() {
     if ($('opt2-obj-table').querySelectorAll('tr[data-row]').length > 1) { tr.remove(); optRefreshUnion(); }
   });
 }
+function optKnobOptions(feats, cur) {
+  // 保留已選；若原選已不在目標特徵聯集，插入停用占位項提示重選（不靜默改成第一個）
+  const stale = cur && !feats.includes(cur)
+    ? `<option value="" selected disabled>（原選 ${escHtml(cur)} 已不在目標範圍，請重選）</option>` : '';
+  return stale + feats.map((f) => `<option value="${escHtml(f)}" ${f === cur ? 'selected' : ''}>${escHtml(f)}</option>`).join('');
+}
 function optAddKnob() {
-  const feats = optUnionFeatures();
-  const opts = feats.map((f) => `<option value="${f}">${f}</option>`).join('');
   const tr = document.createElement('tr');
   tr.dataset.row = '1';
   tr.innerHTML = `
-    <td><select data-knob-name>${opts}</select></td>
+    <td><select data-knob-name>${optKnobOptions(optUnionFeatures(), null)}</select></td>
     <td><input type="number" step="any" data-knob-lo placeholder="自動下限">
       <span class="opt2-cond-op">～</span><input type="number" step="any" data-knob-hi placeholder="自動上限"></td>
     <td><button class="opt2-del" data-knob-del>移除</button></td>`;
@@ -205,11 +209,10 @@ function optAddKnob() {
   tr.querySelector('[data-knob-del]').addEventListener('click', () => { tr.remove(); optRefreshRef(); });
 }
 function optRefreshUnion() {
-  // 目標變更→更新 knob 下拉候選（保留已選）＋重建起始值表
+  // 目標變更→更新 knob 下拉候選（保留已選；原選失效時停用占位提示）＋重建起始值表
   const feats = optUnionFeatures();
   $('opt2-knob-table').querySelectorAll('select[data-knob-name]').forEach((s) => {
-    const cur = s.value;
-    s.innerHTML = feats.map((f) => `<option value="${f}" ${f === cur ? 'selected' : ''}>${f}</option>`).join('');
+    s.innerHTML = optKnobOptions(feats, s.value);
   });
   optRefreshRef();
 }
@@ -221,8 +224,11 @@ function optRefreshRef() {
     $('opt2-ref-table').innerHTML = '<tr><td style="color:var(--text2);font-size:13px">所有特徵都設為可調參數，無其他起始值需設定。</td></tr>';
     return;
   }
-  $('opt2-ref-table').innerHTML = `<tr>${refFeats.map((f) => `<th>${f}</th>`).join('')}</tr>
-    <tr>${refFeats.map((f) => `<td><input type="number" step="any" data-ref="${f}" value="${OPT.median[f] ?? ''}" style="width:110px"></td>`).join('')}</tr>`;
+  // 保留使用者已手動輸入的起始值（重建 innerHTML 前先快照，優先於中位數）
+  const cur = {};
+  $('opt2-ref-table').querySelectorAll('input[data-ref]').forEach((i) => { if (i.value !== '') cur[i.dataset.ref] = i.value; });
+  $('opt2-ref-table').innerHTML = `<tr>${refFeats.map((f) => `<th>${escHtml(f)}</th>`).join('')}</tr>
+    <tr>${refFeats.map((f) => `<td><input type="number" step="any" data-ref="${escHtml(f)}" value="${cur[f] ?? OPT.median[f] ?? ''}" style="width:110px"></td>`).join('')}</tr>`;
 }
 function optGather() {
   const objectives = [...$('opt2-obj-table').querySelectorAll('tr[data-row]')].map((tr) => {
@@ -249,20 +255,20 @@ function optGather() {
   return { objectives, knobs, reference, precision: OPT.prec, top_n: 5 };
 }
 function optRenderResult(r) {
-  const objName = (o) => o.name;
+  const kv = (k, v) => `<span class="kv">${escHtml(k)}：<b>${v}</b></span>`;
   const head = `<div class="md-sub" style="margin-bottom:10px">精準度 ${
     { low: '低', med: '中', high: '高' }[r.precision]}｜可行樣本 ${r.feasible_count.toLocaleString()}${
-    r.warning ? `｜<span style="color:#B8860B">${r.warning}</span>` : ''}</div>`;
-  const note = r.note ? `<div class="opt2-note">${r.note}</div>` : '';
-  const objMeta = Object.fromEntries(r.objectives.map((o) => [o.mid, o]));
+    r.warning ? `｜<span style="color:#B8860B">${escHtml(r.warning)}</span>` : ''}</div>`;
+  const note = r.note ? `<div class="opt2-note">${escHtml(r.note)}</div>` : '';
   const cards = r.recommendations.map((rec) => {
-    const rows = rec.objectives.map((ob) => {
-      const meta = objMeta[ob.mid] || {};
+    // 目標按位置對應（不用 mid 當鍵——同一模型可作多個不同條件的目標，mid 會覆蓋）
+    const rows = rec.objectives.map((ob, i) => {
+      const meta = r.objectives[i] || {};
       const cond = meta.type === 'range' ? `範圍 ${meta.min}～${meta.max}`
         : meta.type === 'max' ? '最大化' : '最小化';
       const dCls = ob.desirability < 0.5 ? ' class="d-lo"' : '';
       const inr = ob.in_range === null ? '—' : (ob.in_range ? '✓ 達標' : `✗ 差 ${Math.abs(ob.margin)}`);
-      return `<tr><td>${ob.name}</td><td style="color:var(--text2)">${cond}</td>
+      return `<tr><td>${escHtml(ob.name)}</td><td style="color:var(--text2)">${cond}</td>
         <td><b>${ob.pred}</b></td><td${dCls}>${(ob.desirability * 100).toFixed(0)}%</td>
         <td style="color:${ob.in_range === false ? 'var(--danger)' : 'var(--text2)'}">${inr}</td></tr>`;
     }).join('');
@@ -270,17 +276,17 @@ function optRenderResult(r) {
       <div class="opt2-rec-head"><span class="opt2-rank">${rec.rank}</span>
         <span class="opt2-score">綜合分 <b>${(rec.score * 100).toFixed(0)}</b>／100</span>
         <span class="opt2-badge ${rec.feasible ? 'ok' : 'bad'}">${rec.feasible ? '全目標達標' : '未全達標'}</span></div>
-      <div class="opt2-kv">${Object.entries(rec.knobs).map(([k, v]) => `<span class="kv">${k}：<b>${v}</b></span>`).join('')}</div>
+      <div class="opt2-kv">${Object.entries(rec.knobs).map(([k, v]) => kv(k, v)).join('')}</div>
       <table class="opt2-otbl"><tr><th>目標</th><th>條件</th><th>預測值</th><th>滿意度</th><th>達標</th></tr>${rows}</table>
     </div>`;
   }).join('');
   // 起始值對照
   const b = r.baseline;
-  const bRows = b.objectives.map((ob) => `<tr><td>${ob.name}</td><td><b>${ob.pred}</b></td><td>${(ob.desirability * 100).toFixed(0)}%</td></tr>`).join('');
+  const bRows = b.objectives.map((ob) => `<tr><td>${escHtml(ob.name)}</td><td><b>${ob.pred}</b></td><td>${(ob.desirability * 100).toFixed(0)}%</td></tr>`).join('');
   const baseline = `<div class="opt2-rec" style="opacity:.85">
     <div class="opt2-rec-head"><span class="opt2-score" style="font-weight:600">起始值（目前操作點）</span>
       <span class="opt2-score" style="margin-left:auto">綜合分 <b>${(b.score * 100).toFixed(0)}</b>／100</span></div>
-    <div class="opt2-kv">${Object.entries(b.knobs).map(([k, v]) => `<span class="kv">${k}：<b>${v}</b></span>`).join('')}</div>
+    <div class="opt2-kv">${Object.entries(b.knobs).map(([k, v]) => kv(k, v)).join('')}</div>
     <table class="opt2-otbl"><tr><th>目標</th><th>預測值</th><th>滿意度</th></tr>${bRows}</table></div>`;
   $('opt2-out').innerHTML = head + note + cards + baseline;
 }
@@ -1150,7 +1156,7 @@ async function renderModels() {
         <table class="model-table">${thead}<tbody>${
         ms.map((m, i) => `<tr data-id="${m.id}">
           <td>${m.status === 'done' ? `#${i + 1}` : ''}</td>
-          <td>${m.name}</td>
+          <td>${escHtml(m.name)}</td>
           <td>${m.task === 'classification' ? '分類' : m.task === 'timeseries' ? '時序' : m.task === 'anomaly' ? '異常偵測' : m.task === 'hybrid' ? '混合（模擬＋AI）' : '迴歸'}</td>
           <td>${(ALGO_META?.find((a) => a.key === m.algo)?.name) ?? m.algo}${m.auto_tune ? '（自動調參）' : ''}</td>
           ${mv(m).map((v) => `<td>${v}</td>`).join('')}
@@ -1190,7 +1196,8 @@ const METRIC_HEADS = {
 };
 
 // ------------------------------------------------------------ AI 助教（本機 LLM）
-const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// hoisted：renderMySets 等在模組載入時即可能同步呼叫，const 會 TDZ
+function escHtml(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 let aiOk = null;       // null=未探測
 let aiBusy = false;    // 本機引擎單併發，忙碌時擋新請求
 async function aiStatus() {
@@ -1261,7 +1268,7 @@ async function openModelDetail(mid) {
   if (m.status !== 'done') {
     // 不用 alert（原生對話框會凍住頁面），錯誤直接顯示在詳情區
     $('model-detail').style.display = '';
-    $('model-detail').innerHTML = `<h3>${m.name}</h3><p class="hint" style="margin-top:6px">${
+    $('model-detail').innerHTML = `<h3>${escHtml(m.name)}</h3><p class="hint" style="margin-top:6px">${
       m.status === 'error' ? `訓練失敗：${m.error}` : '訓練中，請稍候…（列表會自動更新）'}</p>`;
     return;
   }
@@ -1327,7 +1334,7 @@ async function openModelDetail(mid) {
       ? `混合模型（物理模擬＋AI 殘差）${qi(`預測＝代理模型 g(x)＋殘差模型 r(x)：g 學模擬基準欄「${m.sim_col}」（把物理模擬的知識蒸餾進 AI），r 學「實際−模擬」的殘差（儀器偏差、老化、模擬沒抓到的現場效應）。下方指標表有三方對比：純物理模擬的誤差、純 AI 的誤差、混合模型的誤差——混合通常最準，且物理基準來自受認證的模擬軟體，可信度有背書。新資料預測不需要模擬欄。`)}`
       : '迴歸';
   $('model-detail').innerHTML = `
-    <h3 style="display:flex;align-items:center;gap:8px"><span id="md-name">${m.name}</span>
+    <h3 style="display:flex;align-items:center;gap:8px"><span id="md-name">${escHtml(m.name)}</span>
       <button class="mini" id="btn-rename" title="改名"
         style="width:auto;padding:2px 10px;font-size:12px;cursor:pointer">改名</button></h3>
     <div class="md-sub">${algoName}${qi(algoMeta?.desc)}｜${taskName}｜訓練資料 ${m.n_rows.toLocaleString()} 筆｜目標 ${m.target}</div>

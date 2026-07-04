@@ -183,8 +183,11 @@ def _require_admin(request: Request) -> dict:
 @router.get("/api/admin/users")
 def admin_list_users(request: Request):
     _require_admin(request)
+    # 免登入（demo）模式沒有真正的驗證身分：不對匿名訪客洩漏真實帳號清單
+    if AUTH_DISABLED:
+        return {"auth_disabled": True, "users": []}
     users = _load_users()
-    return {"auth_disabled": AUTH_DISABLED,
+    return {"auth_disabled": False,
             "users": [{"email": e, "name": v.get("name"), "role": v.get("role", "user"),
                        "is_active": v.get("is_active", True), "created": v.get("created")}
                       for e, v in sorted(users.items(), key=lambda kv: kv[1].get("created") or "")]}
@@ -193,6 +196,8 @@ def admin_list_users(request: Request):
 @router.post("/api/admin/users/{email}")
 def admin_update_user(email: str, request: Request, body: dict):
     me_u = _require_admin(request)
+    if AUTH_DISABLED:
+        raise HTTPException(403, "免登入模式下無法變更帳號——請先啟用登入")
     users = _load_users()
     if email not in users:
         raise HTTPException(404, "使用者不存在")
@@ -215,6 +220,8 @@ def admin_update_user(email: str, request: Request, body: dict):
 @router.delete("/api/admin/users/{email}")
 def admin_delete_user(email: str, request: Request):
     me_u = _require_admin(request)
+    if AUTH_DISABLED:
+        raise HTTPException(403, "免登入模式下無法刪除帳號——請先啟用登入")
     if email == me_u.get("email"):
         raise HTTPException(422, "不能刪除自己的帳號")
     users = _load_users()

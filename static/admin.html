@@ -98,20 +98,22 @@
       wrap.querySelectorAll('button[data-del]').forEach((b) => b.addEventListener('click', () => delUser(b, b.dataset.del)));
     }
 
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
     function rowHtml(u) {
       const isMe = u.email === myEmail;
       const active = u.is_active !== false;
+      const em = esc(u.email);
       return `<tr>
-        <td><div class="u-name">${u.name || u.email}${isMe ? `<span class="me-tag">(${T('me','你')})</span>` : ''}</div><div class="u-email">${u.email}</div></td>
-        <td><select class="role" data-email="${u.email}" ${isMe ? 'disabled' : ''}>
+        <td><div class="u-name">${esc(u.name || u.email)}${isMe ? `<span class="me-tag">(${T('me','你')})</span>` : ''}</div><div class="u-email">${em}</div></td>
+        <td><select class="role" data-email="${em}" ${isMe ? 'disabled' : ''}>
           <option value="admin" ${u.role==='admin'?'selected':''}>${T('role.admin','管理員')}</option>
           <option value="user" ${u.role!=='admin'?'selected':''}>${T('role.user','一般成員')}</option>
         </select></td>
         <td><span class="pill ${active?'on':'off'}">${active?T('st.on','啟用'):T('st.off','已停用')}</span></td>
-        <td style="color:var(--text2);font-size:13px;white-space:nowrap">${u.created || '—'}</td>
+        <td style="color:var(--text2);font-size:13px;white-space:nowrap">${esc(u.created) || '—'}</td>
         <td style="white-space:nowrap">
-          ${isMe ? '' : `<button class="act" data-toggle="${active?'disable':'enable'}" data-email="${u.email}">${active?T('act.disable','停用'):T('act.enable','啟用')}</button>
-          <button class="act danger" data-del="${u.email}">${T('act.delete','刪除')}</button>`}
+          ${isMe ? '' : `<button class="act" data-toggle="${active?'disable':'enable'}" data-email="${em}">${active?T('act.disable','停用'):T('act.enable','啟用')}</button>
+          <button class="act danger" data-del="${em}">${T('act.delete','刪除')}</button>`}
         </td></tr>`;
     }
 

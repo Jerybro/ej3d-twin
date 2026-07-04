@@ -1537,6 +1537,9 @@ def optimize2(sid: str, body: dict) -> dict:
             raise HTTPException(422, f"目標「{rec.get('name') or o['mid']}」是 {rec.get('task')} 模型，"
                                      "配方最佳化僅支援迴歸／混合模型")
         Xk, yk = _current_xy(sid, rec)      # 缺欄會 422；y 供正規化錨點
+        if len(yk) == 0:
+            raise HTTPException(422, f"目標「{rec.get('name') or o['mid']}」在現行資料視圖沒有可用資料列"
+                                     "（可能被篩選步驟全部排除），無法最佳化")
         p1, p99 = float(np.percentile(yk, 1)), float(np.percentile(yk, 99))
         yscale.append([p1, p99])
         recs.append(rec)
@@ -1605,18 +1608,21 @@ def optimize2(sid: str, body: dict) -> dict:
         for i, rec in enumerate(recs):
             Xk = S[:, [ucol[f] for f in rec["features"]]]
             p = np.ravel(_predict_any(packs[i], Xk)).astype(float)
+            valid = np.isfinite(p)           # 模型外插出 NaN/inf 的點：無效
             p = np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0)
             preds_by.append(p)
             cond = objectives[i].get("condition") or {}
             ct = cond.get("type", "max")
-            lo_k, hi_k = yscale[i]
-            if hi_k - lo_k < 1e-9:          # 常數錨點→退回本批 min/max
-                lo_k, hi_k = float(p.min()), float(p.max())
+            lo_k, hi_k = yscale[i]            # 常數錨點交由 _desirability 回常數 1.0（勿用本批 min/max，
+                                             # 否則 baseline 單點與 pool 多點錨點不一致、分數不可比）
             rmin = float(cond["min"]) if ct == "range" else None
             rmax = float(cond["max"]) if ct == "range" else None
-            d_by.append(_desirability(p, ct, lo_k, hi_k, rmin, rmax))
+            d = _desirability(p, ct, lo_k, hi_k, rmin, rmax)
+            d[~valid] = 0.0                   # 無效點慾望度歸零
+            d_by.append(d)
+            feas &= valid                     # 任一目標預測無效 → 該點不可行
             if ct == "range":
-                ok = (p > rmin) & (p < rmax)
+                ok = (p > rmin) & (p < rmax) & valid
                 nviol += (~ok).astype(int)
                 feas &= ok
         wsum = sum(weights)

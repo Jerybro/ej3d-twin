@@ -116,7 +116,7 @@
       <div class="top-menu" id="top-menu">
         <button class="tm-btn" id="tm-btn">
           <span class="av" id="tm-av">JS</span>
-          <span id="tm-name" data-i18n="menu.guest">訪客</span>
+          <span id="tm-name">選單</span>
           <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
         </button>
         <div class="tm-pop">
@@ -328,28 +328,28 @@
     }));
     document.querySelector(`.tm-lang button[data-lang="${JSI18N.lang()}"]`)?.classList.add('on');
 
-    // 帳號狀態
-    fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((me) => {
+    // 帳號狀態（存 me，語言切換時一併重繪，避免被 i18n apply 覆寫或停在舊語言）
+    let ME = null;
+    function renderAccount() {
+      const en = JSI18N.lang() === 'en';
       const av = document.getElementById('tm-av');
       const nm = document.getElementById('tm-name');
-      if (!me || me.auth_disabled) {
-        nm.textContent = JSI18N.lang() === 'en' ? 'Menu' : '選單';
-        av.textContent = 'JS';
-        return;
-      }
-      const name = me.name || me.email;
+      const loggedIn = ME && !ME.auth_disabled;
+      document.getElementById('tm-user').style.display = loggedIn ? '' : 'none';
+      document.getElementById('tm-logout').style.display = loggedIn ? '' : 'none';
+      document.getElementById('tm-logout-sep').style.display = loggedIn ? '' : 'none';
+      document.getElementById('tm-admin').style.display = (loggedIn && ME.role === 'admin') ? '' : 'none';
+      if (!loggedIn) { nm.textContent = en ? 'Menu' : '選單'; av.textContent = 'JS'; return; }
+      const name = ME.name || ME.email;
       nm.textContent = name.length > 8 ? name.slice(0, 8) : name;
       av.textContent = (name[0] || 'U').toUpperCase();
-      document.getElementById('tm-user').style.display = '';
       document.getElementById('tm-u-name').textContent = name;
-      document.getElementById('tm-u-email').textContent = me.email;
-      document.getElementById('tm-u-role').textContent = me.role === 'admin'
-        ? (JSI18N.lang() === 'en' ? 'Administrator' : '管理員')
-        : (JSI18N.lang() === 'en' ? 'Member' : '一般成員');
-      document.getElementById('tm-logout').style.display = '';
-      document.getElementById('tm-logout-sep').style.display = '';
-      if (me.role === 'admin') document.getElementById('tm-admin').style.display = '';
-    }).catch(() => {});
+      document.getElementById('tm-u-email').textContent = ME.email;
+      document.getElementById('tm-u-role').textContent = ME.role === 'admin'
+        ? (en ? 'Administrator' : '管理員') : (en ? 'Member' : '一般成員');
+    }
+    fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((me) => { ME = me; renderAccount(); }).catch(() => renderAccount());
+    window.addEventListener('js-lang-change', renderAccount);
   </script>
 </body>
 </html>

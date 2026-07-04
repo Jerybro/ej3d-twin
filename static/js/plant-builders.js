@@ -1024,6 +1024,257 @@ builders.skid = function ({ w, h, d }) {
   return g;
 };
 
+// -------------------------------------------------- 素材庫擴充二期（公用/電氣/固體處理）
+builders.rotarykiln = function ({ r, len }) {
+  const g = new THREE.Group();
+  const tilt = new THREE.Group();
+  const shell = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 20), std(0x8d99a6, { metalness: 0.35, roughness: 0.55 }));
+  shell.rotation.z = Math.PI / 2;
+  const ring1 = new THREE.Mesh(new THREE.TorusGeometry(r * 1.12, 0.09, 8, 22), std(0x55606c));
+  ring1.rotation.y = Math.PI / 2;
+  ring1.position.x = -len * 0.28;
+  const ring2 = ring1.clone();
+  ring2.position.x = len * 0.28;
+  const gearRing = new THREE.Mesh(new THREE.TorusGeometry(r * 1.2, 0.12, 8, 26), std(0x3a4a5a));
+  gearRing.rotation.y = Math.PI / 2;
+  gearRing.position.x = len * 0.05;
+  tilt.add(shell, ring1, ring2, gearRing);
+  tilt.rotation.z = 0.055;                       // 迴轉窯慣例：略傾斜（出料端低）
+  tilt.position.y = r + 0.9;
+  g.add(tilt);
+  for (const sx of [-0.28, 0.28]) {
+    const pier = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.0, r * 1.6), std(0x6b7683));
+    pier.position.set(sx * len, 0.5, 0);
+    g.add(pier);
+  }
+  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.2, r * 2 + 0.8, r * 2 + 0.6), std(0x55606c));
+  hood.position.set(len / 2 + 0.5, r + 0.7, 0);
+  g.add(hood);
+  return g;
+};
+
+builders.scrubber = function ({ r, h }) {
+  const g = new THREE.Group();
+  const shell = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h * 0.82, 22), std(0x9aa7b4));
+  shell.position.y = h * 0.5;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(r, 22, 10, 0, Math.PI * 2, 0, Math.PI / 2), std(0x8d99a6));
+  head.position.y = h * 0.91;
+  const skirt = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.96, r * 1.02, h * 0.09, 22), std(0x55606c));
+  skirt.position.y = h * 0.045;
+  for (const yy of [0.42, 0.62]) {                // 填充床段外箍
+    const band = new THREE.Mesh(new THREE.TorusGeometry(r * 1.02, 0.045, 6, 22), std(0x6b7683));
+    band.rotation.x = Math.PI / 2;
+    band.position.y = h * yy;
+    g.add(band);
+  }
+  const duct = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.3, r * 0.3, r * 1.6, 12), std(0x8d99a6));
+  duct.rotation.z = Math.PI / 2;
+  duct.position.set(r * 1.5, h * 0.22, 0);
+  const vent = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.22, r * 0.22, h * 0.16, 12), std(0x8d99a6));
+  vent.position.y = h * 1.02;
+  g.add(shell, head, skirt, duct, vent);
+  return g;
+};
+
+builders.centrifuge = function ({ r, h }) {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(r * 2.6, 0.18, r * 2.2), std(0x55606c));
+  base.position.y = 0.09;
+  const bowl = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.92, h, 22), std(0x7d92a8, { metalness: 0.45, roughness: 0.4 }));
+  bowl.position.y = h / 2 + 0.18;
+  const lid = new THREE.Mesh(new THREE.SphereGeometry(r, 22, 8, 0, Math.PI * 2, 0, Math.PI / 2.6), std(0x8d99a6));
+  lid.scale.y = 0.45;
+  lid.position.y = h + 0.18;
+  const motor = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.34, r * 0.34, r * 1.1, 12), std(0x2e6da8));
+  motor.rotation.z = Math.PI / 2;
+  motor.position.set(r * 1.5, h * 0.5 + 0.18, 0);
+  g.add(base, bowl, lid, motor);
+  return g;
+};
+
+builders.baghouse = function ({ w, h, d }) {
+  const g = new THREE.Group();
+  const legH = h * 0.28;
+  const hopH = h * 0.24;
+  const boxH = h - legH - hopH;
+  const box = new THREE.Mesh(new THREE.BoxGeometry(w, boxH, d), std(0x9aa7b4));
+  box.position.y = legH + hopH + boxH / 2;
+  const hop = new THREE.Mesh(new THREE.CylinderGeometry(Math.min(w, d) * 0.7, 0.12, hopH, 4), std(0x8d99a6));
+  hop.rotation.y = Math.PI / 4;                   // 四段圓柱旋 45°＝方錐料斗
+  hop.position.y = legH + hopH / 2;
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.12, legH, 0.12), std(0x55606c));
+    leg.position.set(sx * (w / 2 - 0.15), legH / 2, sz * (d / 2 - 0.15));
+    g.add(leg);
+  }
+  const outlet = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, h * 0.3, 12), std(0x8d99a6));
+  outlet.position.set(-w / 2 + 0.4, h + h * 0.08, 0);
+  const walkway = new THREE.Mesh(new THREE.BoxGeometry(w * 1.04, 0.08, 0.7), std(0x6b7683));
+  walkway.position.set(0, h + 0.04, d / 2 + 0.35);
+  g.add(box, hop, outlet, walkway);
+  return g;
+};
+
+builders.boiler = function ({ w, h, d }) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.72, d), std(0x9aa7b4));
+  body.position.y = h * 0.36 + 0.12;
+  const base = new THREE.Mesh(new THREE.BoxGeometry(w * 1.06, 0.12, d * 1.06), std(0x55606c));
+  base.position.y = 0.06;
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(d * 0.28, d * 0.28, w * 0.86, 18), std(0x8d99a6));
+  drum.rotation.z = Math.PI / 2;
+  drum.position.y = h * 0.72 + 0.12 + d * 0.26;
+  const stackPipe = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, h * 0.9, 14), std(0x6b7683));
+  stackPipe.position.set(-w / 2 + 0.5, h * 0.72 + h * 0.45, -d / 2 + 0.5);
+  const burner = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.5, 12), std(0x3a4a5a));
+  burner.rotation.x = Math.PI / 2;
+  burner.position.set(w * 0.12, h * 0.3, d / 2 + 0.22);
+  g.add(body, base, drum, stackPipe, burner);
+  return g;
+};
+
+builders.chiller = function ({ w, h, d }) {
+  const g = new THREE.Group();
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(w, 0.14, d), std(0x55606c));
+  frame.position.y = 0.07;
+  const evap = new THREE.Mesh(new THREE.CylinderGeometry(d * 0.34, d * 0.34, w * 0.9, 16), std(0x9aa7b4));
+  evap.rotation.z = Math.PI / 2;
+  evap.position.y = 0.14 + d * 0.34;
+  const cond = evap.clone();
+  cond.position.y = evap.position.y + d * 0.72;
+  const compr = new THREE.Mesh(new THREE.CylinderGeometry(d * 0.2, d * 0.2, w * 0.34, 12), std(0x2e6da8));
+  compr.rotation.z = Math.PI / 2;
+  compr.position.set(w * 0.1, cond.position.y + d * 0.42, 0);
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(0.5, h * 0.7, 0.22), std(0x3a4a5a));
+  panel.position.set(w / 2 - 0.3, h * 0.42, d / 2 + 0.12);
+  g.add(frame, evap, cond, compr, panel);
+  return g;
+};
+
+builders.deaerator = function ({ r, len }) {
+  const g = new THREE.Group();
+  const storH = r * 2.2;
+  const stor = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.92, r * 0.92, storH, 20), std(0x9aa7b4));
+  stor.position.y = storH / 2 + 0.15;
+  const drumY = storH + 0.15 + r * 0.9;
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.78, r * 0.78, len * 0.8, 18), std(0x8d99a6));
+  drum.rotation.z = Math.PI / 2;
+  drum.position.y = drumY;
+  for (const sx of [-1, 1]) {
+    const headCap = new THREE.Mesh(new THREE.SphereGeometry(r * 0.78, 16, 10), std(0x8d99a6));
+    headCap.scale.x = 0.55;
+    headCap.position.set(sx * len * 0.4, drumY, 0);
+    g.add(headCap);
+  }
+  const domeVent = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.3, r * 0.3, r * 0.8, 12), std(0x6b7683));
+  domeVent.position.set(0, drumY + r * 1.1, 0);
+  const ring = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.98, r * 1.04, 0.15, 20), std(0x55606c));
+  ring.position.y = 0.075;
+  g.add(stor, drum, domeVent, ring);
+  return g;
+};
+
+builders.transformer = function ({ w, h, d }) {
+  const g = new THREE.Group();
+  const tank = new THREE.Mesh(new THREE.BoxGeometry(w * 0.62, h * 0.62, d), std(0x6b7683, { metalness: 0.3, roughness: 0.6 }));
+  tank.position.y = h * 0.31 + 0.1;
+  const base = new THREE.Mesh(new THREE.BoxGeometry(w * 0.7, 0.1, d * 1.05), std(0x3a4a5a));
+  base.position.y = 0.05;
+  g.add(tank, base);
+  for (const sx of [-1, 1]) {                     // 兩側散熱鰭片
+    for (let i = 0; i < 4; i++) {
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(w * 0.16, h * 0.52, 0.06), std(0x55606c));
+      fin.position.set(sx * w * 0.39, h * 0.31 + 0.1, -d / 2 + 0.12 + (i * (d - 0.24)) / 3);
+      g.add(fin);
+    }
+  }
+  for (let i = -1; i <= 1; i++) {                 // 三相套管
+    const bushing = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.09, h * 0.3, 8), std(0xb8c2cc));
+    bushing.position.set(i * w * 0.18, h * 0.62 + 0.1 + h * 0.15, 0);
+    g.add(bushing);
+  }
+  const conservator = new THREE.Mesh(new THREE.CylinderGeometry(d * 0.14, d * 0.14, w * 0.5, 12), std(0x9aa7b4));
+  conservator.rotation.z = Math.PI / 2;
+  conservator.position.set(0, h * 0.86, -d / 2 + 0.05);
+  g.add(conservator);
+  return g;
+};
+
+builders.mcc = function ({ w, h, d }) {
+  const g = new THREE.Group();
+  const n = Math.max(2, Math.round(w / 0.8));
+  const cw = w / n;
+  for (let i = 0; i < n; i++) {
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(cw * 0.94, h, d), std(0x3a4a5a));
+    cab.position.set(-w / 2 + cw * (i + 0.5), h / 2 + 0.05, 0);
+    const door = new THREE.Mesh(new THREE.BoxGeometry(cw * 0.8, h * 0.86, 0.03), std(0x55606c));
+    door.position.set(cab.position.x, h / 2 + 0.05, d / 2 + 0.02);
+    g.add(cab, door);
+  }
+  const plinth = new THREE.Mesh(new THREE.BoxGeometry(w * 1.02, 0.1, d * 1.02), std(0x2a333d));
+  plinth.position.y = 0.05;
+  g.add(plinth);
+  return g;
+};
+
+builders.genset = function ({ w, h, d }) {
+  const g = new THREE.Group();
+  const skidBase = new THREE.Mesh(new THREE.BoxGeometry(w, 0.16, d), std(0xd9a53a));
+  skidBase.position.y = 0.08;
+  const engine = new THREE.Mesh(new THREE.BoxGeometry(w * 0.42, h * 0.6, d * 0.72), std(0x3a4a5a));
+  engine.position.set(-w * 0.13, h * 0.3 + 0.16, 0);
+  const alternator = new THREE.Mesh(new THREE.CylinderGeometry(d * 0.3, d * 0.3, w * 0.3, 14), std(0x2e6da8));
+  alternator.rotation.z = Math.PI / 2;
+  alternator.position.set(w * 0.24, h * 0.3 + 0.16, 0);
+  const radiator = new THREE.Mesh(new THREE.BoxGeometry(w * 0.1, h * 0.62, d * 0.8), std(0x55606c));
+  radiator.position.set(-w / 2 + w * 0.06, h * 0.31 + 0.16, 0);
+  const exhaust = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, h * 0.5, 10), std(0x6b7683));
+  exhaust.position.set(-w * 0.2, h * 0.85 + 0.16, d * 0.2);
+  g.add(skidBase, engine, alternator, radiator, exhaust);
+  return g;
+};
+
+builders.safetyshower = function ({ h }) {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, h, 10), std(0x2e8b57));
+  pole.position.y = h / 2;
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.5, 8), std(0x2e8b57));
+  arm.rotation.z = Math.PI / 2;
+  arm.position.set(0.25, h - 0.05, 0);
+  const showerHead = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.05, 0.12, 14), std(0x9aa7b4));
+  showerHead.position.set(0.5, h - 0.12, 0);
+  const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.12, 0.1, 14), std(0x9aa7b4));
+  bowl.position.set(0.3, 1.05, 0);
+  const basePlate = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.06, 12), std(0x55606c));
+  basePlate.position.y = 0.03;
+  g.add(pole, arm, showerHead, bowl, basePlate);
+  return g;
+};
+
+builders.cageladder = function ({ h }) {
+  const g = new THREE.Group();
+  const railMat = std(0x8d99a6);
+  for (const sx of [-0.22, 0.22]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.05, h, 0.05), railMat);
+    rail.position.set(sx, h / 2, 0);
+    g.add(rail);
+  }
+  const rungs = Math.floor(h / 0.3);
+  for (let i = 1; i <= rungs; i++) {
+    const rung = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.44, 6), railMat);
+    rung.rotation.z = Math.PI / 2;
+    rung.position.y = i * 0.3;
+    g.add(rung);
+  }
+  for (let y = 2.2; y < h - 0.2; y += 0.6) {      // 2.2m 以上護籠圈
+    const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.02, 6, 16, Math.PI), railMat);
+    hoop.rotation.x = -Math.PI / 2;
+    hoop.position.set(0, y, 0.05);
+    g.add(hoop);
+  }
+  return g;
+};
+
 // -------------------------------------------------- 管線元件（Piping Components）
 // E3D Component Editor：閥/法蘭對/異徑管/止回閥，沿管線弧長定位
 export function buildPipeComponent(kind, r) {
@@ -1129,6 +1380,7 @@ export const ASSET_CATEGORIES = [
     { type: 'fixedbed', name: '固定床反應器', dims: { r: 1.2, h: 7 }, prefix: 'R' },
     { type: 'pfr', name: '管式反應器', dims: { r: 0.25, len: 5, rows: 3 }, prefix: 'R' },
     { type: 'agitank', name: '攪拌槽', dims: { r: 1.3, h: 3 }, prefix: 'M' },
+    { type: 'rotarykiln', name: '迴轉窯（乾燥/焚化）', dims: { r: 1.1, len: 9 }, prefix: 'RK' },
   ]},
   { name: '分離設備', items: [
     { type: 'column', name: '蒸餾塔', dims: { r: 1.2, h: 9 }, prefix: 'C' },
@@ -1137,6 +1389,9 @@ export const ASSET_CATEGORIES = [
     { type: 'flash_h', name: '臥式分離槽', dims: { r: 1.1, len: 4.5 }, prefix: 'V' },
     { type: 'cyclone', name: '旋風分離器', dims: { r: 0.8, h: 4 }, prefix: 'S' },
     { type: 'filterv', name: '籃式過濾器', dims: { r: 0.6, h: 2.4 }, prefix: 'FL' },
+    { type: 'scrubber', name: '洗滌塔', dims: { r: 1.0, h: 6 }, prefix: 'C' },
+    { type: 'centrifuge', name: '離心機', dims: { r: 0.9, h: 1.2 }, prefix: 'CF' },
+    { type: 'baghouse', name: '袋式集塵器', dims: { w: 3, h: 4.5, d: 2.2 }, prefix: 'BF' },
   ]},
   { name: '熱交換', items: [
     { type: 'hx', name: '殼管熱交換器', dims: { r: 0.5, len: 3 }, prefix: 'E' },
@@ -1170,12 +1425,22 @@ export const ASSET_CATEGORIES = [
     { type: 'stack', name: '煙囪', dims: { r: 0.8, h: 14 }, prefix: 'ST' },
     { type: 'piperack', name: '管架', dims: { w: 8, h: 4, d: 2, bays: 4 }, prefix: 'PR' },
     { type: 'conveyor', name: '輸送帶', dims: { len: 8, h: 2, w: 1 }, prefix: 'CV' },
+    { type: 'boiler', name: '蒸汽鍋爐', dims: { w: 3.2, h: 3.4, d: 2.6 }, prefix: 'B' },
+    { type: 'chiller', name: '冰水機組', dims: { w: 3, h: 1.9, d: 1.2 }, prefix: 'CH' },
+    { type: 'deaerator', name: '除氧器', dims: { r: 0.9, len: 4 }, prefix: 'DA' },
+    { type: 'safetyshower', name: '安全淋浴洗眼站', dims: { h: 2.4 }, prefix: 'SS' },
+  ]},
+  { name: '電氣設備', items: [
+    { type: 'transformer', name: '油浸式變壓器', dims: { w: 2.4, h: 2.2, d: 1.6 }, prefix: 'TR' },
+    { type: 'mcc', name: 'MCC 配電盤列', dims: { w: 4, h: 2.2, d: 0.8 }, prefix: 'MCC' },
+    { type: 'genset', name: '柴油發電機組', dims: { w: 4, h: 2.2, d: 1.6 }, prefix: 'G' },
   ]},
   { name: '結構鋼構', discipline: 'struct', items: [
     { type: 'scolumn', name: 'H 型鋼柱', dims: { h: 4 }, prefix: 'SC' },
     { type: 'sbeam', name: 'H 型鋼樑', dims: { len: 5, elev: 3 }, prefix: 'SB' },
     { type: 'stairs', name: '樓梯', dims: { w: 1.0, h: 3, run: 3.6 }, prefix: 'STR' },
     { type: 'srail', name: '扶手欄杆', dims: { len: 4 }, prefix: 'HR' },
+    { type: 'cageladder', name: '籠式直爬梯', dims: { h: 6 }, prefix: 'LD' },
     { type: 'splat', name: '平台', dims: { w: 3, d: 2.4, elev: 3 }, prefix: 'PF' },
   ]},
   { name: '基元（自建設備）', items: [

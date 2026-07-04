@@ -51,6 +51,10 @@ const ICONS = {
   ga: '<rect x="3" y="3" width="18" height="18" rx="1.5"/><circle cx="9" cy="9" r="2.6"/><rect x="14" y="13" width="5" height="5"/><path d="M3 17h7M9 3v4"/>',
   iso: '<path d="M4 17l8-5 8 5M12 12V3"/><path d="M4 17v4h16v-4"/><path d="M8 5l4-2 4 2"/>',
   cap: '<path d="M12 2l8 4.5v11L12 22l-8-4.5v-11L12 2z"/><path d="M4 6.5l8 4.5 8-4.5" fill="rgba(4,106,251,.2)" stroke="none"/><path d="M4 6.5l8 4.5 8-4.5"/>',
+  mto: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M3 14h18M9 4v16"/>',
+  laycube: '<path d="M12 3l7 4v10l-7 4-7-4V7l7-4z"/><path d="M12 11l7-4M12 11L5 7M12 11v10"/>',
+  laypipe: '<path d="M4 6h7a7 7 0 0 1 7 7v5"/><path d="M4 11h7a2 2 0 0 1 2 2v5"/>',
+  laybeam: '<path d="M6 4h12M6 20h12M12 4v16"/>',
 };
 document.querySelectorAll('.ric[data-ic]').forEach((el) => {
   const d = ICONS[el.dataset.ic];
@@ -220,6 +224,17 @@ const eqObjects = new Map();  // tag → { group, def, labelEl }
 const pipeObjects = [];       // index 對齊 sceneData.pipes → { group }
 const hiddenTags = new Set(); // 模型樹「隱藏」的設備（UI 狀態，不入存檔）
 
+// ---------------------------------------------------------------- 圖層顯示（設備/管線/結構）
+const LAYERS = { equip: true, pipe: true, struct: true };
+const STRUCT_TYPES = new Set(['scolumn', 'sbeam', 'stairs', 'srail', 'splat', 'cageladder']);
+function eqLayerOn(def) { return STRUCT_TYPES.has(def.type) ? LAYERS.struct : LAYERS.equip; }
+function applyLayers() {
+  for (const entry of eqObjects.values()) {
+    entry.group.visible = !hiddenTags.has(entry.def.tag) && eqLayerOn(entry.def);
+  }
+  for (const p of pipeObjects) if (p) p.group.visible = LAYERS.pipe;
+}
+
 function emptyScene(name) {
   return {
     plant: { id: 'NEW', name, units: [{ id: 'U-100', name: '主區', equipment: [] }] },
@@ -254,7 +269,7 @@ function buildEquipment(def) {
   label.position.set(0, labelHeight(def), 0);
   group.add(label);
 
-  group.visible = !hiddenTags.has(def.tag);
+  group.visible = !hiddenTags.has(def.tag) && eqLayerOn(def);
   scene.add(group);
   eqObjects.set(def.tag, { group, def, labelEl: el });
   return group;
@@ -342,6 +357,7 @@ function rebuildAllPipes() {
   for (const p of pipeObjects) if (p) scene.remove(p.group);
   pipeObjects.length = 0;
   sceneData.pipes.forEach((pipe, i) => buildPipe(pipe, i));
+  applyLayers();
 }
 
 // ------------------------------------------------------------ 載入場景
@@ -957,7 +973,7 @@ function toggleHidden(tag) {
     hiddenTags.add(tag);
     if (selected?.kind === 'eq' && selected.def.tag === tag) transform.detach();
   }
-  entry.group.visible = !hiddenTags.has(tag);
+  entry.group.visible = !hiddenTags.has(tag) && eqLayerOn(entry.def);
   rebuildTree();
 }
 
@@ -2108,6 +2124,65 @@ document.getElementById('btn-clipcap').addEventListener('click', (e) => {
   clipCapUpdate();
 });
 
+// ------------------------------------------------------------ 圖層顯示切換（檢視 tab）
+for (const [btnId, key] of [['btn-lay-eq', 'equip'], ['btn-lay-pipe', 'pipe'], ['btn-lay-struct', 'struct']]) {
+  document.getElementById(btnId).addEventListener('click', (e) => {
+    LAYERS[key] = !LAYERS[key];
+    e.currentTarget.classList.toggle('active', LAYERS[key]);
+    applyLayers();
+  });
+}
+
+// ------------------------------------------------------------ MTO 材料表（CSV：管線＋彙總＋設備）
+function exportMTO() {
+  const typeName = new Map(ASSET_CATEGORIES.flatMap((c) => c.items.map((it) => [it.type, it.name])));
+  const compName = Object.fromEntries(PIPE_COMPONENTS.map((c) => [c.kind, c.name]));
+  const esc = (v) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const rows = [];
+  rows.push(['J.S_3D Studio 材料表（MTO）', sceneData.plant?.name ?? sceneId ?? '']);
+  rows.push(['輸出時間', new Date().toLocaleString('zh-TW', { hour12: false })]);
+  rows.push([]);
+  rows.push(['[管線]']);
+  rows.push(['編號', 'Spec', '口徑', '長度(m)', '元件']);
+  const sums = new Map();
+  sceneData.pipes.forEach((p, i) => {
+    const L = pipeLength(p);
+    const dn = p.dn ?? `r${p.r}`;
+    const comps = (p.components ?? []).map((c) => `${compName[c.kind] ?? c.kind}@${c.at}m`).join('; ');
+    rows.push([`PIPE-${i + 1}`, p.spec ?? '—', dn, L.toFixed(2), comps]);
+    const k = `${p.spec ?? '—'}|${dn}`;
+    const acc = sums.get(k) ?? { L: 0, n: 0 };
+    acc.L += L; acc.n += 1; sums.set(k, acc);
+  });
+  rows.push([]);
+  rows.push(['[管線彙總]']);
+  rows.push(['Spec', '口徑', '總長(m)', '條數']);
+  for (const [k, acc] of [...sums].sort()) {
+    const [sp, dn] = k.split('|');
+    rows.push([sp, dn, acc.L.toFixed(2), acc.n]);
+  }
+  rows.push([]);
+  rows.push(['[設備]']);
+  rows.push(['位號', '名稱', '類型', '單元']);
+  let eqN = 0;
+  for (const unit of sceneData.plant.units) {
+    for (const eq of unit.equipment) {
+      eqN += 1;
+      rows.push([eq.tag, eq.name ?? typeName.get(eq.type) ?? '', eq.type, unit.name ?? unit.id ?? '']);
+    }
+  }
+  const totalL = [...sums.values()].reduce((a, acc) => a + acc.L, 0);
+  rows.push([]);
+  rows.push(['[統計]', `設備 ${eqN}`, `管線 ${sceneData.pipes.length}`, `管線總長 ${totalL.toFixed(1)} m`]);
+  const csv = '\uFEFF' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `${sceneId ?? 'scene'}-MTO.csv`;
+  a.click();
+  setHint(`材料表已輸出：管線 ${sceneData.pipes.length} 條、設備 ${eqN} 台（CSV）`);
+}
+document.getElementById('btn-mto').addEventListener('click', exportMTO);
+
 // ------------------------------------------------------------ Clash 檢測面板（工具 tab）
 const clashDock = document.getElementById('clash-dock');
 let clashMarks = [];   // BoxHelper 高亮
@@ -2212,7 +2287,7 @@ function renderViewsPanel() {
     flyTo(v.pos, v.target);
     hiddenTags.clear();
     for (const t of v.hidden ?? []) hiddenTags.add(t);
-    for (const [tag, entry] of eqObjects) entry.group.visible = !hiddenTags.has(tag);
+    for (const [tag, entry] of eqObjects) entry.group.visible = !hiddenTags.has(tag) && eqLayerOn(entry.def);
     rebuildTree();
   }));
   propBody.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => {

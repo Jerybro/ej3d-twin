@@ -61,6 +61,7 @@ const ICONS = {
   support: '<path d="M7 9a5 5 0 0 1 10 0"/><path d="M12 9v9M7 18h10"/>',
   layelec: '<path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/>',
   elev: '<path d="M3 19h18M3 13h12M3 7h12"/><path d="M19 16V6M16 9l3-3 3 3"/>',
+  layhvac: '<rect x="3" y="9" width="12" height="7" rx="1"/><path d="M15 10.5h6M15 14.5h6M7 9V5h8"/>',
 };
 document.querySelectorAll('.ric[data-ic]').forEach((el) => {
   const d = ICONS[el.dataset.ic];
@@ -231,12 +232,14 @@ const pipeObjects = [];       // index 對齊 sceneData.pipes → { group }
 const hiddenTags = new Set(); // 模型樹「隱藏」的設備（UI 狀態，不入存檔）
 
 // ---------------------------------------------------------------- 圖層顯示（設備/管線/結構）
-const LAYERS = { equip: true, pipe: true, struct: true, elec: true };
+const LAYERS = { equip: true, pipe: true, struct: true, elec: true, hvac: true };
 const STRUCT_TYPES = new Set(['scolumn', 'sbeam', 'stairs', 'srail', 'splat', 'cageladder', 'psupport']);
 const ELEC_TYPES = new Set(['cabletray', 'traybend', 'trayriser', 'jbox', 'lightpole']);
+const HVAC_TYPES = new Set(['duct', 'ductbend', 'ductriser', 'ahu', 'rooffan']);
 function eqLayerOn(def) {
   if (STRUCT_TYPES.has(def.type)) return LAYERS.struct;
   if (ELEC_TYPES.has(def.type)) return LAYERS.elec;
+  if (HVAC_TYPES.has(def.type)) return LAYERS.hvac;
   return LAYERS.equip;
 }
 function applyLayers() {
@@ -290,12 +293,13 @@ function buildEquipment(def) {
 function rebuildEquipment(def) {
   const entry = eqObjects.get(def.tag);
   if (!entry) return;
-  const old = entry.group.children.find((c) => !c.isCSS2DObject);
-  entry.group.remove(old);
+  // 移除 body＋管嘴群組全重繪（只換 body 會留下嘴殘影）
+  for (const c of entry.group.children.filter((x) => !x.isCSS2DObject)) entry.group.remove(c);
   const body = builders[def.type](def.dims, def);
   markShadow(body);
   body.traverse((o) => { if (o.isMesh) o.userData.eqTag = def.tag; });
   entry.group.add(body);
+  renderNozzles(entry.group, def);
   entry.group.children.find((c) => c.isCSS2DObject)?.position.set(0, labelHeight(def), 0);
 }
 
@@ -516,6 +520,11 @@ function renderPropPanel(def) {
       ${pgRow('WRT', `<span>/WORL</span>`)}
     </div>
     ${dimRows ? `<div class="pg-section">Design Parameters</div><div class="pg-grid">${dimRows}</div>` : ''}
+    ${def.nozzles?.length ? `<div class="pg-section">管嘴 Nozzles</div><div class="pg-grid">${def.nozzles.map((nz, i) =>
+      pgRow(nz.id, `<select data-nzdn="${i}" class="rsel" style="width:86px">${PIPE_BORES.map((b) =>
+        `<option ${b.dn === nz.dn ? 'selected' : ''}>${b.dn}</option>`).join('')}</select>
+        <button data-nzdel="${i}" style="margin-left:6px;border:none;background:none;color:#d03050;cursor:pointer;font-size:11.5px;font-family:inherit">刪除</button>`)).join('')}</div>` : ''}
+    ${def.type === 'piperack' ? `<div class="pg-section">儀電</div><button class="pbtn" id="prop-tray">沿管架佈橋架</button>` : ''}
     ${def.type === 'assembly' ? primsSection(def) : ''}
     ${infoRows ? `<div class="pg-section">Information</div><div class="pg-grid">${infoRows}</div>` : ''}
     <button class="pbtn" id="prop-zoom">縮放至（F）</button>
@@ -556,6 +565,34 @@ function renderPropPanel(def) {
       document.getElementById('prop-title').textContent = def.tag;
       syncTreeSelection();
     });
+  });
+  propBody.querySelectorAll('[data-nzdn]').forEach((sel) => sel.addEventListener('change', () => {
+    pushUndo();
+    def.nozzles[+sel.dataset.nzdn].dn = sel.value;
+    rebuildEquipment(def);
+  }));
+  propBody.querySelectorAll('[data-nzdel]').forEach((b) => b.addEventListener('click', () => {
+    pushUndo();
+    def.nozzles.splice(+b.dataset.nzdel, 1);
+    rebuildEquipment(def);
+    renderPropPanel(def);
+    setHint(`已刪除 <b>${def.tag}</b> 管嘴`);
+  }));
+  document.getElementById('prop-tray')?.addEventListener('click', () => {
+    // 沿管架頂層自動佈電纜橋架：長度/位置/轉向承接管架
+    pushUndo();
+    const unit = sceneData.plant.units.find((u) => u.equipment.includes(def)) ?? sceneData.plant.units[0];
+    const tray = {
+      tag: nextTag('CT'), type: 'cabletray', name: '電纜橋架（沿管架）',
+      dims: { w: 0.45, len: def.dims.w ?? 8, elev: +((def.dims.h ?? 4) + 0.15).toFixed(2) },
+      pos: [...def.pos], rot_y: def.rot_y ?? 0,
+      design: {}, instruments: [], pid_ref: '',
+    };
+    unit.equipment.push(tray);
+    buildEquipment(tray);
+    rebuildTree();
+    updateTopbar();
+    setHint(`已沿 <b>${def.tag}</b> 頂層佈橋架 <b>${tray.tag}</b>（EL.${((def.dims.h ?? 4) + 0.15).toFixed(2)}，儀電圖層）`);
   });
   document.getElementById('prop-zoom').addEventListener('click', () => zoomToSelection());
   document.getElementById('prop-delete').addEventListener('click', deleteSelected);
@@ -1004,7 +1041,7 @@ document.querySelectorAll('.rtab').forEach((tab) => {
 // 結構 STRUCTURES：只帶出設備 tab，且素材群組過濾為結構鋼構
 document.getElementById('qat-discipline').addEventListener('change', (e) => {
   const v = e.target.value;
-  const show = { pipe: ['equip', 'pipe'], equip: ['equip'], struct: ['equip'], elec: ['equip'], none: [] }[v];
+  const show = { pipe: ['equip', 'pipe'], equip: ['equip'], struct: ['equip'], elec: ['equip'], hvac: ['equip'], none: [] }[v];
   document.querySelectorAll('.ctx-tab').forEach((t) => {
     const on = show.includes(t.dataset.tab);
     t.classList.toggle('hidden', !on);
@@ -1012,12 +1049,12 @@ document.getElementById('qat-discipline').addEventListener('change', (e) => {
       document.querySelector('.rtab[data-tab="home"]').click();
     }
   });
-  const disc = v === 'struct' ? 'struct' : v === 'elec' ? 'elec' : 'general';
+  const disc = { struct: 'struct', elec: 'elec', hvac: 'hvac' }[v] ?? 'general';
   equipRibbon.querySelectorAll('.rgroup').forEach((g) => {
     g.style.display = g.dataset.disc === disc ? '' : 'none';
   });
   const equipTab = document.querySelector('.rtab[data-tab="equip"]');
-  equipTab.textContent = { struct: '結構 STRUCTURES', elec: '儀電 ELECTRICAL' }[v] ?? '設備 EQUIPMENT';
+  equipTab.textContent = { struct: '結構 STRUCTURES', elec: '儀電 ELECTRICAL', hvac: '風管 HVAC' }[v] ?? '設備 EQUIPMENT';
 });
 
 // QAT 迷你鈕鏡射主要功能
@@ -1060,7 +1097,7 @@ for (const cat of ASSET_CATEGORIES) {
 }
 
 // 預設 discipline＝管線：結構鋼構群組先隱藏（切 STRUCTURES 才亮）
-equipRibbon.querySelectorAll('.rgroup[data-disc="struct"], .rgroup[data-disc="elec"]').forEach((g) => { g.style.display = 'none'; });
+equipRibbon.querySelectorAll('.rgroup[data-disc="struct"], .rgroup[data-disc="elec"], .rgroup[data-disc="hvac"]').forEach((g) => { g.style.display = 'none'; });
 
 function startPlacing(asset, btn) {
   setMode('placing');
@@ -1966,7 +2003,31 @@ document.getElementById('st-snap').addEventListener('click', (e) => {
 });
 applySnapSettings();
 
-// ------------------------------------------------------------ GA 出圖（俯視配置圖，E3D Draw 輕量版）
+// ------------------------------------------------------------ 2D 圖框標題欄（GA/ISO 共用）
+function dwgTitleBlock(right, bottom, meta) {
+  // 三列制式標題欄：公司+專案 / 圖名 / 圖號·Rev·日期·比例
+  const W = Math.min(460, right - 12), H = 64;
+  const x = right - W, y = bottom - H;
+  const c1 = x + W * 0.52, c2 = x + W * 0.68, c3 = x + W * 0.84;
+  return `
+  <g>
+    <rect x="${x}" y="${y}" width="${W}" height="${H}" fill="#fff" stroke="#12283a" stroke-width="1.4"/>
+    <line x1="${x}" y1="${y + 19}" x2="${x + W}" y2="${y + 19}" stroke="#12283a" stroke-width="0.8"/>
+    <line x1="${x}" y1="${y + 42}" x2="${x + W}" y2="${y + 42}" stroke="#12283a" stroke-width="0.8"/>
+    <line x1="${c1}" y1="${y + 42}" x2="${c1}" y2="${y + H}" stroke="#12283a" stroke-width="0.6"/>
+    <line x1="${c2}" y1="${y + 42}" x2="${c2}" y2="${y + H}" stroke="#12283a" stroke-width="0.6"/>
+    <line x1="${c3}" y1="${y + 42}" x2="${c3}" y2="${y + H}" stroke="#12283a" stroke-width="0.6"/>
+    <text x="${x + 8}" y="${y + 13.5}" font-size="10" font-weight="700" fill="#12283a">J.S Process Intelligence｜J.S_3D Studio</text>
+    <text x="${x + W - 8}" y="${y + 13.5}" font-size="9" fill="#5b6b7a" text-anchor="end">${meta.project}</text>
+    <text x="${x + 8}" y="${y + 35.5}" font-size="12.5" font-weight="700" fill="#12283a">${meta.title}</text>
+    <text x="${x + 8}" y="${y + 56}" font-size="9.5" fill="#12283a">圖號 ${meta.dwgno}</text>
+    <text x="${c1 + 6}" y="${y + 56}" font-size="9.5" fill="#12283a">Rev ${meta.rev}</text>
+    <text x="${c2 + 6}" y="${y + 56}" font-size="9.5" fill="#12283a">${meta.date}</text>
+    <text x="${c3 + 6}" y="${y + 56}" font-size="9.5" fill="#12283a">${meta.scaleTxt}</text>
+  </g>`;
+}
+
+// ------------------------------------------------------------ GA 出圖（俯視配置圖）
 function exportGA() {
   const b = sceneBounds();
   const pad = 6;
@@ -2005,23 +2066,28 @@ function exportGA() {
     }
     parts.push(`<text x="${sx(ex)}" y="${(parseFloat(sz(ez)) - (dims.r ? dims.r * S : 8) - 4).toFixed(1)}" font-size="10" font-weight="600" fill="#12283a" text-anchor="middle">${eq.tag}</text>`);
   }
-  // 圖框＋標題欄＋比例尺
+  // 圖框（雙線）＋制式標題欄＋比例尺
   const now = new Date();
   const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  const title = `${sceneData.plant.name}｜GENERAL ARRANGEMENT（俯視配置）`;
+  const PW = W * S, PH = H * S + 78;
+  const tb = dwgTitleBlock(PW - 7, PH - 7, {
+    project: `設備 ${allEquipment().length}・管線 ${sceneData.pipes.length}`,
+    title: `${sceneData.plant.name}｜GENERAL ARRANGEMENT 配置圖`,
+    dwgno: `${(sceneId ?? 'SCN').toUpperCase()}-GA-001`,
+    rev: 'A', date: dateStr, scaleTxt: `1m=${S}px`,
+  });
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W * S} ${H * S + 46}" font-family="Inter,'Noto Sans TC',sans-serif" style="background:#fff">
-  <rect x="0.5" y="0.5" width="${W * S - 1}" height="${H * S - 1}" fill="#fdfefe" stroke="#12283a" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PW} ${PH}" font-family="Inter,'Noto Sans TC',sans-serif" style="background:#fff">
+  <rect x="1" y="1" width="${PW - 2}" height="${PH - 2}" fill="#fdfefe" stroke="#12283a" stroke-width="1.8"/>
+  <rect x="7" y="7" width="${PW - 14}" height="${PH - 14}" fill="none" stroke="#12283a" stroke-width="0.7"/>
+  <g clip-path="none">
   ${parts.join('\n  ')}
-  <g transform="translate(0 ${H * S})">
-    <rect x="0.5" y="2" width="${W * S - 1}" height="42" fill="#fff" stroke="#12283a" stroke-width="1.2"/>
-    <text x="12" y="20" font-size="13" font-weight="700" fill="#12283a">${title}</text>
-    <text x="12" y="36" font-size="10" fill="#5b6b7a">J.S Process Intelligence｜設備 ${allEquipment().length}・管線 ${sceneData.pipes.length}｜比例 1m=${S}px｜${dateStr}</text>
-    <g transform="translate(${W * S - 140} 26)">
-      <line x1="0" y1="0" x2="${10 * S}" y2="0" stroke="#12283a" stroke-width="3"/>
-      <text x="${5 * S}" y="-5" font-size="9" fill="#12283a" text-anchor="middle">10 m</text>
-    </g>
   </g>
+  <g transform="translate(16 ${PH - 24})">
+    <line x1="0" y1="0" x2="${10 * S}" y2="0" stroke="#12283a" stroke-width="3"/>
+    <text x="${5 * S}" y="-5" font-size="9" fill="#12283a" text-anchor="middle">10 m</text>
+  </g>
+  ${tb}
 </svg>`;
   const blob = new Blob([svg], { type: 'image/svg+xml' });
   const url = URL.createObjectURL(blob);
@@ -2105,17 +2171,28 @@ function exportISO() {
   parts.push(`<g transform="translate(${W - 58} 26)"><path d="M0 14 L10 -4 L20 14" fill="none" stroke="#12283a" stroke-width="1.6"/><text x="10" y="27" font-size="10" text-anchor="middle" fill="#12283a" font-weight="700">N</text></g>`);
   const bomRows = bom.slice(0, 6).map((b, i) => `<text x="14" y="${H - 74 + i * 12}" font-size="9.5" fill="#12283a">${i + 1}. ${b}</text>`).join('');
   const more = bom.length > 6 ? `<text x="14" y="${H - 74 + 6 * 12}" font-size="9.5" fill="#5b6b7a">…共 ${bom.length} 項</text>` : '';
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const PH = H + 78;
+  const tb = dwgTitleBlock(W - 7, PH - 7, {
+    project: `${sceneData.plant?.name ?? sceneId ?? ''}`,
+    title: `ISOMETRIC 單管圖｜管線 #${selected.index + 1}`,
+    dwgno: `${(sceneId ?? 'SCN').toUpperCase()}-ISO-${String(selected.index + 1).padStart(3, '0')}`,
+    rev: 'A', date: dateStr,
+    scaleTxt: `${pipe.dn ?? `r${pipe.r}`}｜${pipeLength(pipe).toFixed(1)}m`,
+  });
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" font-family="Inter,'Noto Sans TC',sans-serif" style="background:#fff">
-  <rect x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" fill="#fdfefe" stroke="#12283a" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${PH}" font-family="Inter,'Noto Sans TC',sans-serif" style="background:#fff">
+  <rect x="1" y="1" width="${W - 2}" height="${PH - 2}" fill="#fdfefe" stroke="#12283a" stroke-width="1.8"/>
+  <rect x="7" y="7" width="${W - 14}" height="${PH - 14}" fill="none" stroke="#12283a" stroke-width="0.7"/>
   ${parts.join('\n  ')}
   <g>
-    <line x1="0" y1="${H - 110}" x2="${W}" y2="${H - 110}" stroke="#12283a" stroke-width="1"/>
-    <text x="12" y="${H - 90}" font-size="13" font-weight="700" fill="#12283a">ISOMETRIC｜管線 #${selected.index + 1}</text>
+    <line x1="7" y1="${H - 110}" x2="${W - 7}" y2="${H - 110}" stroke="#12283a" stroke-width="1"/>
+    <text x="14" y="${H - 90}" font-size="12" font-weight="700" fill="#12283a">元件表 BOM</text>
     ${bomRows}${more}
     <text x="${W - 12}" y="${H - 90}" font-size="10" fill="#5b6b7a" text-anchor="end">Spec ${pipe.spec ?? '—'}｜${pipe.dn ?? `r${pipe.r}`}｜總長 ${pipeLength(pipe).toFixed(2)} m｜尺寸 mm／高程 EL.mm</text>
-    <text x="${W - 12}" y="${H - 74}" font-size="9.5" fill="#5b6b7a" text-anchor="end">J.S Process Intelligence｜J.S_3D Studio 交付</text>
   </g>
+  ${tb}
 </svg>`;
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
   window.open(url, '_blank');
@@ -2163,7 +2240,7 @@ document.getElementById('btn-clipcap').addEventListener('click', (e) => {
 });
 
 // ------------------------------------------------------------ 圖層顯示切換（檢視 tab）
-for (const [btnId, key] of [['btn-lay-eq', 'equip'], ['btn-lay-pipe', 'pipe'], ['btn-lay-struct', 'struct'], ['btn-lay-elec', 'elec']]) {
+for (const [btnId, key] of [['btn-lay-eq', 'equip'], ['btn-lay-pipe', 'pipe'], ['btn-lay-struct', 'struct'], ['btn-lay-elec', 'elec'], ['btn-lay-hvac', 'hvac']]) {
   document.getElementById(btnId).addEventListener('click', (e) => {
     LAYERS[key] = !LAYERS[key];
     e.currentTarget.classList.toggle('active', LAYERS[key]);
@@ -2224,6 +2301,8 @@ document.getElementById('btn-mto').addEventListener('click', exportMTO);
 // ------------------------------------------------------------ 設備管嘴（Nozzle：點表面放置、畫管吸附嘴端）
 const nozzleMat = std(0x2e6da8, { metalness: 0.4, roughness: 0.45 });
 function renderNozzles(group, def) {
+  const nzRoot = new THREE.Group();
+  nzRoot.name = 'nozzles';
   for (const nz of def.nozzles ?? []) {
     const r = PIPE_BORES.find((b) => b.dn === nz.dn)?.r ?? 0.08;
     const stub = new THREE.Group();
@@ -2235,8 +2314,9 @@ function renderNozzles(group, def) {
     stub.position.set(...nz.pos);
     stub.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...nz.dir).normalize());
     stub.traverse((o) => { if (o.isMesh) o.userData.eqTag = def.tag; });
-    group.add(stub);
+    nzRoot.add(stub);
   }
+  group.add(nzRoot);
 }
 
 function nozzleWorld(def, nz) {
@@ -2244,16 +2324,6 @@ function nozzleWorld(def, nz) {
   const p = new THREE.Vector3(...nz.pos).add(dir.multiplyScalar(0.32));
   p.applyAxisAngle(new THREE.Vector3(0, 1, 0), def.rot_y ?? 0);
   return p.add(new THREE.Vector3(...def.pos));
-}
-
-function rebuildOneEquipment(def) {
-  const entry = eqObjects.get(def.tag);
-  if (entry) {
-    if (transform.object === entry.group) transform.detach();
-    scene.remove(entry.group);
-    eqObjects.delete(def.tag);
-  }
-  buildEquipment(def);
 }
 
 function addNozzleAt(tag, hit) {
@@ -2280,7 +2350,8 @@ function addNozzleAt(tag, hit) {
     pos: [+local.x.toFixed(2), +local.y.toFixed(2), +local.z.toFixed(2)],
     dir: [+dirL.x.toFixed(3), +dirL.y.toFixed(3), +dirL.z.toFixed(3)],
   });
-  rebuildOneEquipment(def);
+  rebuildEquipment(def);
+  if (selected?.kind === 'eq' && selected.def === def) renderPropPanel(def);
   setHint(`已加管嘴 <b>${def.tag}/${nzId}</b>（${dn}）——繪管時 1.5m 內自動吸附嘴端；可續點加嘴，Esc 結束`);
 }
 
@@ -2292,6 +2363,24 @@ document.getElementById('btn-nozzle').addEventListener('click', () => {
 });
 
 // ------------------------------------------------------------ 管線支撐自動生成（高架水平段每 4m）
+function removeSupportsOf(uid) {
+  let n = 0;
+  for (const u of sceneData.plant.units) {
+    for (const eq of u.equipment.filter((e) => e.sup_of === uid)) {
+      const entry = eqObjects.get(eq.tag);
+      if (entry) {
+        if (transform.object === entry.group) transform.detach();
+        scene.remove(entry.group);
+        eqObjects.delete(eq.tag);
+      }
+      hiddenTags.delete(eq.tag);
+      n += 1;
+    }
+    u.equipment = u.equipment.filter((e) => e.sup_of !== uid);
+  }
+  return n;
+}
+
 document.getElementById('btn-supports').addEventListener('click', () => {
   if (selected?.kind !== 'pipe') { setHint('先選取一條管線再<b>生成支撐</b>'); return; }
   const pipe = sceneData.pipes[selected.index];
@@ -2310,6 +2399,9 @@ document.getElementById('btn-supports').addEventListener('click', () => {
   }
   if (!spots.length) { setHint('此管線沒有可支撐的高架水平段（貼地或垂直）'); return; }
   pushUndo();
+  // 支撐與管線關聯：pipe.uid 綁定——重按＝先清舊支撐再重生（改管後直接重按即可）
+  pipe.uid = pipe.uid ?? `PL-${Math.random().toString(36).slice(2, 8)}`;
+  const removed = removeSupportsOf(pipe.uid);
   let unit = sceneData.plant.units.find((u) => u.id === 'U-SUP');
   if (!unit) { unit = { id: 'U-SUP', name: '管線支撐', equipment: [] }; sceneData.plant.units.push(unit); }
   for (const sp of spots) {
@@ -2317,14 +2409,14 @@ document.getElementById('btn-supports').addEventListener('click', () => {
       tag: nextTag('PS'), type: 'psupport', name: '管線支撐',
       dims: { h: +(sp.y - pipe.r).toFixed(2), r: Math.max(pipe.r, 0.05) },
       pos: [+sp.x.toFixed(2), 0, +sp.z.toFixed(2)], rot_y: +sp.yaw.toFixed(3),
-      design: {}, instruments: [], pid_ref: '',
+      sup_of: pipe.uid, design: {}, instruments: [], pid_ref: '',
     };
     unit.equipment.push(def);
     buildEquipment(def);
   }
   rebuildTree();
   updateTopbar();
-  setHint(`已沿管線 #${selected.index + 1} 生成 <b>${spots.length}</b> 支管線支撐（間距 ${SPAN}m，入結構圖層）；重複點擊會再生成一組`);
+  setHint(`已沿管線 #${selected.index + 1} ${removed ? `重生（清除舊 ${removed} 支）` : '生成'} <b>${spots.length}</b> 支支撐（間距 ${SPAN}m，結構圖層）——改管後重按即重生`);
 });
 
 // ------------------------------------------------------------ 陣列／鏡射複製（佔右側屬性面板）
@@ -2759,7 +2851,9 @@ function deleteSelected() {
       u.equipment = u.equipment.filter((e) => e.tag !== tag);
     }
   } else if (selected.kind === 'pipe') {
+    const uid = sceneData.pipes[selected.index]?.uid;
     sceneData.pipes.splice(selected.index, 1);
+    if (uid) removeSupportsOf(uid);   // 支撐隨管刪除
     rebuildAllPipes();
   }
   rebuildTree();

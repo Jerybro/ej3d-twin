@@ -299,6 +299,7 @@
           <option value="equip">設備 EQUIPMENT</option>
           <option value="struct">結構 STRUCTURES</option>
           <option value="elec">儀電 ELECTRICAL</option>
+          <option value="hvac">風管 HVAC</option>
           <option value="none">通用 GENERAL</option>
         </select>
         <span id="scene-name" style="margin-left:auto">未儲存場景</span>
@@ -409,13 +410,19 @@
               <button class="rbtn" id="btn-underlay" title="P&ID 圖紙底圖顯示切換"><span class="ric" data-ic="map"></span>底圖</button>
               <button class="rbtn" id="btn-grid" title="地面網格顯示切換"><span class="ric" data-ic="grid"></span>網格</button>
               <button class="rbtn" id="btn-labels" title="設備位號標籤顯示切換"><span class="ric" data-ic="label"></span>標籤</button>
+              <button class="rbtn" id="btn-elev" title="標高基準面：顯示 EL 網格＋管理標高清單（屬性面板）"><span class="ric" data-ic="elev"></span>標高</button>
+            </div>
+            <div class="rgroup-label">內容</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
               <button class="rbtn active" id="btn-lay-eq" title="設備圖層顯示切換"><span class="ric" data-ic="laycube"></span>設備</button>
               <button class="rbtn active" id="btn-lay-pipe" title="管線圖層顯示切換"><span class="ric" data-ic="laypipe"></span>管線</button>
               <button class="rbtn active" id="btn-lay-struct" title="結構圖層顯示切換"><span class="ric" data-ic="laybeam"></span>結構</button>
               <button class="rbtn active" id="btn-lay-elec" title="儀電圖層顯示切換"><span class="ric" data-ic="layelec"></span>儀電</button>
-              <button class="rbtn" id="btn-elev" title="標高基準面：顯示 EL 網格＋管理標高清單（屬性面板）"><span class="ric" data-ic="elev"></span>標高</button>
+              <button class="rbtn active" id="btn-lay-hvac" title="風管圖層顯示切換"><span class="ric" data-ic="layhvac"></span>風管</button>
             </div>
-            <div class="rgroup-label">內容</div>
+            <div class="rgroup-label">圖層</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">

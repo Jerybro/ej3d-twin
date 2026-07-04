@@ -1364,6 +1364,84 @@ builders.lightpole = function ({ h }) {
   return g;
 };
 
+// -------------------------------------------------- 風管 HVAC（hvac discipline）
+builders.duct = function ({ w, h, len, elev }) {
+  const g = new THREE.Group();
+  const m = std(0xaeb6bf, { metalness: 0.5, roughness: 0.35 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(len, h, w), m);
+  body.position.y = elev + h / 2;
+  g.add(body);
+  const nf = Math.max(1, Math.floor(len / 1.5));
+  for (let i = 0; i <= nf; i++) {                 // 法蘭接縫
+    const fl = new THREE.Mesh(new THREE.BoxGeometry(0.05, h + 0.1, w + 0.1), std(0x8d99a6));
+    fl.position.set(-len / 2 + (len * i) / nf, elev + h / 2, 0);
+    g.add(fl);
+  }
+  return g;
+};
+
+builders.ductbend = function ({ w, h, elev }) {
+  const g = new THREE.Group();
+  const m = std(0xaeb6bf, { metalness: 0.5, roughness: 0.35 });
+  const L = Math.max(w * 2, 1.2);
+  const armX = new THREE.Mesh(new THREE.BoxGeometry(L, h, w), m);
+  armX.position.set(L / 2 - w / 2, elev + h / 2, 0);
+  const armZ = new THREE.Mesh(new THREE.BoxGeometry(w, h, L), m);
+  armZ.position.set(0, elev + h / 2, L / 2 - w / 2);
+  g.add(armX, armZ);
+  return g;
+};
+
+builders.ductriser = function ({ w, h, hgt }) {
+  const g = new THREE.Group();
+  const m = std(0xaeb6bf, { metalness: 0.5, roughness: 0.35 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, h), m);
+  body.position.y = hgt / 2;
+  g.add(body);
+  for (let y = 1; y < hgt; y += 1.5) {
+    const fl = new THREE.Mesh(new THREE.BoxGeometry(w + 0.1, 0.05, h + 0.1), std(0x8d99a6));
+    fl.position.y = y;
+    g.add(fl);
+  }
+  return g;
+};
+
+builders.ahu = function ({ w, h, d }) {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(w * 1.02, 0.12, d * 1.02), std(0x55606c));
+  base.position.y = 0.06;
+  const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), std(0xb9c1ca, { metalness: 0.35, roughness: 0.5 }));
+  box.position.y = h / 2 + 0.12;
+  g.add(base, box);
+  const seams = Math.max(2, Math.round(w / 1.2));
+  for (let i = 1; i < seams; i++) {               // 模組段接縫
+    const seam = new THREE.Mesh(new THREE.BoxGeometry(0.03, h, d + 0.04), std(0x8d99a6));
+    seam.position.set(-w / 2 + (w * i) / seams, h / 2 + 0.12, 0);
+    g.add(seam);
+  }
+  const fanRing = new THREE.Mesh(new THREE.TorusGeometry(h * 0.26, 0.05, 8, 20), std(0x3a4a5a));
+  fanRing.position.set(w / 2 - 0.01, h * 0.55, 0);
+  fanRing.rotation.y = Math.PI / 2;
+  const outlet = new THREE.Mesh(new THREE.BoxGeometry(0.5, h * 0.4, d * 0.4), std(0xaeb6bf));
+  outlet.position.set(w / 2 + 0.25, h * 0.7, 0);
+  g.add(fanRing, outlet);
+  return g;
+};
+
+builders.rooffan = function ({ r, h }) {
+  const g = new THREE.Group();
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.75, r * 0.9, h * 0.55, 14), std(0x9aa7b4));
+  stem.position.y = h * 0.275;
+  const cowl = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.75, h * 0.3, 14), std(0x8d99a6));
+  cowl.position.y = h * 0.7;
+  const rainCap = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.15, r * 1.15, 0.06, 14), std(0x55606c));
+  rainCap.position.y = h * 0.88;
+  const motor = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.2, r * 0.2, 0.3, 10), std(0x2e6da8));
+  motor.position.y = h * 0.95;
+  g.add(stem, cowl, rainCap, motor);
+  return g;
+};
+
 // -------------------------------------------------- 管線元件（Piping Components）
 // E3D Component Editor：閥/法蘭對/異徑管/止回閥，沿管線弧長定位
 export function buildPipeComponent(kind, r) {
@@ -1539,6 +1617,13 @@ export const ASSET_CATEGORIES = [
     { type: 'trayriser', name: '橋架垂直段', dims: { w: 0.45, h: 3 }, prefix: 'CT' },
     { type: 'jbox', name: '接線箱', dims: { w: 0.6, h: 0.8, d: 0.3 }, prefix: 'JB' },
     { type: 'lightpole', name: '廠區照明燈桿', dims: { h: 6 }, prefix: 'LP' },
+  ]},
+  { name: '風管 HVAC', discipline: 'hvac', items: [
+    { type: 'duct', name: '矩形風管（直管）', dims: { w: 0.8, h: 0.5, len: 6, elev: 3 }, prefix: 'DU' },
+    { type: 'ductbend', name: '風管水平彎', dims: { w: 0.8, h: 0.5, elev: 3 }, prefix: 'DU' },
+    { type: 'ductriser', name: '風管垂直段', dims: { w: 0.8, h: 0.5, hgt: 3 }, prefix: 'DU' },
+    { type: 'ahu', name: '空調箱 AHU', dims: { w: 3.6, h: 2, d: 1.6 }, prefix: 'AHU' },
+    { type: 'rooffan', name: '屋頂排風機', dims: { r: 0.55, h: 1.4 }, prefix: 'EF' },
   ]},
   { name: '基元（自建設備）', items: [
     { type: 'assembly', name: '自建設備', dims: {},

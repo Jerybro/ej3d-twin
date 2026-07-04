@@ -616,15 +616,17 @@
         <div id="model-detail" style="display:none"></div>
       </div>
     </div>
-    <div id="mysets-view" style="display:none">
-      <div class="model-head">
-        <span>我的資料集——上傳過的檔案與衍生模型都保存在這</span>
-        <span class="spacer"></span>
-        <button class="ctl-btn" id="btn-upload-new">上傳新資料集</button>
-      </div>
-      <div class="ds-list" id="mysets-list"></div>
-    </div>
   </main>
+
+  <!-- 我的資料集：獨立畫面（不需工作階段，未開資料集也能進） -->
+  <div id="mysets-view" style="display:none;padding:20px 16px 24px">
+    <div class="model-head">
+      <span>我的資料集——上傳過的檔案與衍生模型都保存在這</span>
+      <span class="spacer"></span>
+      <button class="ctl-btn" id="btn-upload-new">上傳新資料集</button>
+    </div>
+    <div class="ds-list" id="mysets-list"></div>
+  </div>
 
   <!-- 建模精靈 -->
   <div class="wiz-overlay" id="model-wizard">
@@ -779,6 +781,6 @@
   </div>
 
   <input type="file" id="template-input" accept=".json" style="display:none" />
-  <script type="module" src="/static/js/data.js"></script>
+  <script type="module" src="/static/js/data.js?v=20260704a"></script>
 </body>
 </html>

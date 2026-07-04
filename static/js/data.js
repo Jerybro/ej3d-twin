@@ -59,8 +59,10 @@ async function upload(file) {
 async function enterSession(newSid, filename) {
   sid = newSid;
   $('upload-view').style.display = 'none';
+  $('mysets-view').style.display = 'none';
   $('main-area').style.display = '';
   $('subnav').style.display = '';
+  syncNavTabs();
   await refreshState();
   $('ds-name').textContent = filename ?? state.filename ?? '資料集';
   refreshPropsFluids();
@@ -75,9 +77,10 @@ async function enterSession(newSid, filename) {
 const urlSid = new URLSearchParams(location.search).get('sid');
 if (urlSid) {
   sid = urlSid;
-  api('/state').then(() => enterSession(urlSid)).catch(() => { sid = null; loadMySets(); });
+  api('/state').then(() => enterSession(urlSid)).catch(() => { sid = null; syncNavTabs(); renderMySets(); });
 } else {
-  loadMySets();
+  syncNavTabs();
+  renderMySets();
 }
 
 // ------------------------------------------------------------ 我的資料集（儲存管理）
@@ -123,7 +126,12 @@ async function renderMySets() {
     } else { el.textContent = (await res.json()).detail ?? '刪除失敗'; }
   }));
 }
-const loadMySets = renderMySets;   // upload 頁初始化沿用
+// 無資料集時只留「我的資料集」分頁（資料集/探索/模型都需要工作階段才有意義）
+function syncNavTabs() {
+  document.querySelectorAll('.nav-tab[data-view]').forEach((t) => {
+    if (t.dataset.view !== 'mysets') t.style.display = sid ? '' : 'none';
+  });
+}
 
 // 登入身分顯示與登出（AUTH_DISABLED 時顯示未啟用）
 fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((me) => {
@@ -133,8 +141,7 @@ fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((me) => {
 }).catch(() => {});
 $('mm-logout').addEventListener('click', () => { location.href = '/logout'; });
 $('mm-mysets').addEventListener('click', () => {
-  if (sid) document.querySelector('.nav-tab[data-view="mysets"]')?.click();
-  else location.href = '/data';
+  document.querySelector('.nav-tab[data-view="mysets"]')?.click();
   $('more-drawer').classList.remove('open');
 });
 $('btn-upload-new').addEventListener('click', () => { location.href = '/data'; });
@@ -187,15 +194,21 @@ document.querySelectorAll('.nav-tab[data-view]').forEach((t) => t.addEventListen
   document.querySelectorAll('.nav-tab[data-view]').forEach((x) => x.classList.remove('active'));
   t.classList.add('active');
   const v = t.dataset.view;
+  // 「我的資料集」是獨立畫面（不需要工作階段）：蓋掉上傳頁與工作區；
+  // 其餘分頁屬於工作區（有 sid 才會顯示這些分頁）
+  const isMy = v === 'mysets';
+  $('mysets-view').style.display = isMy ? '' : 'none';
+  $('upload-view').style.display = (isMy || sid) ? 'none' : '';
+  $('main-area').style.display = (!isMy && sid) ? '' : 'none';
+  $('subnav').style.display = (!isMy && sid) ? '' : 'none';
   $('explore-view').style.display = v === 'explore' ? '' : 'none';
   $('dataset-view').style.display = v === 'dataset' ? '' : 'none';
   $('model-view').style.display = v === 'model' ? '' : 'none';
-  $('mysets-view').style.display = v === 'mysets' ? '' : 'none';
   // 次導航依頁切換：探索分析＝二維目標下拉；資料集＝每頁顯示
   $('target-select').style.display = v === 'explore' ? '' : 'none';
   $('perpage-wrap').style.display = v === 'dataset' ? 'flex' : 'none';
   if (v === 'model') renderModels();
-  if (v === 'mysets') renderMySets();
+  if (isMy) renderMySets();
   if (v === 'explore' && wallDirty) { wallDirty = false; renderWall(); }
 }));
 

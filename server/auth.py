@@ -24,7 +24,9 @@ USERS_PATH = BASE_DIR / "uploads" / "data" / "users.json"
 
 def _load_dotenv():
     # .env 為本機部署的權威設定：覆寫既有環境變數（避免其他專案殘留的
-    # GOOGLE_REDIRECT_URI 等變數蓋掉本專案值——實測 CRM PoC 會洩漏 5055 callback）
+    # GOOGLE_REDIRECT_URI 等變數蓋掉本專案值——實測 CRM PoC 會洩漏 5055 callback）。
+    # 例外：AUTH_DISABLED 是執行期開關，啟動時給的環境變數優先（驗證/demo 用）。
+    keep = {k: os.environ[k] for k in ("AUTH_DISABLED",) if k in os.environ}
     p = BASE_DIR / ".env"
     if not p.exists():
         return
@@ -34,6 +36,7 @@ def _load_dotenv():
             continue
         k, v = line.split("=", 1)
         os.environ[k.strip()] = v.strip()
+    os.environ.update(keep)
 
 
 _load_dotenv()

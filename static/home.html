@@ -47,6 +47,25 @@
     footer.site { margin-top: 44px; color: var(--text2); font-size: 12.5px;
       border-top: 1px solid var(--bdr); padding-top: 16px;
       display: flex; justify-content: space-between; }
+    /* 使用流程引導（四步卡） */
+    .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    @media (max-width: 960px) { .steps { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 640px) { .steps { grid-template-columns: 1fr; } }
+    a.step {
+      background: var(--white); border: 1px solid var(--bdr); border-radius: 8px;
+      padding: 16px 18px; text-decoration: none; color: var(--text);
+      display: flex; flex-direction: column;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    a.step:hover { border-color: var(--blue); box-shadow: 0 4px 16px rgba(4, 106, 251, 0.10); }
+    .step .no {
+      width: 24px; height: 24px; border-radius: 50%; background: var(--blue); color: #fff;
+      font-size: 12.5px; font-weight: 600; display: inline-flex;
+      align-items: center; justify-content: center;
+    }
+    .step h3 { font-size: 14.5px; font-weight: 600; margin: 10px 0 6px; }
+    .step p { font-size: 12.5px; color: var(--text2); line-height: 1.75; flex: 1; }
+    .step .go { font-size: 12.5px; color: var(--blue); margin-top: 10px; }
   </style>
 </head>
 <body>
@@ -59,6 +78,34 @@
     <p class="tagline">
       數據與物理雙驅動的流程工業平台：先成就數據孿生，再映射視覺孿生。物理約束治理 AI 外插，每一個模型附驗證度。
     </p>
+
+    <div class="group-title">第一次使用？照這四步走</div>
+    <div class="steps">
+      <a class="step" href="/data">
+        <span class="no">1</span>
+        <h3>上傳或開啟資料</h3>
+        <p>CSV／Excel 拖放上傳（需含時間欄）；之前上傳的檔案都保存在「我的資料集」，隨時開啟繼續。</p>
+        <span class="go">進入資料工作台</span>
+      </a>
+      <a class="step" href="/data">
+        <span class="no">2</span>
+        <h3>探索與清洗</h3>
+        <p>欄位卡片牆看分布、滑鼠框選排除異常段、資料健檢三判準——資料乾淨比選演算法重要。</p>
+        <span class="go">開始探索分析</span>
+      </a>
+      <a class="step" href="/data?view=model">
+        <span class="no">3</span>
+        <h3>建立模型</h3>
+        <p>全自動一次比較所有適用演算法；每個演算法、參數、指標都有白話說明，AI 助教隨時給建議。</p>
+        <span class="go">進入模型工作區</span>
+      </a>
+      <a class="step" href="/data?view=model">
+        <span class="no">4</span>
+        <h3>應用與監控</h3>
+        <p>模型評估、操作差異試算、批次試算、配方優化；設備健康度儀表板持續監控、7 天預測。</p>
+        <span class="go">進入模型應用</span>
+      </a>
+    </div>
 
     <div class="group-title">資料智能</div>
     <div class="cards">

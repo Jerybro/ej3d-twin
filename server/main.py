@@ -368,6 +368,10 @@ from .aiassist import router as aiassist_router  # noqa: E402
 
 app.include_router(aiassist_router)
 
+from .sprite import router as sprite_router  # noqa: E402
+
+app.include_router(sprite_router)
+
 # --------------------------------------------------------- 登入與權限（Google OAuth）
 from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
 

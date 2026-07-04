@@ -269,6 +269,30 @@
       background: var(--bg); border: 1px solid var(--bdr); border-radius: 6px;
       padding: 12px 14px; margin-top: 10px; }
     #ai-models-out .ai-out { margin: 0 0 14px; }
+    /* 我的資料集：卡片列 */
+    .ds-list { display: flex; flex-direction: column; gap: 10px; }
+    .ds-item { display: flex; align-items: center; gap: 16px; background: var(--white);
+      border: 1px solid var(--bdr); border-radius: 8px; padding: 14px 18px;
+      transition: box-shadow 0.15s, border-color 0.15s; }
+    .ds-item:hover { border-color: #C3CAD3; box-shadow: 0 3px 12px rgba(6, 16, 39, 0.06); }
+    .ds-item.cur { border-color: var(--blue); }
+    .ds-ic { width: 36px; height: 36px; border-radius: 8px; background: var(--bg);
+      display: flex; align-items: center; justify-content: center; flex: none; }
+    .ds-ic svg { width: 17px; height: 17px; stroke: var(--blue); fill: none;
+      stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .ds-info { min-width: 0; flex: 1; }
+    .ds-fn { font-size: 14.5px; font-weight: 600; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ds-meta { font-size: 12.5px; color: var(--text2); margin-top: 3px; }
+    .ds-meta .cur-tag { color: var(--blue); font-weight: 600; }
+    .ds-acts { display: flex; gap: 8px; flex: none; }
+    .ds-acts a, .ds-acts button { font-size: 13px; padding: 6px 14px; border-radius: 5px;
+      border: 1px solid var(--bdr); background: var(--white); color: var(--text);
+      cursor: pointer; text-decoration: none; font-family: inherit; white-space: nowrap; }
+    .ds-acts a:hover, .ds-acts button:hover { border-color: var(--blue); color: var(--blue); }
+    .ds-acts .pri { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .ds-acts .pri:hover { color: #fff; opacity: 0.9; }
+    .ds-acts .dgr:hover { border-color: var(--danger); color: var(--danger); }
     .sec-title { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 6px; }
     #props-adv { margin-top: 18px; border-top: 1px solid var(--bdr); padding-top: 12px; }
     #props-adv summary { font-size: 14px; font-weight: 500; color: var(--text);
@@ -459,6 +483,9 @@
     <button class="nav-tab" data-view="model">
       <svg class="ic" viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v10"/></svg>
       模型</button>
+    <button class="nav-tab" data-view="mysets">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M3 8a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      我的資料集</button>
     <span class="spacer"></span>
     <button class="nav-tab" id="btn-theme" title="圖表主題色">
       <svg class="ic" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 1 10-10c0 2.2-1.8 4-4 4h-2.5a2 2 0 0 0-1.5 3.3c.3.4.5.9.5 1.4A1.3 1.3 0 0 1 13 22z"/><circle cx="7.5" cy="11.5" r="0.5"/><circle cx="10.5" cy="7.5" r="0.5"/><circle cx="15" cy="7.5" r="0.5"/></svg>
@@ -532,7 +559,7 @@
     <div id="upload-err"></div>
     <div class="format-card" id="mysets-card" style="display:none">
       <h3>我的資料集——之前上傳的檔案都保存在這，點「開啟」繼續工作</h3>
-      <div style="overflow-x:auto"><table style="width:100%" id="mysets-table"></table></div>
+      <div class="ds-list" id="mysets-list-up"></div>
     </div>
     <div class="format-card">
       <h3>上傳格式規定</h3>
@@ -588,6 +615,14 @@
         <div id="model-table-wrap"></div>
         <div id="model-detail" style="display:none"></div>
       </div>
+    </div>
+    <div id="mysets-view" style="display:none">
+      <div class="model-head">
+        <span>我的資料集——上傳過的檔案與衍生模型都保存在這</span>
+        <span class="spacer"></span>
+        <button class="ctl-btn" id="btn-upload-new">上傳新資料集</button>
+      </div>
+      <div class="ds-list" id="mysets-list"></div>
     </div>
   </main>
 

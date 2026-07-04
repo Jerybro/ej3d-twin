@@ -81,22 +81,35 @@ if (urlSid) {
 }
 
 // ------------------------------------------------------------ 我的資料集（儲存管理）
-async function loadMySets() {
-  let sets;
-  try { sets = await fetch('/api/data/sessions').then((r) => (r.ok ? r.json() : [])); } catch { return; }
-  if (!sets.length) { $('mysets-card').style.display = 'none'; return; }
-  $('mysets-card').style.display = '';
-  $('mysets-table').innerHTML = `
-    <tr><th>檔名</th><th>筆數</th><th>模型</th><th>上傳時間</th><th>擁有者</th><th></th><th></th><th></th></tr>
-    ${sets.map((s) => `<tr data-sid="${s.sid}">
-      <td>${s.filename ?? s.sid}</td><td>${s.n_rows?.toLocaleString() ?? '—'}</td>
-      <td>${s.n_models || '—'}</td><td>${s.uploaded_at ?? '—'}</td><td>${s.owner ?? '共用'}</td>
-      <td><a href="/data?sid=${s.sid}">開啟</a></td>
-      <td>${s.has_source ? `<a href="/api/data/${s.sid}/source">下載原檔</a>` : ''}</td>
-      <td><span class="del ms-del" data-sid="${s.sid}" style="color:var(--danger);cursor:pointer">刪除</span></td>
-    </tr>`).join('')}`;
+// 卡片列：渲染到導航分頁（mysets-list）與上傳頁（mysets-list-up）兩處
+const DS_ICON = '<svg viewBox="0 0 24 24"><path d="M4 5h16v4H4z"/><path d="M4 10.5h16v4H4z"/><path d="M4 16h16v4H4z"/><circle cx="7" cy="7" r="0.4"/><circle cx="7" cy="12.5" r="0.4"/><circle cx="7" cy="18" r="0.4"/></svg>';
+async function renderMySets() {
+  let sets = [];
+  try { sets = await fetch('/api/data/sessions').then((r) => (r.ok ? r.json() : [])); } catch { /* 未登入等 */ }
+  const meta = (s) => [
+    s.n_rows != null ? `${s.n_rows.toLocaleString()} 筆` : null,
+    s.n_models ? `${s.n_models} 個模型` : null,
+    s.uploaded_at, s.owner ?? '共用',
+    s.sid === sid ? '<span class="cur-tag">使用中</span>' : null,
+  ].filter(Boolean).join('｜');
+  const html = sets.length ? sets.map((s) => `
+    <div class="ds-item${s.sid === sid ? ' cur' : ''}">
+      <div class="ds-ic">${DS_ICON}</div>
+      <div class="ds-info">
+        <div class="ds-fn">${s.filename ?? s.sid}</div>
+        <div class="ds-meta">${meta(s)}</div>
+      </div>
+      <div class="ds-acts">
+        ${s.sid === sid ? '' : `<a class="pri" href="/data?sid=${s.sid}">開啟</a>`}
+        ${s.has_source ? `<a href="/api/data/${s.sid}/source">下載原檔</a>` : ''}
+        <button class="dgr ms-del" data-sid="${s.sid}">刪除</button>
+      </div>
+    </div>`).join('')
+    : '<p class="hint">還沒有資料集——上傳第一個 CSV／Excel 開始。</p>';
+  ['mysets-list', 'mysets-list-up'].forEach((id) => { const el = $(id); if (el) el.innerHTML = html; });
+  if ($('mysets-card')) $('mysets-card').style.display = sets.length ? '' : 'none';
   // 刪除採兩段式確認（不用原生 confirm——會凍住 renderer）
-  $('mysets-table').querySelectorAll('.ms-del').forEach((el) => el.addEventListener('click', async () => {
+  document.querySelectorAll('.ms-del').forEach((el) => el.addEventListener('click', async () => {
     if (el.dataset.armed !== '1') {
       el.dataset.armed = '1';
       el.textContent = '確認刪除？';
@@ -104,10 +117,13 @@ async function loadMySets() {
       return;
     }
     const res = await fetch(`/api/data/${el.dataset.sid}`, { method: 'DELETE' });
-    if (res.ok) await loadMySets();
-    else el.textContent = (await res.json()).detail ?? '刪除失敗';
+    if (res.ok) {
+      if (el.dataset.sid === sid) { location.href = '/data'; return; }
+      await renderMySets();
+    } else { el.textContent = (await res.json()).detail ?? '刪除失敗'; }
   }));
 }
+const loadMySets = renderMySets;   // upload 頁初始化沿用
 
 // 登入身分顯示與登出（AUTH_DISABLED 時顯示未啟用）
 fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((me) => {
@@ -116,7 +132,35 @@ fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((me) => {
   if (!me.auth_disabled) $('mm-logout').style.display = '';
 }).catch(() => {});
 $('mm-logout').addEventListener('click', () => { location.href = '/logout'; });
-$('mm-mysets').addEventListener('click', () => { location.href = '/data'; });
+$('mm-mysets').addEventListener('click', () => {
+  if (sid) document.querySelector('.nav-tab[data-view="mysets"]')?.click();
+  else location.href = '/data';
+  $('more-drawer').classList.remove('open');
+});
+$('btn-upload-new').addEventListener('click', () => { location.href = '/data'; });
+
+// AI 小精靈的情境摘要（sprite.js module 從 window 取用）
+window.JS_DATA_CTX = () => {
+  const ctx = { 頁面: sid ? '資料工作台' : '上傳頁' };
+  const activeTab = document.querySelector('.nav-tab.active[data-view]');
+  if (activeTab) ctx.目前分頁 = activeTab.textContent.trim();
+  if (state) {
+    ctx.資料 = {
+      檔名: state.filename, 原始筆數: state.n_base, 現行筆數: state.n_view,
+      欄數: (state.columns ?? []).filter((c) => !c.hidden && c.name !== '__id__').length,
+      處理步驟數: (state.steps ?? []).filter((s) => s.enabled !== false).length,
+    };
+  }
+  const ms = window._lastModels ?? [];
+  if (ms.length) {
+    const done = ms.filter((m) => m.status === 'done');
+    ctx.模型 = { 總數: ms.length, 完成: done.length,
+      訓練中: ms.filter((m) => m.status === 'training').length };
+    const best = done.find((m) => m.metrics_cv?.rmse != null);
+    if (best) ctx.模型.最佳迴歸 = { 名稱: best.name, 演算法: best.algo, rmse: best.metrics_cv.rmse, r2: best.metrics_cv.r2 };
+  }
+  return ctx;
+};
 
 // ------------------------------------------------------------ 狀態
 async function refreshState() {
@@ -146,10 +190,12 @@ document.querySelectorAll('.nav-tab[data-view]').forEach((t) => t.addEventListen
   $('explore-view').style.display = v === 'explore' ? '' : 'none';
   $('dataset-view').style.display = v === 'dataset' ? '' : 'none';
   $('model-view').style.display = v === 'model' ? '' : 'none';
+  $('mysets-view').style.display = v === 'mysets' ? '' : 'none';
   // 次導航依頁切換：探索分析＝二維目標下拉；資料集＝每頁顯示
   $('target-select').style.display = v === 'explore' ? '' : 'none';
   $('perpage-wrap').style.display = v === 'dataset' ? 'flex' : 'none';
   if (v === 'model') renderModels();
+  if (v === 'mysets') renderMySets();
   if (v === 'explore' && wallDirty) { wallDirty = false; renderWall(); }
 }));
 
@@ -872,6 +918,7 @@ async function renderModels() {
   if (!sid) return;
   clearTimeout(modelPollTimer);
   const models = await apiML('/models');
+  window._lastModels = models;   // AI 小精靈情境摘要用
   $('model-empty').style.display = models.length ? 'none' : '';
   $('model-main').style.display = models.length ? '' : 'none';
   if (models.length) {
@@ -2016,6 +2063,10 @@ $('btn-scan').addEventListener('click', async () => {
     await refreshState();
   });
 });
+
+// ------------------------------------------------------------ AI 小精靈（右下角，與孿生/E3D 共用模組）
+import('/static/js/sprite.js').then(({ initSprite }) =>
+  initSprite({ page: 'data', bottom: 16, context: () => window.JS_DATA_CTX?.() ?? {} })).catch(() => {});
 
 // ------------------------------------------------------------ 圓圈問號懸浮說明
 // 泡泡掛 body＋fixed 定位：不被表格/卡片的 overflow 裁切；事件 delegation 涵蓋動態內容

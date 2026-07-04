@@ -453,7 +453,9 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 PAGES = {
     "/": "home.html",          # 平台首頁（產品導航）
     "/twin": "index.html",     # 產品3：3D 數位孿生檢視
-    "/twin/editor": "editor.html",  # 產品3：3D 模塊編輯器
+    "/studio": "editor.html",  # 產品3：J.S_3D Studio 設計工作室（獨立入口）
+    "/e3d": "editor.html",     # 舊路徑別名（既有連結相容）
+    "/twin/editor": "editor.html",  # 舊路徑別名（既有連結相容）
     "/twin/pid": "pid.html",   # 產品3：P&ID 管理
     "/data": "data.html",      # 產品2：資料前處理
     "/docs": "docs.html",      # 操作說明（雙語）

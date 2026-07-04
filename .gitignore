@@ -40,3 +40,4 @@ data/automl/
 .env
 .secret_key
 
+batch_rerun.log

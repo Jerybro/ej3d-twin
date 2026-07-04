@@ -7,7 +7,8 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
-import { std, markShadow, builders, detailedBuilders, dm, dFlange, mergeByMaterial, labelHeight } from './plant-builders.js';
+import { std, markShadow, builders, detailedBuilders, dm, dFlange, mergeByMaterial, labelHeight, buildPipeComponent } from './plant-builders.js';
+import { initSprite } from './sprite.js';
 
 const ACCENT = new THREE.Color('#46c2e0');
 const ALARM_RED = new THREE.Color('#ff2a2d');
@@ -27,6 +28,10 @@ if (SCENE_ID !== 'demo') {
   document.getElementById('brand-sub').textContent =
     plantData.source ? `資料來源：${plantData.source}` : `場景：${SCENE_ID}`;
   document.title = `${plantData.plant?.name ?? SCENE_ID}｜J.S_3D Ai`;
+  // 自定義調整入口：3D 設計工作室（Studio）開同一場景
+  const editBtn = document.getElementById('btn-edit-e3d');
+  editBtn.href = `/studio?scene=${SCENE_ID}`;
+  editBtn.style.display = '';
 }
 
 // ---------------------------------------------------------------- 基礎場景
@@ -389,7 +394,7 @@ function setEquipmentBody(entry, builderSet) {
   // 精細建模器共用材質物件，警報脈動會改 emissive → 每台 clone 材質避免互相污染
   // 新素材（編輯器擴充）尚無精細版 → fallback 簡易幾何
   const build = builderSet[entry.def.type] ?? builders[entry.def.type];
-  let body = build(entry.def.dims);
+  let body = build(entry.def.dims, entry.def);   // assembly 自建設備讀 def.prims
   if (builderSet === detailedBuilders && builderSet[entry.def.type]) body = mergeByMaterial(body);
   body.traverse((o) => {
     if (o.isMesh) {
@@ -457,6 +462,27 @@ const bridgeMat = std(0x2e8ba8); // 跨圖橋接管：主題青，一眼辨識�
         const joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
         joint.position.copy(b);
         plantGroup.add(joint);
+      }
+    }
+    // 管中元件（編輯器放置的閥/法蘭/異徑管）：手繪場景（非合併路徑）呈現
+    if (!manyPipes && pipe.components?.length) {
+      let acc = 0;
+      const segs = pts.map((p, i) => i ? { a: pts[i - 1], b: p, len: pts[i - 1].distanceTo(p) } : null).filter(Boolean);
+      for (const c of pipe.components) {
+        let at = c.at, pose = null, walked = 0;
+        for (const s of segs) {
+          if (walked + s.len >= at || s === segs[segs.length - 1]) {
+            const t = Math.max(0, Math.min(1, (at - walked) / Math.max(s.len, 1e-6)));
+            pose = { pos: s.a.clone().lerp(s.b, t), dir: s.b.clone().sub(s.a).normalize() };
+            break;
+          }
+          walked += s.len;
+        }
+        if (!pose) continue;
+        const comp = buildPipeComponent(c.kind, pipe.r);
+        comp.position.copy(pose.pos);
+        comp.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), pose.dir);
+        plantGroup.add(comp);
       }
     }
   }
@@ -567,6 +593,30 @@ function flyCam(toPos, toTgt) {
 
 // console／導覽用：EJ3D.fly([camX,camY,camZ],[lookX,lookY,lookZ])
 window.EJ3D = { fly: (p, t) => flyCam(new THREE.Vector3(...p), new THREE.Vector3(...t)) };
+
+// AI 小精靈：右下角情境建議（scenario-bar 上方）
+initSprite({
+  page: 'twin',
+  bottom: 58,
+  context: () => {
+    const t = window.__lastTick ?? {};
+    const insts = Object.entries(t.tags ?? {}).map(([tag, d]) => {
+      const base = plantData.instruments?.[tag]?.base;
+      const dev = base ? Math.abs(d.v - base) / Math.max(Math.abs(base), 1) : 0;
+      return { tag, name: d.name, v: d.v, unit: d.unit, dev };
+    }).sort((a, b) => b.dev - a.dev).slice(0, 6)
+      .map(({ tag, name, v, unit, dev }) => `${tag} ${name}=${v}${unit}（偏離 ${(dev * 100).toFixed(0)}%）`);
+    return {
+      場景: plantData.plant?.name ?? SCENE_ID,
+      資料來源: plantData.source ?? '內建示範',
+      設備數: plantData.plant.units.reduce((n, u) => n + (u.equipment?.length ?? 0), 0),
+      管線數: plantData.pipes?.length ?? 0,
+      目前情境: scenarioDefs[t.scenario]?.name ?? t.scenario ?? 'normal',
+      告警: (t.alarms ?? []).slice(0, 5).map((a) => a.text),
+      偏離最大儀錶: insts,
+    };
+  },
+});
 
 function selectEquipment(tag, flyTo = false) {
   if (selectedTag && eqMap[selectedTag]) eqMap[selectedTag].treeEl.classList.remove('active');
@@ -798,7 +848,7 @@ function buildEvacPath(sc, parent) {
   parent.add(ring);
   const musterEl = document.createElement('div');
   musterEl.className = 'muster-label';
-  musterEl.textContent = '⛑ 集合點';
+  musterEl.textContent = '集合點';
   const musterLabel = new CSS2DObject(musterEl);
   musterLabel.position.set(sc.muster[0], 1.2, sc.muster[2]);
   parent.add(musterLabel);
@@ -976,7 +1026,7 @@ function renderMatch(m) {
   if (active !== injectActive) {
     injectActive = active;
     injectBtn.classList.toggle('active', active);
-    injectBtn.textContent = active ? '⏹ 停止注入' : '⚡ 異常注入（盲測）';
+    injectBtn.textContent = active ? '停止注入' : '異常注入';
     matchPanel.classList.toggle('hidden', !active);
     if (!active) {
       matchStatus.textContent = '監看 DCS 特徵中…';
@@ -987,10 +1037,10 @@ function renderMatch(m) {
   if (!active) return;
   const top = m.ranked[0];
   if (m.confirmed && top) {
-    matchStatus.textContent = `✔ 已確認（信心 ${Math.round(top.conf * 100)}%）：${scenarioDefs[m.truth]?.name ?? top.name}`;
+    matchStatus.textContent = `已確認（信心 ${Math.round(top.conf * 100)}%）：${scenarioDefs[m.truth]?.name ?? top.name}`;
     matchStatus.classList.add('confirmed');
   } else {
-    matchStatus.textContent = '⟳ DCS 感測偏移發展中，比對進行中…';
+    matchStatus.textContent = 'DCS 偏移比對中…';
     matchStatus.classList.remove('confirmed');
   }
   matchList.innerHTML = m.ranked.map((r, i) => `
@@ -1032,7 +1082,7 @@ if (fencePoly.length) {
   fenceMats.push(topLineMat);
   const fenceEl = document.createElement('div');
   fenceEl.className = 'cam-label';
-  fenceEl.textContent = `⛔ ${plantData.fence.name}`;
+  fenceEl.textContent = plantData.fence.name;
   const fenceLabel = new CSS2DObject(fenceEl);
   const cx = fencePoly.reduce((s, p) => s + p[0], 0) / fencePoly.length;
   const cz = Math.max(...fencePoly.map((p) => p[1]));
@@ -1070,7 +1120,7 @@ for (const c of plantData.cameras ?? []) {
   cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
   const el = document.createElement('div');
   el.className = 'cam-label';
-  el.textContent = `📹 ${c.id}`;
+  el.textContent = c.id;
   el.title = c.name;
   const label = new CSS2DObject(el);
   label.position.set(pos.x, pos.y + 0.55, pos.z);
@@ -1260,7 +1310,7 @@ function updateSafety(dt, t) {
     }
     if (violation) {
       w.labelEl.className = 'worker-label violation';
-      w.labelEl.textContent = `⚠ ${w.def.name}｜${violation}`;
+      w.labelEl.textContent = `${w.def.name}｜${violation}`;
       events.push(`${w.def.id} ${violation}`);
     } else {
       w.labelEl.className = 'worker-label';
@@ -1457,11 +1507,11 @@ function buildConstruction() {
     ? conflicts.map((c, i) => {
         const hard = c.gap < 0;
         return `<div class="conflict-item ${hard ? 'hard' : ''}" data-ci="${i}" style="cursor:pointer">
-          <span class="c-kind">${hard ? '⛔ 硬碰撞' : '⚠ 淨距不足'}</span>｜${c.pipe} × ${c.tag}<br>
+          <span class="c-kind">${hard ? '硬碰撞' : '淨距不足'}</span>｜${c.pipe} × ${c.tag}<br>
           <span class="c-dist">${c.note ?? ''}｜${hard ? `干涉 ${(-c.gap).toFixed(2)} m` : `淨距 ${c.gap.toFixed(2)} m（需 ≥ ${con.clearance} m）`}</span>
         </div>`;
       }).join('')
-    : '<div class="conflict-ok">✔ 規劃路徑無衝突</div>';
+    : '<div class="conflict-ok">規劃路徑無衝突</div>';
   conflictList.querySelectorAll('[data-ci]').forEach((el) => {
     el.addEventListener('click', () => {
       const c = conflicts[+el.dataset.ci];
@@ -1734,6 +1784,7 @@ function connectWS() {
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type !== 'tick') return;
+    window.__lastTick = msg;
     setScenario(msg.scenario);
     renderMatch(msg.match);
 

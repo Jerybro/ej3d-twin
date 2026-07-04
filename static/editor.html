@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>3D 設計工作區｜J.S Process Intelligence</title>
+  <title>J.S_3D Studio 設計工作室｜J.S Process Intelligence</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
   <script type="importmap">
     {
@@ -15,9 +15,10 @@
   </script>
   <style>
     :root {
-      --bg: #0e141b; --panel: #131b24; --panel2: #17212c; --panel3: #1b2733;
-      --bdr: #223140; --accent: #46c2e0; --accent-deep: #1f6ea8;
-      --text: #dbe5ee; --dim: #8ba0b3; --warn: #ffaa3c; --danger: #ff4d4f;
+      /* 全平台統一：資料工作台 Tukey 藍白（真 AVEVA E3D 亦為淺色介面） */
+      --bg: #F6F7FA; --panel: #ffffff; --panel2: #F1F3F6; --panel3: #E9EDF2;
+      --bdr: #DBDDE0; --accent: #046AFB; --accent-deep: #E3EDFE;
+      --text: #061027; --dim: #5C6773; --warn: #D97706; --danger: #d03050;
       --ribbon-h: 118px; --status-h: 26px; --vtabs-h: 24px; --tree-w: 236px; --prop-w: 250px;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -49,10 +50,12 @@
       border-bottom: 1px solid var(--bdr); }
     .rtab-sep { width: 12px; }
     .rtab.hidden { display: none; }
+    #qat-brand { font-size: 11px; font-weight: 700; color: var(--accent);
+      letter-spacing: .04em; margin-right: 10px; white-space: nowrap; }
     .brand-home {
       display: inline-flex; align-items: center; justify-content: center;
       width: 22px; height: 22px; border-radius: 5px; margin-right: 8px;
-      background: rgba(70, 194, 224, 0.15); border: 1px solid var(--bdr);
+      background: rgba(4, 106, 251, 0.08); border: 1px solid var(--bdr);
       color: var(--accent); font-size: 10px; font-weight: 700; text-decoration: none;
     }
     .rtab { padding: 5px 14px; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 12.5px;
@@ -71,10 +74,14 @@
       background: none; border: 1px solid transparent; color: var(--text); font-size: 11.5px; font-family: inherit;
       display: flex; flex-direction: column; align-items: center; gap: 1px; line-height: 1.25;
     }
-    .rbtn .ric { font-size: 15px; line-height: 1; color: var(--accent); font-weight: 700; }
+    .rbtn .ric { line-height: 0; }
+    .ric svg { width: 17px; height: 17px; stroke: var(--accent); fill: none;
+      stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; display: block; }
+    .ric.sm svg { width: 13px; height: 13px; }
+    .qbtn .ric { line-height: 0; display: inline-block; }
     .rbtn:hover { background: var(--panel3); border-color: var(--bdr); }
-    .rbtn.active { background: var(--accent-deep); border-color: var(--accent); }
-    .rbtn.warn.active { background: rgba(255, 170, 60, 0.22); border-color: var(--warn); }
+    .rbtn.active { background: var(--accent-deep); border-color: var(--accent); color: var(--accent); }
+    .rbtn.warn.active { background: rgba(217, 119, 6, 0.12); border-color: var(--warn); }
     .rbtn:disabled { opacity: 0.35; pointer-events: none; }
     .rsel { background: var(--panel2); border: 1px solid var(--bdr); color: var(--text);
       border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: 12px; max-width: 128px; }
@@ -102,7 +109,7 @@
     .mt-eq { display: flex; align-items: center; gap: 6px; padding: 3px 6px 3px 20px;
       border-radius: 5px; cursor: pointer; font-size: 12px; }
     .mt-eq:hover { background: var(--panel3); }
-    .mt-eq.selected { background: var(--accent-deep); }
+    .mt-eq.selected { background: var(--accent-deep); outline: 1px solid rgba(4,106,251,.35); }
     .mt-eq.hidden-eq { opacity: 0.4; }
     .mt-ico { width: 14px; text-align: center; color: var(--accent); font-size: 10px; flex-shrink: 0; }
     .mt-tag { font-weight: 600; white-space: nowrap; }
@@ -139,7 +146,7 @@
     /* CE 麵包屑（E3D 頂部路徑列） */
     #ce-breadcrumb { position: absolute; top: 0; left: 0; right: 0; height: 24px; z-index: 22;
       display: flex; align-items: center; gap: 4px; padding: 0 10px;
-      background: rgba(19, 27, 36, 0.92); border-bottom: 1px solid var(--bdr);
+      background: rgba(255, 255, 255, 0.94); border-bottom: 1px solid var(--bdr);
       font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; }
     #ce-breadcrumb .bc-seg { cursor: pointer; padding: 1px 4px; border-radius: 4px; }
     #ce-breadcrumb .bc-seg:hover { color: var(--accent); background: var(--panel3); }
@@ -151,13 +158,13 @@
       z-index: 24; cursor: grab; user-select: none; }
     #power-compass svg { width: 100%; height: 100%; }
     #power-compass .pc-hot { cursor: pointer; }
-    #power-compass .pc-hot:hover circle { fill: rgba(70, 194, 224, 0.35); }
+    #power-compass .pc-hot:hover circle { fill: rgba(4, 106, 251, 0.22); }
     #power-compass .pc-hot text { fill: var(--text); font-size: 13px; font-weight: 700; }
 
     /* 模型樹 DB 型別字（WORL/SITE/ZONE/EQUI/PIPE） */
     .mt-dbtype { font-family: Consolas, monospace; font-size: 10px; color: var(--dim);
       letter-spacing: 0.5px; margin-right: 3px; flex-shrink: 0; }
-    .mt-eq.selected .mt-dbtype { color: rgba(255,255,255,.75); }
+    .mt-eq.selected .mt-dbtype { color: var(--accent); }
 
     /* 底部視圖分頁列 */
     #vtabs { grid-area: vtabs; display: flex; align-items: stretch; gap: 2px; padding: 0 8px;
@@ -172,15 +179,15 @@
     #mode-hint {
       position: absolute; bottom: 12px; left: 12px;
       z-index: 25; padding: 6px 14px; border-radius: 8px; font-size: 12.5px;
-      background: rgba(19, 27, 36, 0.94); border: 1px solid var(--bdr); color: var(--dim);
+      background: rgba(255, 255, 255, 0.95); border: 1px solid var(--bdr); color: var(--dim);
       max-width: 46%; text-align: left;
     }
     #mode-hint b { color: var(--accent); font-weight: 600; }
     #measure-tip { position: absolute; z-index: 26; padding: 3px 9px; border-radius: 10px;
-      background: rgba(255, 170, 60, 0.92); color: #1a1204; font-size: 12px; font-weight: 700;
+      background: rgba(217, 119, 6, 0.92); color: #fff; font-size: 12px; font-weight: 700;
       pointer-events: none; display: none; }
     .pane-reopen { position: absolute; top: 8px; z-index: 24; padding: 5px 9px; border-radius: 7px;
-      cursor: pointer; background: rgba(19, 27, 36, 0.92); border: 1px solid var(--bdr);
+      cursor: pointer; background: rgba(255, 255, 255, 0.94); border: 1px solid var(--bdr);
       color: var(--dim); font-family: inherit; font-size: 11.5px; display: none; }
     .pane-reopen:hover { color: var(--accent); border-color: var(--accent); }
     #tree-reopen { left: 8px; }
@@ -191,13 +198,64 @@
     /* 右鍵情境選單 */
     #ctx-menu { position: fixed; z-index: 80; display: none; min-width: 150px;
       background: var(--panel); border: 1px solid var(--bdr); border-radius: 8px; padding: 4px;
-      box-shadow: 0 8px 28px rgba(0,0,0,.5); }
+      box-shadow: 0 8px 24px rgba(6,16,39,.14); }
     #ctx-menu button { display: block; width: 100%; text-align: left; padding: 7px 12px;
       background: none; border: none; color: var(--text); font-family: inherit; font-size: 12.5px;
       border-radius: 5px; cursor: pointer; }
     #ctx-menu button:hover { background: var(--accent-deep); }
     #ctx-menu button.danger { color: var(--danger); }
     #ctx-menu .ctx-sep { border-top: 1px solid var(--bdr); margin: 4px 6px; }
+    .ctx-sub { position: relative; }
+    .ctx-sub > button::after { content: '›'; float: right; color: var(--dim); }
+    .ctx-sub-menu { position: absolute; left: 100%; top: -4px; display: none; min-width: 110px;
+      background: var(--panel); border: 1px solid var(--bdr); border-radius: 8px; padding: 4px;
+      box-shadow: 0 8px 24px rgba(6,16,39,.14); }
+    .ctx-sub:hover > .ctx-sub-menu { display: block; }
+
+    /* 量測持久標註 */
+    .m-note { padding: 2px 9px; border-radius: 10px; background: rgba(255, 170, 60, 0.92);
+      color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; pointer-events: none; }
+
+    /* 剖切盒面手柄（CSS2D） */
+    .clip-handle { width: 14px; height: 14px; border-radius: 3px; background: rgba(4,106,251,.8);
+      border: 1px solid #fff; cursor: grab; pointer-events: auto; }
+    .clip-handle:hover { background: var(--warn); }
+
+    /* PowerWheel 放射狀選單（E3D 3D 視圖右鍵） */
+    #power-wheel { position: fixed; z-index: 82; width: 230px; height: 230px; display: none; }
+    #power-wheel.show { display: block; }
+    .pw-tile {
+      position: absolute; width: 64px; height: 64px; margin: -32px; left: 50%; top: 50%;
+      border-radius: 50%; background: rgba(255, 255, 255, 0.97); border: 1px solid var(--bdr);
+      color: var(--text); font-size: 11px; font-family: inherit; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+      box-shadow: 0 6px 16px rgba(6,16,39,.16); transition: transform .1s, border-color .1s;
+      line-height: 1.15; text-align: center; padding: 4px;
+    }
+    .pw-tile:hover { border-color: var(--accent); background: var(--panel3); transform: scale(1.08); }
+    .pw-tile.danger { color: var(--danger); }
+    .pw-center {
+      position: absolute; width: 44px; height: 44px; margin: -22px; left: 50%; top: 50%;
+      border-radius: 50%; background: var(--panel2); border: 1px solid var(--bdr);
+      color: var(--dim); font-size: 12px; cursor: pointer; font-family: inherit;
+    }
+    .pw-center:hover { color: var(--danger); border-color: var(--danger); }
+
+    /* Clash 底部面板 */
+    #clash-dock { position: absolute; left: 0; right: 0; bottom: 0; height: 170px; z-index: 26;
+      background: rgba(255, 255, 255, 0.97); border-top: 1px solid var(--bdr); display: none;
+      flex-direction: column; }
+    #clash-dock.show { display: flex; }
+    #clash-dock .pane-head { flex-shrink: 0; }
+    #clash-list { flex: 1; overflow-y: auto; font-size: 12px; }
+    .clash-row { display: grid; grid-template-columns: 74px 1fr 1fr 1fr; gap: 8px; padding: 4px 12px;
+      cursor: pointer; border-bottom: 1px solid rgba(34,49,64,.5); align-items: center; }
+    .clash-row:hover { background: var(--panel3); }
+    .clash-row.selected { background: var(--accent-deep); }
+    .clash-badge { font-size: 10.5px; font-weight: 700; text-align: center; border-radius: 8px; padding: 1px 6px; }
+    .clash-badge.overlap { background: rgba(208,48,80,.10); color: #c0284e; }
+    .clash-badge.touch { background: rgba(217,119,6,.12); color: var(--warn); }
+    .clash-badge.pipe { background: rgba(4,106,251,.08); color: var(--accent); }
 
     /* ================= 狀態列 ================= */
     #statusbar { grid-area: status; display: flex; align-items: center; gap: 18px; padding: 0 12px;
@@ -223,6 +281,15 @@
     .scene-item .meta { color: var(--dim); font-size: 12px; }
     .tbtn { padding: 7px 14px; border-radius: 8px; cursor: pointer; font-family: inherit;
       background: var(--panel2); border: 1px solid var(--bdr); color: var(--text); font-size: 13px; }
+    .tbtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    #dwg-modal { position: fixed; inset: 0; z-index: 95; display: none;
+      background: rgba(5, 9, 13, 0.7); align-items: center; justify-content: center; }
+    #dwg-modal.show { display: flex; }
+    #dwg-modal .modal-box { width: 380px; }
+    #dwg-modal label { display: block; font-size: 11px; color: var(--dim); margin: 10px 0 4px; }
+    #dwg-modal input { width: 100%; padding: 7px 10px; border-radius: 7px; box-sizing: border-box;
+      background: var(--panel2); border: 1px solid var(--bdr); color: var(--text); font-family: inherit; font-size: 13px; }
+    #dwg-modal input:focus { outline: none; border-color: var(--accent); }
   </style>
 </head>
 <body>
@@ -231,13 +298,17 @@
     <div id="ribbon">
       <div id="qat">
         <a class="brand-home" href="/" title="回平台首頁">J.S</a>
-        <button class="qbtn" id="qat-save" title="儲存（Ctrl+S）">💾</button>
-        <button class="qbtn" id="qat-saveas" title="另存">⧉</button>
-        <button class="qbtn" id="qat-undo" disabled title="復原（Ctrl+Z）">↶</button>
-        <button class="qbtn" id="qat-redo" disabled title="還原（Ctrl+Y）">↷</button>
+        <span id="qat-brand">J.S_3D Studio</span>
+        <button class="qbtn" id="qat-save" title="儲存（Ctrl+S）"><span class="ric sm" data-ic="save"></span></button>
+        <button class="qbtn" id="qat-saveas" title="另存"><span class="ric sm" data-ic="saveas"></span></button>
+        <button class="qbtn" id="qat-undo" disabled title="復原（Ctrl+Z）"><span class="ric sm" data-ic="undo"></span></button>
+        <button class="qbtn" id="qat-redo" disabled title="還原（Ctrl+Y）"><span class="ric sm" data-ic="redo"></span></button>
         <select class="rsel" id="qat-discipline" title="專業領域（Discipline）——切換情境功能頁籤">
           <option value="pipe" selected>管線 PIPING</option>
           <option value="equip">設備 EQUIPMENT</option>
+          <option value="struct">結構 STRUCTURES</option>
+          <option value="elec">儀電 ELECTRICAL</option>
+          <option value="hvac">風管 HVAC</option>
           <option value="none">通用 GENERAL</option>
         </select>
         <span id="scene-name" style="margin-left:auto">未儲存場景</span>
@@ -246,6 +317,7 @@
         <button class="rtab" data-tab="project">專案</button>
         <button class="rtab active" data-tab="home">首頁</button>
         <button class="rtab" data-tab="view">檢視</button>
+        <button class="rtab" data-tab="tools">工具</button>
         <span class="rtab-sep"></span>
         <button class="rtab ctx-tab" data-tab="equip">設備 EQUIPMENT</button>
         <button class="rtab ctx-tab" data-tab="pipe">管線 PIPING</button>
@@ -255,16 +327,19 @@
         <div class="rpage" data-page="project">
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" id="btn-save" title="儲存（Ctrl+S）"><span class="ric">💾</span>儲存</button>
-              <button class="rbtn" id="btn-saveas" title="另存新場景"><span class="ric">⧉</span>另存</button>
-              <button class="rbtn" id="btn-open" title="開啟既有場景"><span class="ric">📂</span>開啟</button>
-              <button class="rbtn" id="btn-new" title="清空建立新場景"><span class="ric">✚</span>新增</button>
+              <button class="rbtn" id="btn-save" title="儲存（Ctrl+S）"><span class="ric" data-ic="save"></span>儲存</button>
+              <button class="rbtn" id="btn-saveas" title="另存新場景"><span class="ric" data-ic="saveas"></span>另存</button>
+              <button class="rbtn" id="btn-open" title="開啟既有場景"><span class="ric" data-ic="open"></span>開啟</button>
+              <button class="rbtn" id="btn-new" title="清空建立新場景"><span class="ric" data-ic="new"></span>新增</button>
             </div>
             <div class="rgroup-label">場景</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <a class="rbtn" id="btn-view-twin" href="#" target="_blank" style="display:none"><span class="ric">👁</span>孿生檢視</a>
+              <a class="rbtn" id="btn-view-twin" href="#" target="_blank" style="display:none"><span class="ric" data-ic="eye"></span>孿生檢視</a>
+              <button class="rbtn" id="btn-ga" title="輸出俯視配置圖（GA Plot Plan，SVG 可列印）"><span class="ric" data-ic="ga"></span>出圖 GA</button>
+              <button class="rbtn" id="btn-mto" title="輸出材料表（MTO，CSV）——管線長度統計＋元件＋設備清單"><span class="ric" data-ic="mto"></span>材料表</button>
+              <button class="rbtn" id="btn-batch" title="出圖批次：全場景 GA＋每條管線 ISO＋MTO 打包成 ZIP 下載"><span class="ric" data-ic="batch"></span>批次出圖</button>
             </div>
             <div class="rgroup-label">交付</div>
           </div>
@@ -273,37 +348,41 @@
         <div class="rpage active" data-page="home">
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" id="btn-undo" disabled title="復原（Ctrl+Z）"><span class="ric">↶</span>復原</button>
-              <button class="rbtn" id="btn-redo" disabled title="還原（Ctrl+Y）"><span class="ric">↷</span>還原</button>
-              <button class="rbtn" id="btn-del" title="刪除選取（Delete）"><span class="ric">🗑</span>刪除</button>
+              <button class="rbtn" id="btn-undo" disabled title="復原（Ctrl+Z）"><span class="ric" data-ic="undo"></span>復原</button>
+              <button class="rbtn" id="btn-redo" disabled title="還原（Ctrl+Y）"><span class="ric" data-ic="redo"></span>還原</button>
+              <button class="rbtn" id="btn-del" title="刪除選取（Delete）"><span class="ric" data-ic="del"></span>刪除</button>
             </div>
             <div class="rgroup-label">共用</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" id="btn-fit-sel" title="縮放至選取（F）"><span class="ric">◎</span>至選取</button>
-              <button class="rbtn" id="btn-fit" title="縮放至全場景（Home）"><span class="ric">⛶</span>全場</button>
+              <button class="rbtn" id="btn-fit-sel" title="縮放至選取（F）"><span class="ric" data-ic="fitsel"></span>至選取</button>
+              <button class="rbtn" id="btn-fit" title="縮放至全場景（Home）"><span class="ric" data-ic="fitall"></span>全場</button>
             </div>
             <div class="rgroup-label">巡覽</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn warn" id="btn-measure" title="點兩點量距離；Esc 結束"><span class="ric">📐</span>距離</button>
+              <button class="rbtn warn" id="btn-measure" title="點兩點量距離（可連續；空白鍵重複上次量測）；Esc 結束"><span class="ric" data-ic="measure"></span>距離</button>
+              <button class="rbtn warn" id="btn-measure-angle" title="點三點量角度（第一點＝頂點）；Esc 結束"><span class="ric" data-ic="angle"></span>角度</button>
             </div>
             <div class="rgroup-label">量測</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn xf-btn active" data-m="translate" title="移動（W）"><span class="ric">⇄</span>移動</button>
-              <button class="rbtn xf-btn" data-m="rotate" title="旋轉（E）"><span class="ric">⟳</span>旋轉</button>
-              <button class="rbtn xf-btn" data-m="scale" title="縮放（R）"><span class="ric">⤢</span>縮放</button>
+              <button class="rbtn xf-btn active" data-m="translate" title="移動（W）"><span class="ric" data-ic="move"></span>移動</button>
+              <button class="rbtn xf-btn" data-m="rotate" title="旋轉（E）"><span class="ric" data-ic="rotate"></span>旋轉</button>
+              <button class="rbtn xf-btn" data-m="scale" title="縮放（R）"><span class="ric" data-ic="scale"></span>縮放</button>
+              <button class="rbtn warn" id="btn-nozzle" title="在設備表面點擊放置管嘴（口徑取管線 tab 目前 Bore；繪管自動吸附嘴端）"><span class="ric" data-ic="nozzle"></span>管嘴</button>
+              <button class="rbtn" id="btn-array" title="陣列複製選取設備（方向／間距／數量）"><span class="ric" data-ic="array"></span>陣列</button>
+              <button class="rbtn" id="btn-mirror" title="鏡射複製選取設備（指定軸線位置）"><span class="ric" data-ic="mirror"></span>鏡射</button>
             </div>
             <div class="rgroup-label">修改</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" id="btn-win-tree" title="模型瀏覽器開關"><span class="ric">☰</span>模型樹</button>
-              <button class="rbtn" id="btn-win-prop" title="屬性面板開關"><span class="ric">🗔</span>屬性</button>
+              <button class="rbtn" id="btn-win-tree" title="模型瀏覽器開關"><span class="ric" data-ic="tree"></span>模型樹</button>
+              <button class="rbtn" id="btn-win-prop" title="屬性面板開關"><span class="ric" data-ic="panel"></span>屬性</button>
             </div>
             <div class="rgroup-label">視窗</div>
           </div>
@@ -314,29 +393,53 @@
         <div class="rpage" data-page="pipe">
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn warn" id="pipe-btn" title="依序點擊路徑點；Enter 完成"><span class="ric">╱</span>繪製管線</button>
-              <label style="display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--dim)">管徑
-                <input class="rsel" id="pipe-r" type="number" step="0.02" value="0.12" style="width:64px"> m
-              </label>
+              <button class="rbtn warn" id="pipe-btn" title="依序點擊路徑點；Enter 完成、Shift 正交鎖定"><span class="ric" data-ic="pipe"></span>繪製管線</button>
+              <select class="rsel" id="pipe-spec" title="管線規格（Specification）：材質/壓力等級" style="width:104px"></select>
+              <select class="rsel" id="pipe-bore" title="公稱管徑（Bore）" style="width:82px"></select>
+              <button class="rbtn warn" id="duct-btn" title="繪製風管：點路徑點 Enter 完成；轉角自動放方形彎頭，可沿風管放三通/風門"><span class="ric" data-ic="duct"></span>繪製風管</button>
+              <select class="rsel" id="duct-size" title="風管斷面 寬×高（mm）" style="width:100px">
+                <option value="0.8,0.5">800×500</option>
+                <option value="1.0,0.63">1000×630</option>
+                <option value="1.25,0.8">1250×800</option>
+                <option value="0.5,0.3">500×300</option>
+              </select>
             </div>
-            <div class="rgroup-label">建立</div>
+            <div class="rgroup-label">建立（Spec 驅動）</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn warn" id="pipe-node-btn" title="選中管線後編輯節點：拖曳移動、Delete 刪節點"><span class="ric">◉</span>節點編輯</button>
+              <button class="rbtn warn" id="pipe-node-btn" title="選中管線後編輯節點：拖曳移動、Delete 刪節點"><span class="ric" data-ic="node"></span>節點編輯</button>
+              <button class="rbtn" id="btn-supports" title="沿選中管線的高架水平段每 4m 自動生成管線支撐（入結構圖層）"><span class="ric" data-ic="support"></span>生成支撐</button>
             </div>
             <div class="rgroup-label">修改</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" id="btn-iso" title="輸出選中管線的等角 ISO 單管圖（含尺寸標註與元件表）"><span class="ric" data-ic="iso"></span>出 ISO</button>
+            </div>
+            <div class="rgroup-label">交付</div>
           </div>
         </div>
         <!-- 檢視 VIEW -->
         <div class="rpage" data-page="view">
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" id="btn-underlay" title="P&ID 圖紙底圖顯示切換"><span class="ric">🗺</span>底圖</button>
-              <button class="rbtn" id="btn-grid" title="地面網格顯示切換"><span class="ric">▦</span>網格</button>
-              <button class="rbtn" id="btn-labels" title="設備位號標籤顯示切換"><span class="ric">🏷</span>標籤</button>
+              <button class="rbtn" id="btn-underlay" title="P&ID 圖紙底圖顯示切換"><span class="ric" data-ic="map"></span>底圖</button>
+              <button class="rbtn" id="btn-grid" title="地面網格顯示切換"><span class="ric" data-ic="grid"></span>網格</button>
+              <button class="rbtn" id="btn-labels" title="設備位號標籤顯示切換"><span class="ric" data-ic="label"></span>標籤</button>
+              <button class="rbtn" id="btn-elev" title="標高基準面：顯示 EL 網格＋管理標高清單（屬性面板）"><span class="ric" data-ic="elev"></span>標高</button>
             </div>
             <div class="rgroup-label">內容</div>
+          </div>
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn active" id="btn-lay-eq" title="設備圖層顯示切換"><span class="ric" data-ic="laycube"></span>設備</button>
+              <button class="rbtn active" id="btn-lay-pipe" title="管線圖層顯示切換"><span class="ric" data-ic="laypipe"></span>管線</button>
+              <button class="rbtn active" id="btn-lay-struct" title="結構圖層顯示切換"><span class="ric" data-ic="laybeam"></span>結構</button>
+              <button class="rbtn active" id="btn-lay-elec" title="儀電圖層顯示切換"><span class="ric" data-ic="layelec"></span>儀電</button>
+              <button class="rbtn active" id="btn-lay-hvac" title="風管圖層顯示切換"><span class="ric" data-ic="layhvac"></span>風管</button>
+            </div>
+            <div class="rgroup-label">圖層</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
@@ -351,17 +454,31 @@
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" disabled title="視角書籤（規劃中）"><span class="ric">📌</span>存視角</button>
-              <button class="rbtn" disabled title="視角書籤（規劃中）"><span class="ric">🔖</span>回視角</button>
+              <button class="rbtn" id="btn-view-save" title="儲存目前視角（含隱藏清單與縮圖）"><span class="ric" data-ic="pin"></span>存視角</button>
+              <button class="rbtn" id="btn-view-restore" title="視角書籤清單（屬性面板開啟）"><span class="ric" data-ic="bookmark"></span>回視角</button>
+              <button class="rbtn warn" id="btn-walk" title="第一人稱漫遊：WASD 移動、Shift 加速、Esc 離開"><span class="ric" data-ic="walk"></span>漫遊</button>
             </div>
             <div class="rgroup-label">操縱</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
-              <button class="rbtn" id="btn-clip" title="水平剖切面開關"><span class="ric">▤</span>剖切</button>
-              <input type="range" id="clip-slider" min="0" max="100" value="100" style="width:90px;display:none">
+              <button class="rbtn" id="btn-clipbox" title="剖切盒：全場範圍生成，拖面手柄調整"><span class="ric" data-ic="clipbox"></span>剖切盒</button>
+              <button class="rbtn" id="btn-clipbox-sel" title="以目前選取生成剖切盒（±1m）"><span class="ric" data-ic="clipsel"></span>從選取</button>
+              <button class="rbtn" id="btn-clipsix" title="六平面剖切：屬性面板逐面調整"><span class="ric" data-ic="clipsix"></span>六平面</button>
+              <button class="rbtn" id="btn-clipcap" title="剖面蓋色（Capping）：剖切面上顯示切面填色"><span class="ric" data-ic="cap"></span>蓋面</button>
+              <button class="rbtn" id="btn-clipclear" title="清除剖切"><span class="ric" data-ic="clear"></span>清除</button>
             </div>
             <div class="rgroup-label">剖切</div>
+          </div>
+        </div>
+        <!-- 工具 TOOLS -->
+        <div class="rpage" data-page="tools">
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn warn" id="btn-clash-run" title="全場景碰撞檢查：設備硬碰撞/淨距不足/管線干涉"><span class="ric" data-ic="alert"></span>檢查全部</button>
+              <span id="clash-summary" style="font-size:11.5px;color:var(--dim);align-self:center"></span>
+            </div>
+            <div class="rgroup-label">碰撞</div>
           </div>
         </div>
       </div>
@@ -382,18 +499,23 @@
       <div id="mode-hint">點選素材開始，或點擊場景中的設備編輯</div>
       <div id="measure-tip"></div>
       <canvas id="axis-triad"></canvas>
+      <div id="clash-dock">
+        <div class="pane-head">碰撞檢查結果<span id="clash-count" style="color:var(--dim);font-weight:400"></span>
+          <button class="pane-x" id="clash-close" title="關閉">✕</button></div>
+        <div id="clash-list"></div>
+      </div>
       <div id="power-compass" title="方位羅盤：點 N/S/E/W 切視向、U 俯視、D 仰視；可拖曳移位">
         <svg viewBox="0 0 96 96">
-          <circle cx="48" cy="48" r="45" fill="rgba(19,27,36,.85)" stroke="#223140" stroke-width="1.5"/>
-          <circle cx="48" cy="48" r="30" fill="none" stroke="#223140" stroke-width="1"/>
+          <circle cx="48" cy="48" r="45" fill="rgba(255,255,255,.92)" stroke="#DBDDE0" stroke-width="1.5"/>
+          <circle cx="48" cy="48" r="30" fill="none" stroke="#DBDDE0" stroke-width="1"/>
           <g id="pc-rose">
-            <g class="pc-hot" data-vp="n"><circle cx="48" cy="12" r="10" fill="rgba(70,194,224,.12)"/><text x="48" y="17" text-anchor="middle">N</text></g>
-            <g class="pc-hot" data-vp="s"><circle cx="48" cy="84" r="10" fill="rgba(70,194,224,.12)"/><text x="48" y="89" text-anchor="middle">S</text></g>
-            <g class="pc-hot" data-vp="e"><circle cx="84" cy="48" r="10" fill="rgba(70,194,224,.12)"/><text x="84" y="53" text-anchor="middle">E</text></g>
-            <g class="pc-hot" data-vp="w"><circle cx="12" cy="48" r="10" fill="rgba(70,194,224,.12)"/><text x="12" y="53" text-anchor="middle">W</text></g>
+            <g class="pc-hot" data-vp="n"><circle cx="48" cy="12" r="10" fill="rgba(4,106,251,.07)"/><text x="48" y="17" text-anchor="middle">N</text></g>
+            <g class="pc-hot" data-vp="s"><circle cx="48" cy="84" r="10" fill="rgba(4,106,251,.07)"/><text x="48" y="89" text-anchor="middle">S</text></g>
+            <g class="pc-hot" data-vp="e"><circle cx="84" cy="48" r="10" fill="rgba(4,106,251,.07)"/><text x="84" y="53" text-anchor="middle">E</text></g>
+            <g class="pc-hot" data-vp="w"><circle cx="12" cy="48" r="10" fill="rgba(4,106,251,.07)"/><text x="12" y="53" text-anchor="middle">W</text></g>
           </g>
-          <g class="pc-hot" data-vp="top"><circle cx="48" cy="38" r="8" fill="rgba(70,194,224,.12)"/><text x="48" y="42" text-anchor="middle" font-size="10">U</text></g>
-          <g class="pc-hot" data-vp="bottom"><circle cx="48" cy="58" r="8" fill="rgba(70,194,224,.12)"/><text x="48" y="62" text-anchor="middle" font-size="10">D</text></g>
+          <g class="pc-hot" data-vp="top"><circle cx="48" cy="38" r="8" fill="rgba(4,106,251,.07)"/><text x="48" y="42" text-anchor="middle" font-size="10">U</text></g>
+          <g class="pc-hot" data-vp="bottom"><circle cx="48" cy="58" r="8" fill="rgba(4,106,251,.07)"/><text x="48" y="62" text-anchor="middle" font-size="10">D</text></g>
         </svg>
       </div>
     </main>
@@ -422,6 +544,21 @@
   </div>
 
   <div id="ctx-menu"></div>
+  <div id="power-wheel"></div>
+
+  <div id="dwg-modal">
+    <div class="modal-box">
+      <div class="panel-title" id="dwg-mtitle">出圖設定</div>
+      <label>圖名</label><input id="dwg-title">
+      <label>圖號</label><input id="dwg-no">
+      <div style="display:flex;gap:10px">
+        <div style="width:96px"><label>Rev</label><input id="dwg-rev"></div>
+        <div style="flex:1"><label>繪製</label><input id="dwg-by" placeholder="繪製者/單位"></div>
+      </div>
+      <button class="tbtn primary" id="dwg-ok" style="width:100%;margin-top:14px">出圖</button>
+      <button class="tbtn" id="dwg-cancel" style="width:100%;margin-top:6px">取消</button>
+    </div>
+  </div>
 
   <div id="open-modal">
     <div class="modal-box">

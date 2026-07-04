@@ -1,11 +1,12 @@
 :root {
+  /* 全平台統一：Tukey 藍白外殼（3D 場景維持深色畫布，白色浮動面板對比） */
   --bg: #0e141b;
-  --panel: rgba(16, 24, 33, 0.88);
-  --panel-border: rgba(70, 194, 224, 0.25);
-  --accent: #46c2e0;
-  --accent-deep: #1f6ea8;
-  --text: #dbe5ee;
-  --text-dim: #8ba0b3;
+  --panel: rgba(255, 255, 255, 0.94);
+  --panel-border: #DBDDE0;
+  --accent: #046AFB;
+  --accent-deep: #E3EDFE;
+  --text: #061027;
+  --text-dim: #5C6773;
   --alarm: #ff4d4f;
   --safe: #35e08c;
 }
@@ -29,7 +30,7 @@ html, body {
   position: absolute; top: 0; left: 0; right: 0; height: 52px;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 16px;
-  background: linear-gradient(180deg, rgba(10, 16, 22, 0.95), rgba(10, 16, 22, 0.75));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(255, 255, 255, 0.88));
   border-bottom: 1px solid var(--panel-border);
   z-index: 30;
 }
@@ -37,30 +38,44 @@ html, body {
 .brand-home {
   display: inline-flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; border-radius: 6px; align-self: center;
-  background: rgba(70, 194, 224, 0.15); border: 1px solid var(--panel-border);
+  background: rgba(4, 106, 251, 0.08); border: 1px solid var(--panel-border);
   color: var(--accent); font-size: 11px; font-weight: 700; text-decoration: none;
 }
-.brand-home:hover { background: rgba(70, 194, 224, 0.3); }
+.brand-home:hover { background: rgba(4, 106, 251, 0.16); }
 .brand-mark {
   font-weight: 700; font-size: 18px; letter-spacing: 0.5px;
-  background: linear-gradient(90deg, var(--accent), #7ee2f5);
+  background: linear-gradient(90deg, var(--accent), #3f8dff);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .brand-title { font-weight: 500; font-size: 15px; }
 .brand-sub { color: var(--text-dim); font-size: 12px; }
-.topbar-right { display: flex; gap: 8px; align-items: center; }
+.topbar-right { display: flex; gap: 0; align-items: center; }
+.chip-group { position: relative; display: flex; gap: 4px; align-items: center;
+  padding: 10px 10px 6px; border-left: 1px solid var(--panel-border); }
+.chip-group:first-child { border-left: none; }
+.chip-group::after { content: attr(data-glabel); position: absolute; left: 0; right: 0;
+  bottom: -3px; text-align: center; font-size: 9px; letter-spacing: 2px;
+  color: var(--text-dim); opacity: 0.85; }
+.chip-primary { background: var(--accent); color: #fff !important; border-color: var(--accent);
+  font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+.chip-primary:hover { background: #0559d6; }
+.cic { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round; }
+.chip .cic { vertical-align: -2px; }
+.chip-stat { padding: 4px 9px; font-size: 11.5px; }
 .chip {
-  padding: 5px 12px; border-radius: 20px;
-  background: rgba(31, 110, 168, 0.25);
+  padding: 5px 11px; border-radius: 16px; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 4px;
+  background: rgba(4, 106, 251, 0.07);
   border: 1px solid var(--panel-border);
   font-size: 12px; color: var(--text);
   text-decoration: none;
 }
 .chip b { color: var(--accent); font-size: 13px; }
 .chip .unit { color: var(--text-dim); }
-.chip.alarm { background: rgba(255, 77, 79, 0.25); border-color: var(--alarm); }
+.chip.alarm { background: rgba(208, 48, 80, 0.10); border-color: var(--alarm); }
 .chip.alarm b { color: var(--alarm); }
-.chip-btn:hover { background: rgba(70, 194, 224, 0.3); cursor: pointer; }
+.chip-btn:hover { background: rgba(4, 106, 251, 0.14); cursor: pointer; }
 #ws-status.ok { color: var(--safe); }
 #ws-status.down { color: var(--alarm); }
 
@@ -108,8 +123,8 @@ html, body {
   display: flex; gap: 8px; align-items: baseline;
   padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 13px;
 }
-.tree-eq:hover { background: rgba(70, 194, 224, 0.12); }
-.tree-eq.active { background: rgba(70, 194, 224, 0.22); outline: 1px solid var(--panel-border); }
+.tree-eq:hover { background: rgba(4, 106, 251, 0.07); }
+.tree-eq.active { background: var(--accent-deep); outline: 1px solid rgba(4,106,251,.35); }
 .tree-eq.alarming .eq-tag { color: var(--alarm); }
 .eq-tag { font-weight: 700; color: var(--accent); min-width: 52px; }
 .eq-name { color: var(--text); font-size: 12px; }
@@ -146,17 +161,17 @@ html, body {
 #scenario-bar {
   position: absolute; bottom: 0; left: 0; right: 0; height: 58px;
   display: flex; align-items: center; gap: 14px; padding: 0 16px;
-  background: linear-gradient(0deg, rgba(10, 16, 22, 0.95), rgba(10, 16, 22, 0.7));
+  background: linear-gradient(0deg, rgba(255, 255, 255, 0.97), rgba(255, 255, 255, 0.85));
   border-top: 1px solid var(--panel-border); z-index: 30;
 }
 .bar-label { font-size: 12px; font-weight: 700; color: var(--text-dim); white-space: nowrap; }
 #scenario-buttons { display: flex; gap: 8px; }
 .sc-btn {
   padding: 8px 16px; border-radius: 8px; cursor: pointer;
-  background: rgba(31, 110, 168, 0.2); border: 1px solid var(--panel-border);
+  background: rgba(4, 106, 251, 0.06); border: 1px solid var(--panel-border);
   color: var(--text); font-size: 13px; font-family: inherit;
 }
-.sc-btn:hover { background: rgba(70, 194, 224, 0.25); }
+.sc-btn:hover { background: rgba(4, 106, 251, 0.12); }
 .sc-btn.active { background: var(--accent-deep); border-color: var(--accent); font-weight: 700; }
 .sc-btn.danger.active { background: rgba(163, 29, 33, 0.85); border-color: var(--alarm); }
 .bar-hint { font-size: 11px; color: var(--text-dim); margin-left: auto; }
@@ -164,12 +179,12 @@ html, body {
 /* ------------------------------------------------------------ 3D labels */
 .eq-label {
   padding: 2px 8px; border-radius: 10px;
-  background: rgba(12, 20, 28, 0.82);
+  background: rgba(255, 255, 255, 0.92);
   border: 1px solid var(--panel-border);
   color: var(--accent); font-size: 11px; font-weight: 700;
   cursor: pointer; user-select: none; white-space: nowrap;
 }
-.eq-label:hover { background: rgba(70, 194, 224, 0.3); color: #fff; }
+.eq-label:hover { background: rgba(4, 106, 251, 0.12); color: var(--accent); }
 .eq-label.alarming { border-color: var(--alarm); color: var(--alarm); animation: blink 1s step-end infinite; }
 .muster-label {
   padding: 3px 10px; border-radius: 10px;
@@ -190,7 +205,7 @@ html, body {
 .match-row-head { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 2px; }
 .match-row-head .conf { font-weight: 700; color: var(--accent); }
 .match-row.best .conf { color: var(--safe); }
-.match-bar { height: 5px; border-radius: 3px; background: rgba(70, 194, 224, 0.15); overflow: hidden; }
+.match-bar { height: 5px; border-radius: 3px; background: rgba(4, 106, 251, 0.10); overflow: hidden; }
 .match-bar > i {
   display: block; height: 100%; border-radius: 3px;
   background: linear-gradient(90deg, var(--accent-deep), var(--accent));
@@ -221,10 +236,10 @@ html, body {
 .conflict-item .c-dist { color: var(--text-dim); }
 .conflict-ok { font-size: 12px; color: var(--safe); padding: 6px 2px; }
 #mode-construction.active { background: rgba(255, 170, 60, 0.3); border-color: #ffaa3c; font-weight: 700; }
-#sky-toggle.active { background: rgba(70, 194, 224, 0.3); border-color: var(--accent); }
-#detail-toggle.active { background: rgba(70, 194, 224, 0.3); border-color: var(--accent); }
-#heat-toggle.active { background: rgba(70, 194, 224, 0.3); border-color: var(--accent); }
-#calc-toggle.active { background: rgba(70, 194, 224, 0.3); border-color: var(--accent); }
+#sky-toggle.active { background: rgba(4, 106, 251, 0.14); border-color: var(--accent); }
+#detail-toggle.active { background: rgba(4, 106, 251, 0.14); border-color: var(--accent); }
+#heat-toggle.active { background: rgba(4, 106, 251, 0.14); border-color: var(--accent); }
+#calc-toggle.active { background: rgba(4, 106, 251, 0.14); border-color: var(--accent); }
 
 /* ------------------------------------------------------ 製程計算面板 */
 #calc-panel {
@@ -289,10 +304,10 @@ html, body {
 .pid-btn {
   margin-top: 12px; width: 100%; padding: 8px;
   border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 13px;
-  background: rgba(31, 110, 168, 0.25); border: 1px solid var(--panel-border);
+  background: rgba(4, 106, 251, 0.07); border: 1px solid var(--panel-border);
   color: var(--text);
 }
-.pid-btn:hover { background: rgba(70, 194, 224, 0.28); }
+.pid-btn:hover { background: rgba(4, 106, 251, 0.14); }
 
 /* ----------------------------------------------------- 工安 AI／人員標籤 */
 #vision-chip.alarm { animation: blink 1s step-end infinite; }

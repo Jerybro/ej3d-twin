@@ -452,17 +452,28 @@ def _extract_connectors(hits) -> list:
             for lb, (cx, cy, conf, tgt, cid) in conns.items()]
 
 
-def _classify(hits):
-    """OCR 命中 → 設備/儀錶清單（同 tag 取信心最高者）。"""
+def _classify(hits, page_w=None, page_h=None, margin=0.055):
+    """OCR 命中 → 設備/儀錶清單（同 tag 取信心最高者）。
+
+    設備位號在頁面外緣帶（margin）的命中不參賽——那是 off-page 參照
+    /PFD 名稱列（「To C219」、上下緣設備名列）；**必須在 hit 層過濾**：
+    若先取最高信心再過濾，名稱列副本會贏過圖中實例然後整組被殺
+    （C618/C620 曾因此消失）。
+    """
     equips, insts = {}, {}
     for cx, cy, text, conf, _h in hits:
         t = text.replace(" ", "").replace("-", "")  # 正規化去連字號（E-651≡E651）
         if BLACKLIST_RE.match(t) or "/" in t:
             continue
+        in_margin = page_w and not (
+            margin * page_w < cx < (1 - margin) * page_w
+            and margin * page_h < cy < (1 - margin) * page_h)
         if INST_RE.match(t):
             if t not in insts or conf > insts[t][2]:
                 insts[t] = (cx, cy, conf)
         elif EQUIP_RE.match(t) and conf >= EQUIP_MIN_CONF and t[0] in TYPE_MAP:
+            if in_margin:
+                continue
             if t not in equips or conf > equips[t][2]:
                 equips[t] = (cx, cy, conf)
     return equips, insts
@@ -693,7 +704,32 @@ def parse_pid(filename: str) -> dict:
     raw = _dedupe_hits(_ocr(img))
     hits, used = _merge_fragments(raw)
     hits += _rescue_orphans(img, raw, used)
-    equips, insts = _classify(hits)
+    equips, insts = _classify(hits, img.width, img.height)
+    # 混淆前綴對決（C↔E、F↔E OCR 字形相近）：同一張圖同號多前綴＝誤讀，
+    # 取信心高者（如 PFD 的 C665 vs E665）
+    CONFUSABLE = [{"C", "E"}, {"F", "E"}]
+    by_num: dict[str, list] = {}
+    for t in list(equips):
+        by_num.setdefault(re.sub(r"^[A-Z]+-?", "", t), []).append(t)
+    for num, tags in by_num.items():
+        if len(tags) < 2:
+            continue
+        for pair in CONFUSABLE:
+            dup = [t for t in tags if t[0] in pair]
+            if len(dup) >= 2:
+                dup.sort(key=lambda t: -equips[t][2])
+                for loser in dup[1:]:
+                    equips.pop(loser, None)
+    # 跨單元參照過濾：以本圖設備數字「百位系列」眾數為主系列（TA32=6xx），
+    # 異系列位號（C712/C812/V721/C219…）＝「To xxx」流向標的，非本單元設備。
+    # 樣本 <3 不啟用（小圖不可靠）。
+    if len(equips) >= 3:
+        from collections import Counter
+        hundreds = [re.sub(r"^[A-Z]+-?", "", t)[0] for t in equips]
+        series, n_series = Counter(hundreds).most_common(1)[0]
+        if n_series >= 3:
+            equips = {t: v for t, v in equips.items()
+                      if re.sub(r"^[A-Z]+-?", "", t)[0] == series}
     connectors = _extract_connectors(hits)
     dims_mm = _mine_dims(raw, equips)
     dims_mm.update(_rescue_dims(img, raw, equips, set(dims_mm)))

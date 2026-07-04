@@ -7,9 +7,10 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #0e141b; --panel: #131b24; --panel2: #17212c;
-      --bdr: #223140; --accent: #46c2e0; --accent-deep: #1f6ea8;
-      --text: #dbe5ee; --dim: #8ba0b3;
+      /* 全平台統一：Tukey 藍白 */
+      --bg: #F6F7FA; --panel: #ffffff; --panel2: #F1F3F6;
+      --bdr: #DBDDE0; --accent: #046AFB; --accent-deep: #E3EDFE;
+      --text: #061027; --dim: #5C6773;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; background: var(--bg); color: var(--text);
@@ -23,7 +24,7 @@
     .brand-home {
       display: inline-flex; align-items: center; justify-content: center;
       width: 26px; height: 26px; border-radius: 6px;
-      background: rgba(70, 194, 224, 0.15); border: 1px solid var(--bdr);
+      background: rgba(4, 106, 251, 0.08); border: 1px solid var(--bdr);
       color: var(--accent); font-size: 11px; font-weight: 700; text-decoration: none;
     }
     h1 { font-size: 16px; font-weight: 700; }
@@ -50,18 +51,18 @@
       text-decoration: none; font-family: inherit; display: inline-block;
     }
     .mini-btn:hover { border-color: var(--accent); }
-    .mini-btn.primary { background: var(--accent-deep); border-color: var(--accent); font-weight: 600; }
+    .mini-btn.primary { background: var(--accent-deep); border-color: var(--accent); color: var(--accent); font-weight: 600; }
     .mini-btn:disabled { opacity: 0.5; pointer-events: none; }
     .roadmap {
       border: 1px solid var(--bdr); border-radius: 10px; padding: 14px;
       background: var(--panel2);
     }
     .roadmap .tag { display: inline-block; font-size: 10px; font-weight: 700;
-      letter-spacing: 1px; color: var(--bg); background: var(--dim);
+      letter-spacing: 1px; color: #fff; background: var(--dim);
       padding: 2px 8px; border-radius: 8px; margin-bottom: 8px; }
     .roadmap p { color: var(--dim); font-size: 12.5px; line-height: 1.7; }
     main { flex: 1; display: flex; align-items: center; justify-content: center; }
-    main iframe { width: 100%; height: 100%; border: 0; background: #222; }
+    main iframe { width: 100%; height: 100%; border: 0; background: #E9EDF2; }
     #placeholder { color: var(--dim); font-size: 14px; }
   </style>
 </head>
@@ -91,7 +92,7 @@
       <div class="section-title">3D 場景建置</div>
       <div class="roadmap" style="margin-bottom:10px">
         <p>依 P&amp;ID 規劃設備配置後，使用
-          <a href="/twin/editor" style="color:var(--accent)">3D 模塊編輯器</a>
+          <a href="/studio" style="color:var(--accent)">3D 設計工作室</a>
           放置對應的工業素材，即可產生可接數據的孿生場景。</p>
       </div>
       <div class="roadmap">
@@ -123,7 +124,7 @@
              </div>
              <div class="file-actions">
                <button class="mini-btn parse-btn" data-name="${f.name}">${f.scene_id ? '重新解析' : '解析建模'}</button>
-               ${f.scene_id ? `<a class="mini-btn" href="/twin/editor?scene=${f.scene_id}">編輯器開啟</a>
+               ${f.scene_id ? `<a class="mini-btn" href="/studio?scene=${f.scene_id}">設計工作室開啟</a>
                <a class="mini-btn" href="/twin?scene=${f.scene_id}" target="_blank">孿生檢視</a>` : ''}
              </div>
            </div>
@@ -169,7 +170,7 @@
           OCR 命中 ${res.ocr_hits}｜抓到 <b style="color:var(--accent)">${res.equipment} 台設備</b>、
           ${res.instruments} 個儀錶位號（已自動掛最近設備）</p>
         <div style="display:flex;gap:10px;margin-bottom:16px">
-          <a class="mini-btn primary" href="/twin/editor?scene=${res.scene_id}">在編輯器開啟草稿（修改/刪誤抓）</a>
+          <a class="mini-btn primary" href="/studio?scene=${res.scene_id}">在設計工作室開啟草稿（修改/刪誤抓）</a>
           <a class="mini-btn" href="/twin?scene=${res.scene_id}" target="_blank">孿生檢視</a>
         </div>
         <table style="border-collapse:collapse;font-size:12.5px;width:100%">
@@ -207,7 +208,7 @@
           if (st.merged_scene_id) {
             mergedEl.style.display = 'flex';
             mergedEl.innerHTML =
-              `<a class="mini-btn primary" href="/twin/editor?scene=${st.merged_scene_id}">整廠場景：編輯器開啟</a>
+              `<a class="mini-btn primary" href="/studio?scene=${st.merged_scene_id}">整廠場景：設計工作室開啟</a>
                <a class="mini-btn" href="/twin?scene=${st.merged_scene_id}" target="_blank">孿生檢視</a>`;
           }
         } else {

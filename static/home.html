@@ -63,6 +63,8 @@
       font-size: 12.5px; font-weight: 600; display: inline-flex;
       align-items: center; justify-content: center;
     }
+    .step .no.tw { background: var(--green); }   /* 5–7 視覺孿生段 */
+    a.step:has(.no.tw):hover { border-color: var(--green); box-shadow: 0 4px 16px rgba(5, 150, 105, 0.10); }
     .step h3 { font-size: 14.5px; font-weight: 600; margin: 10px 0 6px; }
     .step p { font-size: 12.5px; color: var(--text2); line-height: 1.75; flex: 1; }
     .step .go { font-size: 12.5px; color: var(--blue); margin-top: 10px; }
@@ -79,7 +81,7 @@
       數據與物理雙驅動的流程工業平台：先成就數據孿生，再映射視覺孿生。物理約束治理 AI 外插，每一個模型附驗證度。
     </p>
 
-    <div class="group-title">第一次使用？照這四步走</div>
+    <div class="group-title">第一次使用？從數據到數位孿生，照這七步走</div>
     <div class="steps">
       <a class="step" href="/data">
         <span class="no">1</span>
@@ -104,6 +106,24 @@
         <h3>應用與監控</h3>
         <p>模型評估、操作差異試算、批次試算、配方優化；設備健康度儀表板持續監控、7 天預測。</p>
         <span class="go">進入模型應用</span>
+      </a>
+      <a class="step" href="/twin/pid">
+        <span class="no tw">5</span>
+        <h3>P&amp;ID 自動建廠</h3>
+        <p>上傳 P&amp;ID 圖面，OCR 自動解析設備位號生成 3D 廠區草稿；整廠多張圖批次解析、跨圖縫合。</p>
+        <span class="go">進入圖面管理</span>
+      </a>
+      <a class="step" href="/twin/editor">
+        <span class="no tw">6</span>
+        <h3>3D 場景精修</h3>
+        <p>在 3D 工作區調整草稿：搬移改型設備、繪製管線、工業素材庫補齊場景——改草稿永遠比從零建快。</p>
+        <span class="go">開啟編輯器</span>
+      </a>
+      <a class="step" href="/twin">
+        <span class="no tw">7</span>
+        <h3>孿生檢視——數據上 3D</h3>
+        <p>即時數據熱力圖疊上廠區、異常注入 AI 比對、施工衝突與工安模擬——你的數據在廠區裡活起來。</p>
+        <span class="go">進入孿生檢視</span>
       </a>
     </div>
 

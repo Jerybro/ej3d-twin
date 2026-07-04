@@ -53,6 +53,7 @@ const ICONS = {
   cap: '<path d="M12 2l8 4.5v11L12 22l-8-4.5v-11L12 2z"/><path d="M4 6.5l8 4.5 8-4.5" fill="rgba(4,106,251,.2)" stroke="none"/><path d="M4 6.5l8 4.5 8-4.5"/>',
   mto: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M3 14h18M9 4v16"/>',
   batch: '<rect x="3" y="3" width="9" height="9" rx="1"/><path d="M8 14v6h12V8h-6"/><path d="M6 6h3M6 8.5h3"/>',
+  duct: '<rect x="3" y="8" width="18" height="8" rx="1"/><path d="M7 8V5M17 8V5"/>',
   laycube: '<path d="M12 3l7 4v10l-7 4-7-4V7l7-4z"/><path d="M12 11l7-4M12 11L5 7M12 11v10"/>',
   laypipe: '<path d="M4 6h7a7 7 0 0 1 7 7v5"/><path d="M4 11h7a2 2 0 0 1 2 2v5"/>',
   laybeam: '<path d="M6 4h12M6 20h12M12 4v16"/>',
@@ -247,7 +248,7 @@ function applyLayers() {
   for (const entry of eqObjects.values()) {
     entry.group.visible = !hiddenTags.has(entry.def.tag) && eqLayerOn(entry.def);
   }
-  for (const p of pipeObjects) if (p) p.group.visible = LAYERS.pipe;
+  pipeObjects.forEach((p, i) => { if (p) p.group.visible = sceneData.pipes[i]?.profile === 'duct' ? LAYERS.hvac : LAYERS.pipe; });
 }
 
 function emptyScene(name) {
@@ -312,6 +313,7 @@ function buildPipe(pipe, index) {
   const group = new THREE.Group();
   group.userData.pipeIndex = index;
   const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
+  if (pipe.profile === 'duct') { buildDuctBody(pipe, index, group, pts); scene.add(group); pipeObjects[index] = { group }; return; }
   // P&ID 自動抽取場景管線量大：降面數/關陰影，維持可選取
   const lite = sceneData.pipes.length > 60;
   // 異徑管後段變徑：依元件弧長位置建立管徑分段表
@@ -370,6 +372,59 @@ function buildPipe(pipe, index) {
   pipeObjects[index] = { group };
 }
 
+// ------------------------------------------------------------ 風管路由（profile:'duct' 復用管線子系統）
+const ductMat = std(0xaeb6bf, { metalness: 0.5, roughness: 0.35 });
+function buildDuctBody(pipe, index, group, pts) {
+  const w = pipe.duct?.w ?? 0.8, h = pipe.duct?.h ?? 0.5;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const dir = b.clone().sub(a), len = dir.length();
+    if (len < 1e-4) continue;
+    const seg = new THREE.Mesh(new THREE.BoxGeometry(w, h, len), ductMat);
+    seg.position.copy(a).addScaledVector(dir, 0.5);
+    seg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().normalize());
+    seg.castShadow = true;
+    seg.userData.pipeIndex = index;
+    group.add(seg);
+    if (i < pts.length - 2) {                          // 內角：方形彎頭盒（elbow 自動）
+      const el = new THREE.Mesh(new THREE.BoxGeometry(w * 1.06, h * 1.06, Math.max(w, h) * 1.06), ductMat);
+      el.position.copy(pts[i + 1]);
+      el.userData.pipeIndex = index;
+      group.add(el);
+    }
+  }
+  for (const c of pipe.components ?? []) {              // 三通/風門 沿風管弧長定位
+    const pose = arcToPose(pipe, c.at);
+    if (!pose) continue;
+    const comp = buildDuctFitting(c.kind, w, h);
+    comp.position.copy(pose.pos);
+    comp.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), pose.dir);
+    comp.traverse((o) => { o.userData.pipeIndex = index; });
+    group.add(comp);
+  }
+}
+function buildDuctFitting(kind, w, h) {
+  const g = new THREE.Group();
+  if (kind === 'tee') {
+    const collar = new THREE.Mesh(new THREE.BoxGeometry(w * 0.36, h * 1.14, w * 1.14), ductMat);
+    const neck = new THREE.Mesh(new THREE.BoxGeometry(w * 0.5, h * 0.4, w * 0.5), ductMat);
+    neck.position.y = h * 0.34;
+    const branch = new THREE.Mesh(new THREE.BoxGeometry(w * 0.7, h * 0.7, w * 0.7), ductMat);
+    branch.position.y = h * 0.68;
+    g.add(collar, neck, branch);
+  } else if (kind === 'damper') {
+    const collar = new THREE.Mesh(new THREE.BoxGeometry(w * 0.22, h * 1.12, w * 1.12), ductMat);
+    const flap = new THREE.Mesh(new THREE.BoxGeometry(0.02, h * 0.88, w * 0.88), std(0x3a4a5a));
+    flap.rotation.x = 0.5;
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.26, 6), std(0x9aa4ad));
+    handle.position.y = h * 0.62;
+    g.add(collar, flap, handle);
+  } else {
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(w * 0.3, h * 1.12, w * 1.12), ductMat));
+  }
+  return g;
+}
+
 function rebuildAllPipes() {
   for (const p of pipeObjects) if (p) scene.remove(p.group);
   pipeObjects.length = 0;
@@ -413,6 +468,8 @@ function updateTopbar() {
 // ------------------------------------------------------------ 模式與選取
 let mode = 'idle'; // idle | placing | pipe | measure | pipenode | nozzle
 let placingAsset = null;  // ASSET_CATALOG 項
+let ductDraw = false;     // 繪製模式：true=下一條管線為風管
+let ductSize = [0.8, 0.5];
 let ghost = null;
 let selected = null;      // { kind: 'eq', def } | { kind: 'pipe', index }
 let pipeDraft = [];       // Vector3[]
@@ -429,6 +486,8 @@ function setMode(m) {
   mode = m;
   document.querySelectorAll('.asset-btn').forEach((b) => b.classList.remove('active'));
   document.getElementById('pipe-btn').classList.remove('active');
+  document.getElementById('duct-btn').classList.remove('active');
+  ductDraw = false;
   document.getElementById('btn-measure').classList.remove('active');
   document.getElementById('btn-measure-angle').classList.remove('active');
   document.getElementById('pipe-node-btn').classList.remove('active');
@@ -452,7 +511,7 @@ function selectNone() {
   selected = null;
   transform.detach();
   clearNodeHandles();
-  for (const p of pipeObjects) if (p) p.group.traverse((o) => { if (o.isMesh) o.material = pipeMat; });
+  pipeObjects.forEach((p, i) => { if (!p) return; const m = sceneData.pipes[i]?.profile === 'duct' ? ductMat : pipeMat; p.group.traverse((o) => { if (o.isMesh) o.material = m; }); });
   renderPropEmpty();
   syncTreeSelection();
   document.getElementById('st-sel').textContent = '選取：無';
@@ -568,7 +627,7 @@ function renderPropPanel(def) {
       pgRow(nz.id, `<select data-nzdn="${i}" class="rsel" style="width:86px">${PIPE_BORES.map((b) =>
         `<option ${b.dn === nz.dn ? 'selected' : ''}>${b.dn}</option>`).join('')}</select>
         <button data-nzdel="${i}" style="margin-left:6px;border:none;background:none;color:#d03050;cursor:pointer;font-size:11.5px;font-family:inherit">刪除</button>`)).join('')}</div>` : ''}
-    ${def.type === 'piperack' ? `<div class="pg-section">儀電</div><button class="pbtn" id="prop-tray">沿管架佈橋架</button>` : ''}
+    ${def.type === 'piperack' ? `<div class="pg-section">儀電</div><button class="pbtn" id="prop-tray">沿此管架佈橋架</button><button class="pbtn" id="prop-tray-chain">串接共線管架佈線</button>` : ''}
     ${def.type === 'assembly' ? primsSection(def) : ''}
     ${infoRows ? `<div class="pg-section">Information</div><div class="pg-grid">${infoRows}</div>` : ''}
     <button class="pbtn" id="prop-zoom">縮放至（F）</button>
@@ -638,6 +697,12 @@ function renderPropPanel(def) {
     updateTopbar();
     setHint(`已沿 <b>${def.tag}</b> 頂層佈橋架 <b>${tray.tag}</b>（EL.${((def.dims.h ?? 4) + 0.15).toFixed(2)}，儀電圖層）`);
   });
+  document.getElementById('prop-tray-chain')?.addEventListener('click', () => {
+    pushUndo();
+    const res = chainTrayFromRack(def);
+    rebuildTree(); updateTopbar();
+    setHint(res.trays > 1 ? `已串接 ${res.racks} 座共線管架：${res.trays} 段橋架＋${res.bends} 轉角彎頭（儀電圖層）` : `僅此管架佈 1 段橋架（找不到共線相鄰管架）`);
+  });
   document.getElementById('prop-zoom').addEventListener('click', () => zoomToSelection());
   document.getElementById('prop-delete').addEventListener('click', deleteSelected);
 }
@@ -705,14 +770,17 @@ function wirePrims(def) {
 function renderPipeProps(index) {
   const pipe = sceneData.pipes[index];
   document.getElementById('prop-title').textContent = `管線 #${index + 1}`;
-  const compName = Object.fromEntries(PIPE_COMPONENTS.map((c) => [c.kind, c.name]));
+  const isDuct = pipe.profile === 'duct';
+  const DUCT_FITTINGS = [{ kind: 'tee', name: '風管三通' }, { kind: 'damper', name: '風門' }];
+  const compKinds = isDuct ? DUCT_FITTINGS : PIPE_COMPONENTS;
+  const compName = Object.fromEntries([...PIPE_COMPONENTS, ...DUCT_FITTINGS].map((c) => [c.kind, c.name]));
   const compRows = (pipe.components ?? []).map((c, i) =>
     `<label>${compName[c.kind] ?? c.kind}</label>
      <div class="pg-v" style="display:flex;gap:4px;align-items:center">
        <input data-cat="${i}" type="number" step="0.5" value="${c.at}" title="距管頭弧長（m）" style="flex:1">
        <button class="pane-x" data-cdel="${i}" title="刪除">✕</button>
      </div>`).join('');
-  const compOpts = PIPE_COMPONENTS.map((c) => `<option value="${c.kind}">${c.name}</option>`).join('');
+  const compOpts = compKinds.map((c) => `<option value="${c.kind}">${c.name}</option>`).join('');
   propBody.innerHTML = `
     <div class="pg-section">General</div>
     <div class="pg-grid">
@@ -1166,6 +1234,15 @@ document.getElementById('pipe-btn').addEventListener('click', () => {
   selectNone();
   setHint('管線繪製：依序點擊路徑點（靠近設備自動吸附），<b>Enter</b> 完成、<b>Esc</b> 取消');
 });
+document.getElementById('duct-btn').addEventListener('click', () => {
+  if (mode === 'pipe' && ductDraw) { setMode('idle'); return; }
+  setMode('pipe');
+  ductDraw = true;
+  ductSize = document.getElementById('duct-size').value.split(',').map(Number);
+  document.getElementById('duct-btn').classList.add('active');
+  selectNone();
+  setHint('風管繪製：依序點擊路徑點，<b>Enter</b> 完成；轉角自動放方形彎頭，之後可沿風管放三通/風門。Esc 取消');
+});
 
 // ------------------------------------------------------------ 滑鼠互動
 const raycaster = new THREE.Raycaster();
@@ -1244,7 +1321,9 @@ renderer.domElement.addEventListener('pointermove', (e) => {
     const near = nearestArcOnPipe(pipe, pt);
     if (near.pos) {
       if (!compGhost) {
-        compGhost = buildPipeComponent(pendingComp.kind, pipe.r);
+        compGhost = pipe.profile === 'duct'
+          ? buildDuctFitting(pendingComp.kind, pipe.duct?.w ?? 0.8, pipe.duct?.h ?? 0.5)
+          : buildPipeComponent(pendingComp.kind, pipe.r);
         compGhost.traverse((o) => {
           if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.55; }
         });
@@ -2510,6 +2589,61 @@ document.getElementById('btn-nozzle').addEventListener('click', () => {
 });
 
 // ------------------------------------------------------------ 管線支撐自動生成（高架水平段每 4m）
+function rackAxisInfo(r) {
+  const th = r.rot_y ?? 0;
+  return { dir: new THREE.Vector3(Math.cos(th), 0, -Math.sin(th)), c: new THREE.Vector3(r.pos[0], 0, r.pos[2]), len: r.dims.w ?? 8, top: +((r.dims.h ?? 4) + 0.15).toFixed(2) };
+}
+function rackEnds(r) {
+  const a = rackAxisInfo(r), half = a.dir.clone().multiplyScalar(a.len / 2);
+  return [a.c.clone().sub(half), a.c.clone().add(half)];
+}
+function chainTrayFromRack(start) {
+  const racks = sceneData.plant.units.flatMap((u) => u.equipment).filter((e) => e.type === 'piperack');
+  const GAP = 3.0;
+  const comp = [start], seen = new Set([start.tag]), queue = [start];
+  while (queue.length) {
+    const cur = queue.shift(), ce = rackEnds(cur);
+    for (const r of racks) {
+      if (seen.has(r.tag)) continue;
+      const re = rackEnds(r);
+      if (ce.some((p) => re.some((q) => p.distanceTo(q) < GAP))) { seen.add(r.tag); comp.push(r); queue.push(r); }
+    }
+  }
+  let unit = sceneData.plant.units.find((u) => u.id === 'U-TRAY');
+  if (!unit) { unit = { id: 'U-TRAY', name: '橋架佈線', equipment: [] }; sceneData.plant.units.push(unit); }
+  const added = [];
+  for (const r of comp) {
+    const a = rackAxisInfo(r);
+    added.push({ tag: nextTag('CT'), type: 'cabletray', name: '電纜橋架（串接）',
+      dims: { w: 0.45, len: a.len, elev: a.top }, pos: [...r.pos], rot_y: r.rot_y ?? 0,
+      design: {}, instruments: [], pid_ref: '' });
+  }
+  let bends = 0;
+  for (let i = 0; i < comp.length; i++) for (let j = i + 1; j < comp.length; j++) {
+    const A = comp[i], B = comp[j];
+    if (Math.abs(rackAxisInfo(A).dir.dot(rackAxisInfo(B).dir)) > 0.9) continue;   // 同向非轉角
+    const ea = rackEnds(A), eb = rackEnds(B);
+    let corner = null, bestD = GAP;
+    for (const p of ea) for (const q of eb) { const d = p.distanceTo(q); if (d < bestD) { bestD = d; corner = p.clone().add(q).multiplyScalar(0.5); } }
+    if (!corner) continue;
+    const dirA = new THREE.Vector3(A.pos[0], 0, A.pos[2]).sub(corner).normalize();
+    const dirB = new THREE.Vector3(B.pos[0], 0, B.pos[2]).sub(corner).normalize();
+    let bestRot = 0, bestSc = -9;
+    for (const th of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+      const lx = new THREE.Vector3(Math.cos(th), 0, -Math.sin(th)), lz = new THREE.Vector3(Math.sin(th), 0, Math.cos(th));
+      const sc = lx.dot(dirA) + lz.dot(dirB);
+      if (sc > bestSc) { bestSc = sc; bestRot = th; }
+    }
+    const top = Math.max(rackAxisInfo(A).top, rackAxisInfo(B).top);
+    added.push({ tag: nextTag('CT'), type: 'traybend', name: '橋架水平彎',
+      dims: { w: 0.45, elev: top }, pos: [+corner.x.toFixed(2), 0, +corner.z.toFixed(2)], rot_y: +bestRot.toFixed(3),
+      design: {}, instruments: [], pid_ref: '' });
+    bends += 1;
+  }
+  for (const e of added) { unit.equipment.push(e); buildEquipment(e); }
+  return { racks: comp.length, trays: comp.length, bends };
+}
+
 function removeSupportsOf(uid) {
   let n = 0;
   for (const u of sceneData.plant.units) {
@@ -2934,10 +3068,16 @@ addEventListener('keydown', (e) => {
     redo();
   } else if (e.key === 'Enter' && mode === 'pipe' && pipeDraft.length >= 2) {
     pushUndo();
-    const spec = document.getElementById('pipe-spec').value;
-    const dn = document.getElementById('pipe-bore').value;
-    const r = PIPE_BORES.find((b) => b.dn === dn)?.r ?? 0.12;
-    sceneData.pipes.push({ r, spec, dn, pts: pipeDraft.map((p) => [Math.round(p.x * 100) / 100, p.y, Math.round(p.z * 100) / 100]) });
+    const ptsOut = pipeDraft.map((p) => [Math.round(p.x * 100) / 100, p.y, Math.round(p.z * 100) / 100]);
+    if (ductDraw) {
+      const [w, h] = ductSize;
+      sceneData.pipes.push({ r: Math.max(w, h) / 2, profile: 'duct', duct: { w, h }, spec: 'HVAC', dn: `${(w * 1000) | 0}×${(h * 1000) | 0}`, pts: ptsOut });
+    } else {
+      const spec = document.getElementById('pipe-spec').value;
+      const dn = document.getElementById('pipe-bore').value;
+      const r = PIPE_BORES.find((b) => b.dn === dn)?.r ?? 0.12;
+      sceneData.pipes.push({ r, spec, dn, pts: ptsOut });
+    }
     buildPipe(sceneData.pipes.at(-1), sceneData.pipes.length - 1);
     clearPipeDraft();
     rebuildTree();

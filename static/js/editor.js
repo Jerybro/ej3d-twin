@@ -296,7 +296,10 @@ function rebuildEquipment(def) {
   const entry = eqObjects.get(def.tag);
   if (!entry) return;
   // 移除 body＋管嘴群組全重繪（只換 body 會留下嘴殘影）
-  for (const c of entry.group.children.filter((x) => !x.isCSS2DObject)) entry.group.remove(c);
+  for (const c of entry.group.children.filter((x) => !x.isCSS2DObject)) {
+    c.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); });   // 清巢狀管嘴標籤 DOM，防孤兒鬼標籤
+    entry.group.remove(c);
+  }
   const body = builders[def.type](def.dims, def);
   markShadow(body);
   body.traverse((o) => { if (o.isMesh) o.userData.eqTag = def.tag; });
@@ -2239,6 +2242,9 @@ document.getElementById('btn-ga').addEventListener('click', exportGA);
 // ------------------------------------------------------------ ISO 等角單管圖（對標 E3D Isometric 交付，輕量版）
 function isoSvg(idx, meta = {}) {
   const pipe = sceneData.pipes[idx];
+  if ((pipe?.pts?.length ?? 0) < 2) {   // 退化管線（<2 節點）→ 佔位圖，避免 Infinity viewBox
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" style="background:#fff"><rect x="1" y="1" width="318" height="78" fill="none" stroke="#12283a"/><text x="14" y="46" font-size="13" fill="#12283a">管線 #${idx + 1}：節點不足，無法產生 ISO</text></svg>`;
+  }
   const pts = pipe.pts;
   // 等角投影：X=東、Z=北、Y=上（30° 軸測）
   const c30 = Math.cos(Math.PI / 6), s30 = Math.sin(Math.PI / 6);
@@ -2506,7 +2512,7 @@ function makeZip(files) {
 function exportBatch() {
   const base = sceneId ?? 'scene';
   const files = [{ name: `${base}-GA.svg`, text: gaSvg({ by: dwgLastBy }) }];
-  sceneData.pipes.forEach((_, i) => files.push({ name: `ISO/${base}-pipe${i + 1}-ISO.svg`, text: isoSvg(i, { by: dwgLastBy }) }));
+  sceneData.pipes.forEach((p, i) => { if ((p.pts?.length ?? 0) >= 2) files.push({ name: `ISO/${base}-pipe${i + 1}-ISO.svg`, text: isoSvg(i, { by: dwgLastBy }) }); });
   files.push({ name: `${base}-MTO.csv`, text: mtoCsv() });
   const url = URL.createObjectURL(makeZip(files));
   const a = document.createElement('a'); a.href = url; a.download = `${base}-drawings.zip`; a.click();
@@ -2569,7 +2575,9 @@ function addNozzleAt(tag, hit) {
   const local = hit.point.clone().sub(new THREE.Vector3(...def.pos)).applyAxisAngle(yAxis, -(def.rot_y ?? 0));
   const dirL = dirW.clone().applyAxisAngle(yAxis, -(def.rot_y ?? 0));
   def.nozzles = def.nozzles ?? [];
-  const nzId = `N${def.nozzles.length + 1}`;
+  const usedNz = new Set(def.nozzles.map((n) => n.id));
+  let nzi = 1; while (usedNz.has(`N${nzi}`)) nzi++;
+  const nzId = `N${nzi}`;
   const dn = document.getElementById('pipe-bore').value || 'DN100';
   def.nozzles.push({
     id: nzId, dn,
@@ -2612,9 +2620,10 @@ function chainTrayFromRack(start) {
   let unit = sceneData.plant.units.find((u) => u.id === 'U-TRAY');
   if (!unit) { unit = { id: 'U-TRAY', name: '橋架佈線', equipment: [] }; sceneData.plant.units.push(unit); }
   const added = [];
+  const emit = (d) => { unit.equipment.push(d); added.push(d); };   // 先入 unit 再產下一個 tag，確保唯一
   for (const r of comp) {
     const a = rackAxisInfo(r);
-    added.push({ tag: nextTag('CT'), type: 'cabletray', name: '電纜橋架（串接）',
+    emit({ tag: nextTag('CT'), type: 'cabletray', name: '電纜橋架（串接）',
       dims: { w: 0.45, len: a.len, elev: a.top }, pos: [...r.pos], rot_y: r.rot_y ?? 0,
       design: {}, instruments: [], pid_ref: '' });
   }
@@ -2635,12 +2644,12 @@ function chainTrayFromRack(start) {
       if (sc > bestSc) { bestSc = sc; bestRot = th; }
     }
     const top = Math.max(rackAxisInfo(A).top, rackAxisInfo(B).top);
-    added.push({ tag: nextTag('CT'), type: 'traybend', name: '橋架水平彎',
+    emit({ tag: nextTag('CT'), type: 'traybend', name: '橋架水平彎',
       dims: { w: 0.45, elev: top }, pos: [+corner.x.toFixed(2), 0, +corner.z.toFixed(2)], rot_y: +bestRot.toFixed(3),
       design: {}, instruments: [], pid_ref: '' });
     bends += 1;
   }
-  for (const e of added) { unit.equipment.push(e); buildEquipment(e); }
+  for (const e of added) buildEquipment(e);   // 已入 unit，此處只建 mesh
   return { racks: comp.length, trays: comp.length, bends };
 }
 

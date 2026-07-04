@@ -23,7 +23,7 @@
       <a class="brand-home" href="/" title="回平台首頁">J.S</a>
       <span class="brand-mark">J.S_3D&nbsp;Ai</span>
       <span class="brand-title" id="brand-title">全廠 3D 數位孿生平台</span>
-      <span class="brand-sub" id="brand-sub">示範廠場景｜穎杰科技</span>
+      <span class="brand-sub" id="brand-sub">示範場景</span>
     </div>
     <div class="topbar-right">
       <div class="chip-group" data-glabel="檢視">
@@ -77,7 +77,7 @@
     <table class="info-table" id="info-design"></table>
     <div class="info-section">即時儀錶（模擬 DCS 數據）</div>
     <table class="info-table" id="info-instruments"></table>
-    <button class="pid-btn" id="info-pid-btn">📐 開啟 P&amp;ID 圖面</button>
+    <button class="pid-btn" id="info-pid-btn">開啟 P&amp;ID 圖面</button>
   </aside>
 
   <aside id="match-panel" class="hidden">
@@ -98,7 +98,7 @@
       <button id="pid-close" title="關閉">×</button>
       <div class="pid-title" id="pid-title">P&amp;ID</div>
       <div id="pid-svg"></div>
-      <div class="pid-note">示意圖面（自 plant.json 生成）｜實際專案掛接 P&amp;ID／ISO 配管圖／電氣系統圖／設備配置圖</div>
+      <div class="pid-note">示意圖面（依 plant.json 生成）</div>
     </div>
   </div>
 
@@ -124,13 +124,13 @@
     <div id="scenario-buttons"></div>
     <div class="bar-actions">
       <button class="sc-btn inject" id="btn-inject" title="盲測：隨機注入一組異常感測訊號，由 AI 比對引擎自動找出最接近的預載情境">
-        ⚡ 異常注入（盲測）
+        異常注入
       </button>
       <button class="sc-btn" id="btn-intrude" title="演示：模擬人員闖入儲槽區電子圍籬，AI 攝影機辨識告警">
-        🚧 模擬闖入
+        模擬闖入
       </button>
     </div>
-    <span class="bar-hint" id="scenario-desc">預載情境比對法：實際洩漏時依 DCS 感測值比對最接近情境</span>
+    <span class="bar-hint" id="scenario-desc">依 DCS 感測值比對最接近的預載情境</span>
   </footer>
 
   <main id="viewport"></main>

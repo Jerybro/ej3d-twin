@@ -18,7 +18,7 @@ const CSS = `
 #js-sprite.open .sp-panel{display:block}
 #js-sprite .sp-head{display:flex;align-items:center;gap:8px;padding:9px 12px;background:#F6F7FA;border-bottom:1px solid #DBDDE0}
 #js-sprite .sp-title{font-size:12.5px;font-weight:700;color:#061027;letter-spacing:.02em}
-#js-sprite .sp-sub{font-size:10.5px;color:#5C6773;margin-left:auto}
+#js-sprite .sp-head button:first-of-type{margin-left:auto}
 #js-sprite .sp-head button{background:none;border:none;cursor:pointer;padding:2px;display:flex;color:#5C6773}
 #js-sprite .sp-head button:hover{color:#046AFB}
 #js-sprite .sp-head svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round}
@@ -51,14 +51,13 @@ export function initSprite({ page = 'twin', bottom = 56, context = () => ({}) } 
     <div class="sp-panel">
       <div class="sp-head">
         <span class="sp-title">AI 助手</span>
-        <span class="sp-sub">本機推論</span>
-        <button data-sp="refresh" title="依目前情境重新取得建議">${IC_REFRESH}</button>
+        <button data-sp="refresh" title="重新整理">${IC_REFRESH}</button>
         <button data-sp="close" title="收合">${IC_CLOSE}</button>
       </div>
-      <div class="sp-body">點右上重新整理取得建議</div>
-      <div class="sp-foot"><span>Qwen3.6｜資料不出這台機器</span><span class="sp-when"></span></div>
+      <div class="sp-body">準備中…</div>
+      <div class="sp-foot"><span>本機 Qwen3.6</span><span class="sp-when"></span></div>
     </div>
-    <button class="sp-fab" title="AI 助手（本機模型情境建議）">${IC_SPARK}<span class="sp-dot"></span></button>`;
+    <button class="sp-fab" title="AI 助手">${IC_SPARK}<span class="sp-dot"></span></button>`;
   document.body.appendChild(root);
 
   const body = root.querySelector('.sp-body');
@@ -89,7 +88,7 @@ export function initSprite({ page = 'twin', bottom = 56, context = () => ({}) } 
     busy = true;
     body.classList.remove('sp-err');
     body.classList.add('sp-busy');
-    body.innerHTML = '<span class="sp-pulse">正在依目前情境思考…</span>';
+    body.innerHTML = '<span class="sp-pulse">思考中…</span>';
     try {
       const r = await fetch('/api/sprite/suggest', {
         method: 'POST',

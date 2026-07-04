@@ -848,7 +848,7 @@ function buildEvacPath(sc, parent) {
   parent.add(ring);
   const musterEl = document.createElement('div');
   musterEl.className = 'muster-label';
-  musterEl.textContent = '⛑ 集合點';
+  musterEl.textContent = '集合點';
   const musterLabel = new CSS2DObject(musterEl);
   musterLabel.position.set(sc.muster[0], 1.2, sc.muster[2]);
   parent.add(musterLabel);
@@ -1026,7 +1026,7 @@ function renderMatch(m) {
   if (active !== injectActive) {
     injectActive = active;
     injectBtn.classList.toggle('active', active);
-    injectBtn.textContent = active ? '⏹ 停止注入' : '⚡ 異常注入（盲測）';
+    injectBtn.textContent = active ? '停止注入' : '異常注入';
     matchPanel.classList.toggle('hidden', !active);
     if (!active) {
       matchStatus.textContent = '監看 DCS 特徵中…';
@@ -1037,10 +1037,10 @@ function renderMatch(m) {
   if (!active) return;
   const top = m.ranked[0];
   if (m.confirmed && top) {
-    matchStatus.textContent = `✔ 已確認（信心 ${Math.round(top.conf * 100)}%）：${scenarioDefs[m.truth]?.name ?? top.name}`;
+    matchStatus.textContent = `已確認（信心 ${Math.round(top.conf * 100)}%）：${scenarioDefs[m.truth]?.name ?? top.name}`;
     matchStatus.classList.add('confirmed');
   } else {
-    matchStatus.textContent = '⟳ DCS 感測偏移發展中，比對進行中…';
+    matchStatus.textContent = 'DCS 偏移比對中…';
     matchStatus.classList.remove('confirmed');
   }
   matchList.innerHTML = m.ranked.map((r, i) => `
@@ -1082,7 +1082,7 @@ if (fencePoly.length) {
   fenceMats.push(topLineMat);
   const fenceEl = document.createElement('div');
   fenceEl.className = 'cam-label';
-  fenceEl.textContent = `⛔ ${plantData.fence.name}`;
+  fenceEl.textContent = plantData.fence.name;
   const fenceLabel = new CSS2DObject(fenceEl);
   const cx = fencePoly.reduce((s, p) => s + p[0], 0) / fencePoly.length;
   const cz = Math.max(...fencePoly.map((p) => p[1]));
@@ -1120,7 +1120,7 @@ for (const c of plantData.cameras ?? []) {
   cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
   const el = document.createElement('div');
   el.className = 'cam-label';
-  el.textContent = `📹 ${c.id}`;
+  el.textContent = c.id;
   el.title = c.name;
   const label = new CSS2DObject(el);
   label.position.set(pos.x, pos.y + 0.55, pos.z);
@@ -1310,7 +1310,7 @@ function updateSafety(dt, t) {
     }
     if (violation) {
       w.labelEl.className = 'worker-label violation';
-      w.labelEl.textContent = `⚠ ${w.def.name}｜${violation}`;
+      w.labelEl.textContent = `${w.def.name}｜${violation}`;
       events.push(`${w.def.id} ${violation}`);
     } else {
       w.labelEl.className = 'worker-label';
@@ -1507,11 +1507,11 @@ function buildConstruction() {
     ? conflicts.map((c, i) => {
         const hard = c.gap < 0;
         return `<div class="conflict-item ${hard ? 'hard' : ''}" data-ci="${i}" style="cursor:pointer">
-          <span class="c-kind">${hard ? '⛔ 硬碰撞' : '⚠ 淨距不足'}</span>｜${c.pipe} × ${c.tag}<br>
+          <span class="c-kind">${hard ? '硬碰撞' : '淨距不足'}</span>｜${c.pipe} × ${c.tag}<br>
           <span class="c-dist">${c.note ?? ''}｜${hard ? `干涉 ${(-c.gap).toFixed(2)} m` : `淨距 ${c.gap.toFixed(2)} m（需 ≥ ${con.clearance} m）`}</span>
         </div>`;
       }).join('')
-    : '<div class="conflict-ok">✔ 規劃路徑無衝突</div>';
+    : '<div class="conflict-ok">規劃路徑無衝突</div>';
   conflictList.querySelectorAll('[data-ci]').forEach((el) => {
     el.addEventListener('click', () => {
       const c = conflicts[+el.dataset.ci];

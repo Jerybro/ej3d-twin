@@ -697,6 +697,105 @@ def _run_anomaly(sid: str, rec: dict):
     rec["status"] = "done"
 
 
+# ------------------------------------------------------ 混合模型（物理模擬＋AI 殘差）
+def _hybrid_xy(sid: str, rec: dict):
+    """混合模型資料：X（特徵）、y（實際目標）、ysim（模擬基準欄，如 ASPEN 產出）。"""
+    df = _load_base(sid)
+    view, *_ = apply_steps(df, _load_steps(sid))
+    sim = rec.get("sim_col")
+    missing = [c for c in (rec["target"], sim, *rec["features"]) if c not in view.columns]
+    if missing:
+        raise HTTPException(422, f"現行視圖缺少欄位：{missing}")
+    cols = [rec["target"], sim, *rec["features"]]
+    data = view[cols].apply(pd.to_numeric, errors="coerce").dropna()
+    return (data[rec["features"]].to_numpy(dtype=float),
+            data[rec["target"]].to_numpy(dtype=float),
+            data[sim].to_numpy(dtype=float))
+
+
+def _cv_splits(n: int, cfg: dict):
+    """依驗證設定產生 (train_idx, test_idx) 序列——混合模型三個管線要吃同一組切分。"""
+    m = cfg["method"]
+    idx = np.arange(n)
+    if m == "holdout":
+        n_te = max(5, int(n * cfg["test_size"]))
+        if cfg["shuffle"]:
+            perm = np.random.RandomState(0).permutation(n)
+            yield perm[n_te:], perm[:n_te]
+        else:
+            yield idx[:-n_te], idx[-n_te:]
+    elif m == "timesplit":
+        from sklearn.model_selection import TimeSeriesSplit
+        yield from TimeSeriesSplit(n_splits=cfg["n_splits"]).split(idx)
+    else:
+        from sklearn.model_selection import KFold
+        kf = KFold(n_splits=cfg["k"], shuffle=cfg["shuffle"],
+                   random_state=0 if cfg["shuffle"] else None)
+        yield from kf.split(idx)
+
+
+VAL_NAMES = {"kfold": "K 折交叉驗證", "holdout": "保留法", "timesplit": "時序切分"}
+
+
+def _run_hybrid(sid: str, rec: dict):
+    """混合模型＝g(x)（模擬代理，蒸餾 ASPEN 等物理模擬）＋ r(x)（殘差修正，學實廠與模擬的差）。
+    同一組 CV 切分下算三方對比：純模擬基準／純 AI 對照／混合——給客戶的可信度證據。"""
+    import joblib
+    from sklearn.inspection import permutation_importance
+
+    X, y, ysim = _hybrid_xy(sid, rec)
+    if len(y) < 30:
+        raise ValueError(f"有效樣本僅 {len(y)} 筆（<30），不足以訓練")
+    cfg = _validation_cfg(rec)
+    algo, params = rec["algo"], rec.get("params")
+    resid = y - ysim
+    # 同折 OOF：g 學模擬、r 學殘差、a 純 AI 對照
+    oof_g = np.full(len(y), np.nan)
+    oof_r = np.full(len(y), np.nan)
+    oof_a = np.full(len(y), np.nan)
+    for tr, te in _cv_splits(len(y), cfg):
+        g = _build_pipeline(algo, params, "regression").fit(X[tr], ysim[tr])
+        r = _build_pipeline(algo, params, "regression").fit(X[tr], resid[tr])
+        a = _build_pipeline(algo, params, "regression").fit(X[tr], y[tr])
+        oof_g[te] = np.ravel(g.predict(X[te]))
+        oof_r[te] = np.ravel(r.predict(X[te]))
+        oof_a[te] = np.ravel(a.predict(X[te]))
+    mask = ~np.isnan(oof_g)
+    hybrid = oof_g + oof_r
+    rec["compare"] = {"sim": _metrics(y[mask], ysim[mask]),
+                      "ai": _metrics(y[mask], oof_a[mask]),
+                      "hybrid": _metrics(y[mask], hybrid[mask])}
+    rec["metrics_cv"] = rec["compare"]["hybrid"]
+    rec["val_desc"] = VAL_NAMES.get(cfg["method"], cfg["method"])
+    # 全量 refit 持久化＋訓練集指標
+    pipe_g = _build_pipeline(algo, params, "regression").fit(X, ysim)
+    pipe_r = _build_pipeline(algo, params, "regression").fit(X, resid)
+    train_pred = np.ravel(pipe_g.predict(X)) + np.ravel(pipe_r.predict(X))
+    rec["metrics_train"] = _metrics(y, train_pred)
+    # 圖：混合 OOF 的準確度＋誤差；FI＝殘差模型（AI 到底修正了什麼）
+    idx = np.random.RandomState(0).choice(int(mask.sum()), min(600, int(mask.sum())), replace=False)
+    ym, hm = y[mask][idx], hybrid[mask][idx]
+    rec["plots"] = {
+        "pa": {"actual": np.round(ym, 4).tolist(), "pred": np.round(hm, 4).tolist()},
+        "err": {"actual": np.round(ym, 4).tolist(), "error": np.round(ym - hm, 4).tolist()},
+    }
+    sub = np.random.RandomState(0).choice(len(y), min(1500, len(y)), replace=False)
+    imp = permutation_importance(pipe_r, X[sub], resid[sub], n_repeats=5, random_state=0, n_jobs=1)
+    order = np.argsort(imp.importances_mean)[::-1][:15]
+    rec["plots"]["fi"] = {"names": [rec["features"][i] for i in order],
+                          "values": np.round(imp.importances_mean[order], 5).tolist()}
+    rec["n_rows"] = int(len(y))
+    joblib.dump({"kind": "hybrid", "g": pipe_g, "r": pipe_r}, _pipe_path(sid, rec["id"]))
+    rec["status"] = "done"
+
+
+def _predict_any(pack, X: np.ndarray) -> np.ndarray:
+    """統一推論：混合模型（{kind:'hybrid',g,r}）＝代理＋殘差；其餘為單一 pipeline。"""
+    if isinstance(pack, dict) and pack.get("kind") == "hybrid":
+        return np.ravel(pack["g"].predict(X)) + np.ravel(pack["r"].predict(X))
+    return pack.predict(X)
+
+
 # ------------------------------------------------------ 驗證方法（使用者可選）
 def _validation_cfg(rec: dict) -> dict:
     v = rec.get("validation") or {}
@@ -807,6 +906,10 @@ def _train_job(sid: str, rec: dict):
             return
         if task == "anomaly":
             _run_anomaly(sid, rec)
+            _save(sid, rec)
+            return
+        if task == "hybrid":
+            _run_hybrid(sid, rec)
             _save(sid, rec)
             return
 
@@ -953,22 +1056,38 @@ def create_models(sid: str, body: dict) -> dict:
         task = "timeseries"
         ts_cfg = {"time_col": body.get("time_col") or tcols[0],
                   "test_size": min(0.5, max(0.05, float(body.get("test_size") or 0.2)))}
+    sim_col = None
+    if body.get("task_type") == "hybrid":
+        if task != "regression":
+            raise HTTPException(422, "混合模型的目標必須是數值欄")
+        sim_col = body.get("sim_col")
+        if not sim_col or sim_col not in view.columns:
+            raise HTTPException(422, "混合模型需要指定模擬基準欄（如 ASPEN 模擬產出欄）")
+        if not pd.api.types.is_numeric_dtype(pd.to_numeric(view[sim_col], errors="coerce")):
+            raise HTTPException(422, f"模擬基準欄 {sim_col} 必須是數值欄")
+        task = "hybrid"
+        features = [f for f in features if f != sim_col]
+        if not features:
+            raise HTTPException(422, "混合模型至少需要一個自變數（不含模擬基準欄）")
     validation = body.get("validation") or {}
     mode = body.get("mode", "manual")
     jobs = []
-    task_algos = [k for k, v in ALGOS.items() if task in v["tasks"]]
+    # 混合模型的 g/r 都是迴歸管線 → 用迴歸演算法集
+    algo_task = "regression" if task == "hybrid" else task
+    task_algos = [k for k, v in ALGOS.items() if algo_task in v["tasks"]]
     if mode == "auto":
         for algo in task_algos:
             jobs.append({"algo": algo, "name": f"{body.get('name') or target}_{algo}",
-                         "params": {}, "auto_tune": task != "timeseries"})
+                         "params": {}, "auto_tune": task not in ("timeseries", "hybrid")})
     else:
         algo = body.get("algo", "XGB")
         if algo not in ALGOS:
             raise HTTPException(422, f"未知演算法 {algo}")
-        if task not in ALGOS[algo]["tasks"]:
+        if algo_task not in ALGOS[algo]["tasks"]:
             raise HTTPException(422, f"{ALGOS[algo]['name']} 不支援{task}任務")
         jobs.append({"algo": algo, "name": body.get("name") or f"{target}_{algo}",
-                     "params": body.get("params") or {}, "auto_tune": bool(body.get("auto_tune"))})
+                     "params": body.get("params") or {},
+                     "auto_tune": bool(body.get("auto_tune")) and task != "hybrid"})
 
     created = []
     for j in jobs:
@@ -977,6 +1096,8 @@ def create_models(sid: str, body: dict) -> dict:
                "target": target, "features": features, "task": task, **j}
         if ts_cfg:
             rec["ts"] = ts_cfg
+        if sim_col:
+            rec["sim_col"] = sim_col
         if validation:
             rec["validation"] = validation
         _save(sid, rec)
@@ -1053,7 +1174,7 @@ def evaluate(sid: str, mid: str) -> dict:
     X, y = _current_xy(sid, rec)
     if len(y) < 5:
         raise HTTPException(422, f"現行視圖有效樣本僅 {len(y)} 筆，無法評估")
-    yhat = np.ravel(pipe.predict(X)) if not cls else pipe.predict(X)
+    yhat = np.ravel(_predict_any(pipe, X)) if not cls else pipe.predict(X)
     ev = {"evaluated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
           "n_rows": int(len(y)),
           "metrics": _metrics_cls(y, yhat) if cls else _metrics(y, yhat)}
@@ -1137,8 +1258,8 @@ async def batch_calc(sid: str, mid: str, file: UploadFile = File(...)) -> dict:
     """批次試算（品質結果試算）：上傳新測試資料集，以已訓練模型整批預測。
     上傳檔含目標欄時併算實際 vs 預測；結果檔（原欄＋預測欄）可下載。"""
     rec = _load(sid, mid)
-    if rec.get("task") not in ("regression", "classification"):
-        raise HTTPException(422, "批次試算僅支援迴歸／分類模型")
+    if rec.get("task") not in ("regression", "classification", "hybrid"):
+        raise HTTPException(422, "批次試算僅支援迴歸／分類／混合模型")
     pipe = _load_pipe(sid, mid)
     raw = await file.read()
     if len(raw) > 50 * 1024 * 1024:
@@ -1160,7 +1281,7 @@ async def batch_calc(sid: str, mid: str, file: UploadFile = File(...)) -> dict:
     if not ok.any():
         raise HTTPException(422, "沒有任何一列的特徵值完整可預測（檢查數值格式）")
     X = feats[ok].to_numpy(dtype=float)
-    yhat = pipe.predict(X)
+    yhat = pipe.predict(X) if cls else _predict_any(pipe, X)
     yhat = np.asarray(yhat) if cls else np.ravel(yhat).astype(float)
     # 結果檔＝原欄位＋預測欄
     pred_col = f"{rec['target']}_預測值"
@@ -1237,8 +1358,8 @@ def batch_download(sid: str, mid: str):
 def whatif(sid: str, mid: str, body: dict) -> dict:
     """操作差異試算：baseline＝現行視圖特徵中位數，body.values 覆蓋部分特徵。"""
     rec = _load(sid, mid)
-    if rec.get("task") not in ("regression", "classification"):
-        raise HTTPException(422, "操作差異試算僅支援迴歸／分類模型")
+    if rec.get("task") not in ("regression", "classification", "hybrid"):
+        raise HTTPException(422, "操作差異試算僅支援迴歸／分類／混合模型")
     pipe = _load_pipe(sid, mid)
     base = _baseline(sid, rec)
     values = body.get("values") or {}
@@ -1257,7 +1378,8 @@ def whatif(sid: str, mid: str, body: dict) -> dict:
             out["proba"] = {c: round(float(p), 4) for c, p in
                             sorted(zip(classes, proba), key=lambda t: -t[1])[:5]}
         return out
-    pb, pn = float(pipe.predict(Xb)[0]), float(pipe.predict(Xn)[0])
+    pb = float(np.ravel(_predict_any(pipe, Xb))[0])
+    pn = float(np.ravel(_predict_any(pipe, Xn))[0])
     return {"baseline_pred": round(pb, 5), "pred": round(pn, 5),
             "delta": round(pn - pb, 5), "baseline": base}
 
@@ -1267,8 +1389,8 @@ def optimize(sid: str, mid: str, body: dict) -> dict:
     """配方優化（參數最佳化）：目標值/最大化/最小化，輸出最佳參數建議。
     可調參數邊界＝現行視圖 P1–P99；隨機搜尋＋最佳鄰域細化。僅迴歸。"""
     rec = _load(sid, mid)
-    if rec.get("task") != "regression":
-        raise HTTPException(422, "配方優化僅支援迴歸模型")
+    if rec.get("task") not in ("regression", "hybrid"):
+        raise HTTPException(422, "配方優化僅支援迴歸／混合模型")
     pipe = _load_pipe(sid, mid)
     mode = body.get("mode", "target")
     knobs = [k for k in (body.get("knobs") or rec["features"]) if k in rec["features"]]
@@ -1303,17 +1425,17 @@ def optimize(sid: str, mid: str, body: dict) -> dict:
         return np.abs(preds - float(body["value"]))
 
     cand = make(3000)
-    preds = pipe.predict(cand)
+    preds = np.ravel(_predict_any(pipe, cand))
     order = np.argsort(score(preds))
     # 最佳 50 組鄰域細化一輪
     refined = np.vstack([make(40, center=cand[i, kidx], spread=1.0) for i in order[:50]])
-    preds2 = pipe.predict(refined)
+    preds2 = np.ravel(_predict_any(pipe, refined))
     all_pts = np.vstack([cand, refined])
     all_preds = np.concatenate([preds, preds2])
     best_i = int(np.argmin(score(all_preds)))
     best_pt = all_pts[best_i]
 
-    baseline_pred = float(pipe.predict(np.array([[base[f] for f in rec["features"]]]))[0])
+    baseline_pred = float(np.ravel(_predict_any(pipe, np.array([[base[f] for f in rec["features"]]])))[0])
     return {
         "mode": mode, "value": body.get("value"),
         "best": {rec["features"][i]: round(float(best_pt[i]), 5) for i in kidx},

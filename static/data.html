@@ -658,16 +658,25 @@
           <option value="auto">自動判定（數值目標＝迴歸、類別目標＝分類）</option>
           <option value="timeseries">時序預測（ARIMA 等時序演算法，單變量）</option>
           <option value="anomaly">設備異常偵測（無監督，健康基準＋風險值）</option>
+          <option value="hybrid">混合模型（物理模擬＋AI 殘差修正）</option>
         </select>
         <div id="wiz-anom-cfg" style="display:none">
           <p class="hint" style="margin:2px 0 8px">以「現行資料視圖」為健康運轉基準建立監控模型——
             請先在探索分析把異常段排除，再來建模；訓練後對新資料計算風險值，超過門檻＝疑似異常。</p>
           <p class="hint" style="margin:2px 0 8px;padding:10px 12px;background:var(--bg);border:1px solid var(--bdr);border-radius:5px">
-            <b>這是非監督式學習，前提很重要</b>${'' /* 監督 vs 非監督：健康度代表性差異 */}
+            <b>這是非監督式學習，前提很重要</b>
             <span class="qi" data-tip="兩種做 PHM 的路線：非監督式（本功能）＝手上只有正常運轉的資料，模型學「健康長什麼樣」，健康度代表的是『偏離平常的程度』——它抓得到異常，但無法保證每次偏離都等於故障，訓練資料裡若混入壞資料，基準被汙染、代表性會下降。監督式＝手上有標記過的故障資料可參照，模型直接學「壞掉長什麼樣」，對已知故障型態的判定準確度高——但需要足夠的故障案例，多數現場拿不到。沒有故障資料時，非監督是務實起點；累積到足夠故障紀錄後可轉監督式提升準確度。">?</span><br>
             此模型<b>假設你選的訓練資料段全部是健康運轉</b>。訓練資料越乾淨，健康分數的代表性越高；
             若混入異常段，基準被汙染，之後的健康分數會失準。手上若有「已確認故障」的歷史資料，
             不要餵進來——留著用「模型評估」對照驗證，或改走監督式（把故障標記當分類目標建分類模型）。</p>
+        </div>
+        <div id="wiz-hybrid-cfg" style="display:none">
+          <label>模擬基準欄（物理模擬產出，如 ASPEN）<span class="qi" data-tip="把製程模擬軟體（ASPEN Plus 等）對每個操作點算出的目標值，在上傳前併成資料裡的一欄，這裡選它。混合模型＝兩個模型相加：代理模型 g(x) 學「模擬值」（把受認證的物理知識蒸餾進 AI，速度快千倍、可進優化）＋殘差模型 r(x) 學「實際−模擬」的差（儀器偏差、設備老化、模擬沒抓到的現場效應）。預測＝g(x)+r(x)。訓練後會給三方對比：純模擬、純 AI、混合——通常混合最準，而且可信度有物理模擬背書。">?</span></label>
+          <select class="mini" id="wiz-sim-col"></select>
+          <p class="hint" style="margin:2px 0 8px;padding:10px 12px;background:var(--bg);border:1px solid var(--bdr);border-radius:5px">
+            <b>物理打底、AI 修正</b>——模擬基準欄的產生方式：在 ASPEN 以實廠操作條件跑模擬
+            （靈敏度分析／批次運算），把模擬的目標值與實廠數據按操作點對齊後併成一欄上傳。
+            新資料預測時<b>不需要</b>再帶模擬欄（代理模型已把物理關係學起來）。</p>
         </div>
         <div id="wiz-ts-cfg" style="display:none">
           <p class="hint" style="margin:2px 0 8px">時序模型以時間排序的目標序列訓練；
@@ -781,6 +790,6 @@
   </div>
 
   <input type="file" id="template-input" accept=".json" style="display:none" />
-  <script type="module" src="/static/js/data.js?v=20260704a"></script>
+  <script type="module" src="/static/js/data.js?v=20260704b"></script>
 </body>
 </html>

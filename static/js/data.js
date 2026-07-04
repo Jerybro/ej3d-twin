@@ -967,7 +967,7 @@ async function renderModels() {
         ms.map((m, i) => `<tr data-id="${m.id}">
           <td>${m.status === 'done' ? `#${i + 1}` : ''}</td>
           <td>${m.name}</td>
-          <td>${m.task === 'classification' ? '分類' : m.task === 'timeseries' ? '時序' : m.task === 'anomaly' ? '異常偵測' : '迴歸'}</td>
+          <td>${m.task === 'classification' ? '分類' : m.task === 'timeseries' ? '時序' : m.task === 'anomaly' ? '異常偵測' : m.task === 'hybrid' ? '混合（模擬＋AI）' : '迴歸'}</td>
           <td>${(ALGO_META?.find((a) => a.key === m.algo)?.name) ?? m.algo}${m.auto_tune ? '（自動調參）' : ''}</td>
           ${mv(m).map((v) => `<td>${v}</td>`).join('')}
           <td class="st-${m.status}" title="${m.error ?? ''}">${stName[m.status] ?? m.status}</td>
@@ -1102,7 +1102,9 @@ async function openModelDetail(mid) {
       <div class="md-chart wide"><h4>風險貢獻度——超標點各感測器偏離程度</h4><canvas id="md-fi"></canvas></div>` : `
       <div class="md-chart"><h4>模型準確度 Actual – Predicted</h4><canvas id="md-pa"></canvas></div>
       <div class="md-chart"><h4>模型準確度 Actual – Error</h4><canvas id="md-err"></canvas></div>
-      <div class="md-chart wide"><h4>重要變數分析 Feature Importance</h4><canvas id="md-fi"></canvas></div>`;
+      <div class="md-chart wide"><h4>${m.task === 'hybrid'
+        ? `殘差修正重要變數${qi('殘差模型 r(x) 的變數重要性——AI 主要靠哪些變數修正「實際與模擬的差」。這裡排前面的變數，代表物理模擬在這些條件下與現場落差最大，值得回頭檢查模擬假設或現場儀器。')}`
+        : '重要變數分析 Feature Importance'}</h4><canvas id="md-fi"></canvas></div>`;
   // PHM 摘要卡（Tukey PHM Edge 同款：健康分數/故障事件/超標率）
   const mcv = m.metrics_cv ?? {};
   const sumCards = isAn ? `
@@ -1134,9 +1136,12 @@ async function openModelDetail(mid) {
           <td>${e.n}</td><td>${e.peak_risk}</td>
           <td style="color:${healthColor(e.min_health)}">${e.min_health}</td><td>${e.top_sensor}</td></tr>`).join('')}
       </table></div>` : '';
+  const isHy = m.task === 'hybrid';
   const taskName = cls ? '分類' : isTs ? '時序預測（單變量）' : isAn
     ? `設備異常偵測（無監督）${qi('設備健康度的完整定義：模型以你提供的訓練資料為「健康運轉基準」，對每個時間點計算風險值（偏離基準的程度），再換算 0–100 健康分數——100＝完全貼合基準、50＝偏離達門檻、0＝偏離達門檻兩倍。重要前提：這是非監督式——訓練時沒有故障資料可參照，健康度代表『偏離平常運轉的程度』，不保證每次偏離都是故障；訓練資料若混入異常段，基準被汙染、分數會失準。對照：手上有標記過的故障資料時（監督式），可把故障標記當分類目標建分類模型，對已知故障型態判定準確度更高——兩種健康度的代表性不同，解讀要分清楚。')}`
-    : '迴歸';
+    : isHy
+      ? `混合模型（物理模擬＋AI 殘差）${qi(`預測＝代理模型 g(x)＋殘差模型 r(x)：g 學模擬基準欄「${m.sim_col}」（把物理模擬的知識蒸餾進 AI），r 學「實際−模擬」的殘差（儀器偏差、老化、模擬沒抓到的現場效應）。下方指標表有三方對比：純物理模擬的誤差、純 AI 的誤差、混合模型的誤差——混合通常最準，且物理基準來自受認證的模擬軟體，可信度有背書。新資料預測不需要模擬欄。`)}`
+      : '迴歸';
   $('model-detail').innerHTML = `
     <h3 style="display:flex;align-items:center;gap:8px"><span id="md-name">${m.name}</span>
       <button class="mini" id="btn-rename" title="改名"
@@ -1146,10 +1151,16 @@ async function openModelDetail(mid) {
     ${sumCards}
     <table class="md-metrics">
       <tr><th>模型指標</th>${heads.map(mh).join('')}</tr>
+      ${isHy && m.compare ? `
+        ${metricRow(`純物理模擬（基準欄 ${m.sim_col}）`, m.compare.sim, kind)}
+        ${metricRow('純 AI（同演算法對照）', m.compare.ai, kind)}` : ''}
       ${isAn ? metricRow(m.val_desc ?? '健康基準', m.metrics_cv, kind)
-        : metricRow(m.val_desc ?? '交叉驗證集', m.metrics_cv, kind) + metricRow('訓練資料集', m.metrics_train, kind)}
+        : metricRow(isHy ? `混合模型（${m.val_desc ?? '交叉驗證'}）` : (m.val_desc ?? '交叉驗證集'), m.metrics_cv, kind)
+          + metricRow('訓練資料集', m.metrics_train, kind)}
       <tbody id="ev-metric-row"></tbody>
     </table>
+    ${isHy && m.compare ? `<p class="hint" style="margin:-6px 0 14px">三方同折對比${qi('三行都在同一組驗證切分上計算，可直接比較：純物理模擬＝模擬基準欄直接當預測的誤差（物理模型與現場的差距）；純 AI＝同一演算法直接學實際值（沒有物理背書）；混合模型＝物理打底＋AI 修正——若混合列誤差最小，代表兩者互補成功。')}：
+      混合模型是否同時勝過純模擬與純 AI，是這個模型值不值得採用的判準。</p>` : ''}
     <div class="md-charts">${charts}</div>
     ${eventsTable}
     ${isAn ? `
@@ -1901,9 +1912,11 @@ $('wiz-mode-ok').addEventListener('click', () => {
   const renderFeatures = () => {
     const tgt = $('wiz-target').value;
     const isAn = $('wiz-task').value === 'anomaly';   // 異常偵測無目標，不排除任何欄
-    $('wiz-features').innerHTML = numeric.filter((c) => isAn || c.name !== tgt).map((c) =>
+    const sim = $('wiz-task').value === 'hybrid' ? $('wiz-sim-col').value : null;
+    $('wiz-features').innerHTML = numeric.filter((c) => (isAn || c.name !== tgt) && c.name !== sim).map((c) =>
       `<label><input type="checkbox" checked value="${c.name}">${c.name}</label>`).join('');
   };
+  $('wiz-sim-col').onchange = renderFeatures;
   $('wiz-target').onchange = () => { renderFeatures(); renderAlgos(); };
   renderFeatures();
   // 任務型態：時序預測需要時間欄；時序＝單變量（特徵工程請於上傳前完成）
@@ -1913,6 +1926,7 @@ $('wiz-mode-ok').addEventListener('click', () => {
   const taskKey = () => {
     if ($('wiz-task').value === 'timeseries') return 'timeseries';
     if ($('wiz-task').value === 'anomaly') return 'anomaly';
+    if ($('wiz-task').value === 'hybrid') return 'hybrid';
     const tgt = state.columns.find((c) => c.name === $('wiz-target').value);
     const isNum = tgt && (tgt.dtype.startsWith('float') || tgt.dtype.startsWith('int'));
     return isNum ? 'regression' : 'classification';
@@ -1921,14 +1935,22 @@ $('wiz-mode-ok').addEventListener('click', () => {
     const tv = $('wiz-task').value;
     const isTs = tv === 'timeseries';
     const isAn = tv === 'anomaly';
+    const isHy = tv === 'hybrid';
     $('wiz-ts-cfg').style.display = isTs ? '' : 'none';
     $('wiz-anom-cfg').style.display = isAn ? '' : 'none';
+    $('wiz-hybrid-cfg').style.display = isHy ? '' : 'none';
     $('wiz-val-cfg').style.display = (isTs || isAn) ? 'none' : '';
     $('wiz-target').style.display = isAn ? 'none' : '';
     $('wiz-target').previousElementSibling.style.display = isAn ? 'none' : '';
     $('wiz-feat-label').style.display = isTs ? 'none' : '';
     $('wiz-features').style.display = isTs ? 'none' : '';
     $('wiz-feat-label').textContent = isAn ? '監測欄位（設備感測器，至少兩欄）' : '自變數（預設全選）';
+    if (isHy) {
+      // 模擬基準欄候選＝數值欄扣掉目標欄
+      const tgt = $('wiz-target').value;
+      $('wiz-sim-col').innerHTML = numeric.filter((c) => c.name !== tgt)
+        .map((c) => `<option>${c.name}</option>`).join('');
+    }
     renderFeatures();
     renderAlgos();
   };
@@ -1952,7 +1974,9 @@ $('wiz-mode-ok').addEventListener('click', () => {
   const renderAlgos = () => {
     if (wizMode !== 'manual') return;
     const tk = taskKey();
-    const list = ALGO_META.filter((a) => a.tasks.includes(tk));
+    // 混合模型的代理與殘差都是迴歸管線 → 用迴歸演算法集
+    const filterTk = tk === 'hybrid' ? 'regression' : tk;
+    const list = ALGO_META.filter((a) => a.tasks.includes(filterTk));
     const def = tk === 'timeseries' ? 'ARIMA' : tk === 'anomaly' ? 'PCA_T2' : 'XGB';
     $('wiz-algo').innerHTML = list.map((a) =>
       `<option value="${a.key}" ${a.key === def ? 'selected' : ''}>${a.name}</option>`).join('');
@@ -2000,6 +2024,16 @@ $('wiz-submit').addEventListener('click', async () => {
     body.task_type = 'timeseries';
     body.test_size = (+$('wiz-ts-test').value || 20) / 100;
     body.features = [];
+  } else if ($('wiz-task').value === 'hybrid') {
+    body.task_type = 'hybrid';
+    body.sim_col = $('wiz-sim-col').value;
+    body.validation = {
+      method: $('wiz-val-method').value,
+      k: +$('wiz-val-k').value || 5,
+      test_size: (+$('wiz-val-test').value || 20) / 100,
+      n_splits: +$('wiz-val-k').value || 5,
+      shuffle: $('wiz-val-shuffle').checked,
+    };
   } else {
     body.validation = {
       method: $('wiz-val-method').value,

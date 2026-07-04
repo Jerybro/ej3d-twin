@@ -174,9 +174,9 @@ def _summary(df: pd.DataFrame, hidden: list | None = None) -> dict:
 
 
 # ---------------------------------------------------------------- 上傳
-FORMAT_SPEC = ("上傳格式規定：CSV（UTF-8）或 Excel，第一列為欄位名稱；"
-               "必須包含一個時間欄（建議名為 time，ISO 格式如 2025-06-01 00:00:00）"
-               "＋至少一個數值欄（PI 位號等）。範例：time, 8AR1_FIC70005, 8AR1_TIC70016, ...")
+FORMAT_SPEC = ("上傳格式規定：CSV（UTF-8）或 Excel，第一列為欄位名稱，至少一個數值欄。"
+               "製程歷史資料建議含時間欄（名為 time，ISO 格式如 2025-06-01 00:00:00）；"
+               "模擬／DOE 資料集（如 ASPEN 參數掃描）可無時間欄，以流水序為索引。")
 
 
 @router.post("/upload")
@@ -209,8 +209,8 @@ async def upload(request: Request, file: UploadFile = File(...)) -> dict:
                 df[c] = dt
                 time_col = c
                 break
-    if time_col is None:
-        raise HTTPException(422, f"找不到有效時間欄（ISO 時戳解析成功率需 >90%）。{FORMAT_SPEC}")
+    # 時間欄改為「建議」而非必要：模擬/DOE 資料集（如 ASPEN 參數掃描）沒有時間概念，
+    # 無時間欄時以 __id__ 流水序為索引（時序任務/時間軸功能自動不可用）
     n_numeric = df.select_dtypes(include="number").shape[1]
     if n_numeric < 1:
         raise HTTPException(422, f"至少需要一個數值欄。{FORMAT_SPEC}")
@@ -227,7 +227,8 @@ async def upload(request: Request, file: UploadFile = File(...)) -> dict:
     (DATA_DIR / f"{sid}.source{ext}").write_bytes(raw)
     from .auth import current_user
     u = current_user(request)
-    meta = {"filename": file.filename, "time_col": str(time_col),
+    meta = {"filename": file.filename,
+            "time_col": str(time_col) if time_col is not None else None,
             "uploaded_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
             "owner": (u or {}).get("email"), "n_rows": int(len(df))}
     (DATA_DIR / f"{sid}.meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")

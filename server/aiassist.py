@@ -134,6 +134,13 @@ def _model_context(sid: str, mid: str) -> str:
         if rec.get("events"):
             e = rec["events"][0]
             lines.append(f"最大故障事件：峰值風險 {e['peak_risk']}、最低健康 {e['min_health']}、主導感測器 {e['top_sensor']}。")
+    if rec.get("task") == "hybrid" and rec.get("compare"):
+        c = rec["compare"]
+        lines.append(f"這是混合模型（物理模擬基準欄 {rec.get('sim_col')}＋AI 殘差修正），同折三方對比："
+                     f"純物理模擬 {_fmt_metrics(c.get('sim'))}；純 AI {_fmt_metrics(c.get('ai'))}；"
+                     f"混合 {_fmt_metrics(c.get('hybrid'))}。"
+                     "評估重點：混合是否同時勝過純模擬與純 AI（互補成功才值得採用）；"
+                     "殘差重要變數排前面的，代表模擬在該條件下與現場落差最大。")
     lines.append("請評估這個模型目前的狀態（好壞、過擬合跡象、可信度），並給下一步建議（調參方向、資料面改善、或該怎麼應用）。")
     return "\n".join(lines)
 

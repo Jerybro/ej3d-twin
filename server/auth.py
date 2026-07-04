@@ -23,6 +23,8 @@ USERS_PATH = BASE_DIR / "uploads" / "data" / "users.json"
 
 
 def _load_dotenv():
+    # .env 為本機部署的權威設定：覆寫既有環境變數（避免其他專案殘留的
+    # GOOGLE_REDIRECT_URI 等變數蓋掉本專案值——實測 CRM PoC 會洩漏 5055 callback）
     p = BASE_DIR / ".env"
     if not p.exists():
         return
@@ -31,7 +33,7 @@ def _load_dotenv():
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, v = line.split("=", 1)
-        os.environ.setdefault(k.strip(), v.strip())
+        os.environ[k.strip()] = v.strip()
 
 
 _load_dotenv()

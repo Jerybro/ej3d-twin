@@ -52,6 +52,7 @@ const ICONS = {
   iso: '<path d="M4 17l8-5 8 5M12 12V3"/><path d="M4 17v4h16v-4"/><path d="M8 5l4-2 4 2"/>',
   cap: '<path d="M12 2l8 4.5v11L12 22l-8-4.5v-11L12 2z"/><path d="M4 6.5l8 4.5 8-4.5" fill="rgba(4,106,251,.2)" stroke="none"/><path d="M4 6.5l8 4.5 8-4.5"/>',
   mto: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M3 14h18M9 4v16"/>',
+  batch: '<rect x="3" y="3" width="9" height="9" rx="1"/><path d="M8 14v6h12V8h-6"/><path d="M6 6h3M6 8.5h3"/>',
   laycube: '<path d="M12 3l7 4v10l-7 4-7-4V7l7-4z"/><path d="M12 11l7-4M12 11L5 7M12 11v10"/>',
   laypipe: '<path d="M4 6h7a7 7 0 0 1 7 7v5"/><path d="M4 11h7a2 2 0 0 1 2 2v5"/>',
   laybeam: '<path d="M6 4h12M6 20h12M12 4v16"/>',
@@ -479,6 +480,49 @@ function selectPipe(index) {
   renderPipeProps(index);
   document.getElementById('st-sel').textContent = `選取：管線 #${index + 1}`;
   if (mode === 'pipenode') buildNodeHandles(index);
+}
+
+// ------------------------------------------------------------ 管嘴選取（點嘴選嘴，非母設備）
+function selectNozzle(tag, nzId) {
+  const entry = eqObjects.get(tag);
+  if (!entry) return;
+  const nz = (entry.def.nozzles ?? []).find((n) => n.id === nzId);
+  if (!nz) { selectEquipment(tag); return; }
+  selectNone();
+  selected = { kind: 'nozzle', def: entry.def, nz };
+  renderNozzleProps(entry.def, nz);
+  document.getElementById('st-sel').textContent = `選取：${tag} / ${nz.id}（管嘴）`;
+}
+function renderNozzleProps(def, nz) {
+  document.getElementById('prop-title').textContent = `${def.tag} / ${nz.id}`;
+  const opts = PIPE_BORES.map((b) => `<option ${b.dn === nz.dn ? 'selected' : ''}>${b.dn}</option>`).join('');
+  propBody.innerHTML = `
+    <div class="pg-section">管嘴 Nozzle</div>
+    <div class="pg-grid">
+      ${pgRow('位號', `<span>${nz.id}</span>`)}
+      ${pgRow('口徑 DN', `<select data-nz="dn">${opts}</select>`)}
+      ${pgRow('方向', `<span>${nz.dir.map((v) => (+v).toFixed(2)).join(', ')}</span>`)}
+      ${pgRow('母設備', `<span class="pg-owner" style="cursor:pointer">${def.tag}</span>`)}
+    </div>
+    <button class="pbtn" id="nz-selparent">選取母設備</button>
+    <button class="pbtn danger" id="nz-del">刪除管嘴（Delete）</button>`;
+  propBody.querySelector('[data-nz="dn"]').addEventListener('change', (e) => {
+    pushUndo();
+    nz.dn = e.target.value;
+    rebuildEquipment(def);
+    selectNozzle(def.tag, nz.id);
+  });
+  const goParent = () => selectEquipment(def.tag);
+  document.getElementById('nz-selparent').addEventListener('click', goParent);
+  propBody.querySelector('.pg-owner').addEventListener('click', goParent);
+  document.getElementById('nz-del').addEventListener('click', () => {
+    pushUndo();
+    def.nozzles = (def.nozzles ?? []).filter((n) => n.id !== nz.id);
+    rebuildEquipment(def);
+    rebuildTree(); updateTopbar();
+    selectEquipment(def.tag);
+    setHint(`已刪除管嘴 <b>${def.tag}/${nz.id}</b>`);
+  });
 }
 
 // ------------------------------------------------------------ 屬性格（E3D Attributes 式）
@@ -1337,6 +1381,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     const o = hit.obj;
     if (o.userData.routeDir !== undefined) return; // 箭頭點擊不改選取
     if (o.userData.nodeIndex !== undefined) { selectNodeHandle(o.userData.nodeIndex, o.userData.mid); return; }
+    if (o.userData.nzId && mode !== 'pipenode' && mode !== 'nozzle') { selectNozzle(o.userData.eqTag, o.userData.nzId); return; }
     if (o.userData.eqTag) { if (mode !== 'pipenode') selectEquipment(o.userData.eqTag); return; }
     if (o.userData.pipeIndex !== undefined) { selectPipe(o.userData.pipeIndex); return; }
   }
@@ -1677,6 +1722,7 @@ function commitNodeDrag() {
   const p = handle.position;
   pipe.pts[nodeDrag.index] = [snapVal(p.x), Math.max(0.1, Math.round(p.y * 100) / 100), snapVal(p.z)];
   rebuildAllPipes();
+  if (hasSupports(pipe.uid)) { regenSupportsForPipe(pipe); rebuildTree(); }   // 節點編輯完自動重生支撐
   const idx = selected.index;
   nodeDrag = null;
   selectPipe(idx);   // 重建 handles（mode 仍是 pipenode）
@@ -2028,7 +2074,7 @@ function dwgTitleBlock(right, bottom, meta) {
 }
 
 // ------------------------------------------------------------ GA 出圖（俯視配置圖）
-function exportGA() {
+function gaSvg(meta = {}) {
   const b = sceneBounds();
   const pad = 6;
   const x0 = b.min.x - pad, z0 = b.min.z - pad;
@@ -2071,10 +2117,10 @@ function exportGA() {
   const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const PW = W * S, PH = H * S + 78;
   const tb = dwgTitleBlock(PW - 7, PH - 7, {
-    project: `設備 ${allEquipment().length}・管線 ${sceneData.pipes.length}`,
-    title: `${sceneData.plant.name}｜GENERAL ARRANGEMENT 配置圖`,
-    dwgno: `${(sceneId ?? 'SCN').toUpperCase()}-GA-001`,
-    rev: 'A', date: dateStr, scaleTxt: `1m=${S}px`,
+    project: `設備 ${allEquipment().length}・管線 ${sceneData.pipes.length}${meta.by ? ' · ' + meta.by : ''}`,
+    title: meta.title ?? `${sceneData.plant.name}｜GENERAL ARRANGEMENT 配置圖`,
+    dwgno: meta.dwgno ?? `${(sceneId ?? 'SCN').toUpperCase()}-GA-001`,
+    rev: meta.rev ?? 'A', date: dateStr, scaleTxt: `1m=${S}px`,
   });
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PW} ${PH}" font-family="Inter,'Noto Sans TC',sans-serif" style="background:#fff">
@@ -2089,14 +2135,17 @@ function exportGA() {
   </g>
   ${tb}
 </svg>`;
-  const blob = new Blob([svg], { type: 'image/svg+xml' });
-  const url = URL.createObjectURL(blob);
-  window.open(url, '_blank');
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${(sceneId ?? 'scene')}-GA.svg`;
-  a.click();
-  setHint('GA 配置圖已輸出（新分頁預覽＋下載 SVG，可直接列印）');
+  return svg;
+}
+function gaDefaults() {
+  return { title: `${sceneData.plant.name}｜GENERAL ARRANGEMENT 配置圖`,
+           dwgno: `${(sceneId ?? 'SCN').toUpperCase()}-GA-001`, rev: 'A', by: dwgLastBy };
+}
+function exportGA() {
+  openDwgDialog('GA', gaDefaults(), (m) => {
+    saveBlob(`${sceneId ?? 'scene'}-GA.svg`, gaSvg(m), 'image/svg+xml', true);
+    setHint('GA 配置圖已輸出（新分頁預覽＋下載 SVG）');
+  });
 }
 document.getElementById('btn-ga').addEventListener('click', exportGA);
 
@@ -2109,9 +2158,8 @@ document.getElementById('btn-ga').addEventListener('click', exportGA);
 }
 
 // ------------------------------------------------------------ ISO 等角單管圖（對標 E3D Isometric 交付，輕量版）
-function exportISO() {
-  if (selected?.kind !== 'pipe') { setHint('先選取一條管線再<b>出 ISO</b>'); return; }
-  const pipe = sceneData.pipes[selected.index];
+function isoSvg(idx, meta = {}) {
+  const pipe = sceneData.pipes[idx];
   const pts = pipe.pts;
   // 等角投影：X=東、Z=北、Y=上（30° 軸測）
   const c30 = Math.cos(Math.PI / 6), s30 = Math.sin(Math.PI / 6);
@@ -2175,10 +2223,10 @@ function exportISO() {
   const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const PH = H + 78;
   const tb = dwgTitleBlock(W - 7, PH - 7, {
-    project: `${sceneData.plant?.name ?? sceneId ?? ''}`,
-    title: `ISOMETRIC 單管圖｜管線 #${selected.index + 1}`,
-    dwgno: `${(sceneId ?? 'SCN').toUpperCase()}-ISO-${String(selected.index + 1).padStart(3, '0')}`,
-    rev: 'A', date: dateStr,
+    project: `${sceneData.plant?.name ?? sceneId ?? ''}${meta.by ? ' · ' + meta.by : ''}`,
+    title: meta.title ?? `ISOMETRIC 單管圖｜管線 #${idx + 1}`,
+    dwgno: meta.dwgno ?? `${(sceneId ?? 'SCN').toUpperCase()}-ISO-${String(idx + 1).padStart(3, '0')}`,
+    rev: meta.rev ?? 'A', date: dateStr,
     scaleTxt: `${pipe.dn ?? `r${pipe.r}`}｜${pipeLength(pipe).toFixed(1)}m`,
   });
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
@@ -2194,13 +2242,19 @@ function exportISO() {
   </g>
   ${tb}
 </svg>`;
-  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
-  window.open(url, '_blank');
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${(sceneId ?? 'scene')}-pipe${selected.index + 1}-ISO.svg`;
-  a.click();
-  setHint('ISO 單管圖已輸出（新分頁預覽＋下載 SVG）');
+  return svg;
+}
+function isoDefaults(idx) {
+  return { title: `ISOMETRIC 單管圖｜管線 #${idx + 1}`,
+           dwgno: `${(sceneId ?? 'SCN').toUpperCase()}-ISO-${String(idx + 1).padStart(3, '0')}`, rev: 'A', by: dwgLastBy };
+}
+function exportISO() {
+  if (selected?.kind !== 'pipe') { setHint('先選取一條管線再<b>出 ISO</b>'); return; }
+  const idx = selected.index;
+  openDwgDialog('ISO', isoDefaults(idx), (m) => {
+    saveBlob(`${sceneId ?? 'scene'}-pipe${idx + 1}-ISO.svg`, isoSvg(idx, m), 'image/svg+xml', true);
+    setHint('ISO 單管圖已輸出（新分頁預覽＋下載 SVG）');
+  });
 }
 document.getElementById('btn-iso').addEventListener('click', exportISO);
 
@@ -2249,7 +2303,7 @@ for (const [btnId, key] of [['btn-lay-eq', 'equip'], ['btn-lay-pipe', 'pipe'], [
 }
 
 // ------------------------------------------------------------ MTO 材料表（CSV：管線＋彙總＋設備）
-function exportMTO() {
+function mtoCsv() {
   const typeName = new Map(ASSET_CATEGORIES.flatMap((c) => c.items.map((it) => [it.type, it.name])));
   const compName = Object.fromEntries(PIPE_COMPONENTS.map((c) => [c.kind, c.name]));
   const esc = (v) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
@@ -2289,14 +2343,98 @@ function exportMTO() {
   const totalL = [...sums.values()].reduce((a, acc) => a + acc.L, 0);
   rows.push([]);
   rows.push(['[統計]', `設備 ${eqN}`, `管線 ${sceneData.pipes.length}`, `管線總長 ${totalL.toFixed(1)} m`]);
-  const csv = '\uFEFF' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  a.download = `${sceneId ?? 'scene'}-MTO.csv`;
-  a.click();
-  setHint(`材料表已輸出：管線 ${sceneData.pipes.length} 條、設備 ${eqN} 台（CSV）`);
+  return '\uFEFF' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
+}
+function exportMTO() {
+  saveBlob(`${sceneId ?? 'scene'}-MTO.csv`, mtoCsv(), 'text/csv;charset=utf-8', false);
+  setHint(`材料表已輸出：管線 ${sceneData.pipes.length} 條、設備 ${allEquipment().length} 台（CSV）`);
 }
 document.getElementById('btn-mto').addEventListener('click', exportMTO);
+
+// ------------------------------------------------------------ 出圖工具：制式圖框彈窗＋批次打包 ZIP
+let dwgLastBy = '';
+let dwgOnOk = null;
+function saveBlob(name, text, mime, preview) {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  if (preview) window.open(url, '_blank');
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+function openDwgDialog(kind, defs, onOk) {
+  dwgOnOk = onOk;
+  document.getElementById('dwg-mtitle').textContent = `出圖設定｜${kind}`;
+  document.getElementById('dwg-title').value = defs.title ?? '';
+  document.getElementById('dwg-no').value = defs.dwgno ?? '';
+  document.getElementById('dwg-rev').value = defs.rev ?? 'A';
+  document.getElementById('dwg-by').value = defs.by ?? dwgLastBy;
+  document.getElementById('dwg-modal').classList.add('show');
+  setTimeout(() => document.getElementById('dwg-title').focus(), 30);
+}
+document.getElementById('dwg-ok').addEventListener('click', () => {
+  const m = {
+    title: document.getElementById('dwg-title').value.trim(),
+    dwgno: document.getElementById('dwg-no').value.trim(),
+    rev: document.getElementById('dwg-rev').value.trim() || 'A',
+    by: document.getElementById('dwg-by').value.trim(),
+  };
+  dwgLastBy = m.by;
+  document.getElementById('dwg-modal').classList.remove('show');
+  const cb = dwgOnOk; dwgOnOk = null;
+  cb?.(m);
+});
+document.getElementById('dwg-cancel').addEventListener('click', () => {
+  document.getElementById('dwg-modal').classList.remove('show');
+  dwgOnOk = null;
+});
+
+/* 極簡 ZIP（STORE，無壓縮）——免外部依賴 */
+function crc32(bytes) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) {
+    crc ^= bytes[i];
+    for (let k = 0; k < 8; k++) crc = (crc >>> 1) ^ (0xEDB88320 & -(crc & 1));
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function makeZip(files) {
+  const enc = new TextEncoder();
+  const u16 = (n) => [n & 0xFF, (n >>> 8) & 0xFF];
+  const u32 = (n) => [n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF];
+  const parts = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const nb = enc.encode(f.name), db = enc.encode(f.text), crc = crc32(db);
+    const lh = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, ...u16(20), ...u16(0), ...u16(0),
+      ...u16(0), ...u16(0), ...u32(crc), ...u32(db.length), ...u32(db.length),
+      ...u16(nb.length), ...u16(0)]);
+    parts.push(lh, nb, db);
+    central.push({ nb, crc, size: db.length, offset });
+    offset += lh.length + nb.length + db.length;
+  }
+  const cdStart = offset; const cds = [];
+  for (const c of central) {
+    const ch = Uint8Array.from([0x50, 0x4b, 0x01, 0x02, ...u16(20), ...u16(20), ...u16(0),
+      ...u16(0), ...u16(0), ...u16(0), ...u32(c.crc), ...u32(c.size), ...u32(c.size),
+      ...u16(c.nb.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(c.offset)]);
+    cds.push(ch, c.nb);
+    offset += ch.length + c.nb.length;
+  }
+  const cdSize = offset - cdStart;
+  const eocd = Uint8Array.from([0x50, 0x4b, 0x05, 0x06, ...u16(0), ...u16(0),
+    ...u16(central.length), ...u16(central.length), ...u32(cdSize), ...u32(cdStart), ...u16(0)]);
+  return new Blob([...parts, ...cds, eocd], { type: 'application/zip' });
+}
+function exportBatch() {
+  const base = sceneId ?? 'scene';
+  const files = [{ name: `${base}-GA.svg`, text: gaSvg({ by: dwgLastBy }) }];
+  sceneData.pipes.forEach((_, i) => files.push({ name: `ISO/${base}-pipe${i + 1}-ISO.svg`, text: isoSvg(i, { by: dwgLastBy }) }));
+  files.push({ name: `${base}-MTO.csv`, text: mtoCsv() });
+  const url = URL.createObjectURL(makeZip(files));
+  const a = document.createElement('a'); a.href = url; a.download = `${base}-drawings.zip`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  setHint(`出圖批次完成：GA 1＋ISO ${sceneData.pipes.length}＋MTO，打包 ZIP（${files.length} 檔）`);
+}
+document.getElementById('btn-batch').addEventListener('click', exportBatch);
 
 // ------------------------------------------------------------ 設備管嘴（Nozzle：點表面放置、畫管吸附嘴端）
 const nozzleMat = std(0x2e6da8, { metalness: 0.4, roughness: 0.45 });
@@ -2313,7 +2451,16 @@ function renderNozzles(group, def) {
     stub.add(neck, flange);
     stub.position.set(...nz.pos);
     stub.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...nz.dir).normalize());
-    stub.traverse((o) => { if (o.isMesh) o.userData.eqTag = def.tag; });
+    // 每個 mesh 帶母設備 tag＋管嘴 id（點嘴選嘴用）
+    stub.traverse((o) => { if (o.isMesh) { o.userData.eqTag = def.tag; o.userData.nzId = nz.id; } });
+    // 3D 標籤：id·DN（隨全域標籤開關；CSS2D）
+    const el = document.createElement('div');
+    el.className = 'nz-label';
+    el.style.cssText = 'padding:1px 5px;border-radius:6px;background:rgba(4,106,251,.9);color:#fff;font-size:9px;font-weight:600;white-space:nowrap;pointer-events:none;';
+    el.textContent = `${nz.id}·${nz.dn}`;
+    const lbl = new CSS2DObject(el);
+    lbl.position.set(0, 0.44, 0);
+    stub.add(lbl);
     nzRoot.add(stub);
   }
   group.add(nzRoot);
@@ -2381,12 +2528,8 @@ function removeSupportsOf(uid) {
   return n;
 }
 
-document.getElementById('btn-supports').addEventListener('click', () => {
-  if (selected?.kind !== 'pipe') { setHint('先選取一條管線再<b>生成支撐</b>'); return; }
-  const pipe = sceneData.pipes[selected.index];
-  const SPAN = 4;
-  const spots = [];
-  const pts = pipe.pts;
+function regenSupportsForPipe(pipe) {
+  const SPAN = 4, spots = [], pts = pipe.pts;
   for (let i = 0; i < pts.length - 1; i++) {
     const [ax, ay, az] = pts[i], [bx, by, bz] = pts[i + 1];
     if (Math.abs(by - ay) > 0.01) continue;              // 只支撐水平段
@@ -2397,11 +2540,9 @@ document.getElementById('btn-supports').addEventListener('click', () => {
       spots.push({ x: ax + (bx - ax) * t, z: az + (bz - az) * t, y: ay, yaw: Math.atan2(bx - ax, bz - az) });
     }
   }
-  if (!spots.length) { setHint('此管線沒有可支撐的高架水平段（貼地或垂直）'); return; }
-  pushUndo();
-  // 支撐與管線關聯：pipe.uid 綁定——重按＝先清舊支撐再重生（改管後直接重按即可）
+  const removed = pipe.uid ? removeSupportsOf(pipe.uid) : 0;   // 先清舊
+  if (!spots.length) return { made: 0, removed };
   pipe.uid = pipe.uid ?? `PL-${Math.random().toString(36).slice(2, 8)}`;
-  const removed = removeSupportsOf(pipe.uid);
   let unit = sceneData.plant.units.find((u) => u.id === 'U-SUP');
   if (!unit) { unit = { id: 'U-SUP', name: '管線支撐', equipment: [] }; sceneData.plant.units.push(unit); }
   for (const sp of spots) {
@@ -2414,9 +2555,20 @@ document.getElementById('btn-supports').addEventListener('click', () => {
     unit.equipment.push(def);
     buildEquipment(def);
   }
+  return { made: spots.length, removed };
+}
+function hasSupports(uid) {
+  return !!uid && sceneData.plant.units.some((u) => u.equipment.some((e) => e.sup_of === uid));
+}
+document.getElementById('btn-supports').addEventListener('click', () => {
+  if (selected?.kind !== 'pipe') { setHint('先選取一條管線再<b>生成支撐</b>'); return; }
+  const pipe = sceneData.pipes[selected.index];
+  pushUndo();
+  const r = regenSupportsForPipe(pipe);
   rebuildTree();
   updateTopbar();
-  setHint(`已沿管線 #${selected.index + 1} ${removed ? `重生（清除舊 ${removed} 支）` : '生成'} <b>${spots.length}</b> 支支撐（間距 ${SPAN}m，結構圖層）——改管後重按即重生`);
+  if (!r.made) { setHint('此管線沒有可支撐的高架水平段（貼地或垂直）' + (r.removed ? `——已清除舊 ${r.removed} 支` : '')); return; }
+  setHint(`已沿管線 #${selected.index + 1} ${r.removed ? `重生（清除舊 ${r.removed} 支）` : '生成'} <b>${r.made}</b> 支支撐（間距 4m，結構圖層）——改管節點後自動重生`);
 });
 
 // ------------------------------------------------------------ 陣列／鏡射複製（佔右側屬性面板）
@@ -2840,6 +2992,14 @@ document.getElementById('btn-del').addEventListener('click', deleteSelected);
 function deleteSelected() {
   if (!selected) return;
   pushUndo();
+  if (selected.kind === 'nozzle') {
+    const def = selected.def;
+    def.nozzles = (def.nozzles ?? []).filter((n) => n.id !== selected.nz.id);
+    rebuildEquipment(def);
+    rebuildTree(); updateTopbar();
+    selectEquipment(def.tag);
+    return;
+  }
   if (selected.kind === 'eq') {
     const tag = selected.def.tag;
     const entry = eqObjects.get(tag);

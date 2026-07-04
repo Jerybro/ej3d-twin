@@ -281,6 +281,15 @@
     .scene-item .meta { color: var(--dim); font-size: 12px; }
     .tbtn { padding: 7px 14px; border-radius: 8px; cursor: pointer; font-family: inherit;
       background: var(--panel2); border: 1px solid var(--bdr); color: var(--text); font-size: 13px; }
+    .tbtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    #dwg-modal { position: fixed; inset: 0; z-index: 95; display: none;
+      background: rgba(5, 9, 13, 0.7); align-items: center; justify-content: center; }
+    #dwg-modal.show { display: flex; }
+    #dwg-modal .modal-box { width: 380px; }
+    #dwg-modal label { display: block; font-size: 11px; color: var(--dim); margin: 10px 0 4px; }
+    #dwg-modal input { width: 100%; padding: 7px 10px; border-radius: 7px; box-sizing: border-box;
+      background: var(--panel2); border: 1px solid var(--bdr); color: var(--text); font-family: inherit; font-size: 13px; }
+    #dwg-modal input:focus { outline: none; border-color: var(--accent); }
   </style>
 </head>
 <body>
@@ -330,6 +339,7 @@
               <a class="rbtn" id="btn-view-twin" href="#" target="_blank" style="display:none"><span class="ric" data-ic="eye"></span>孿生檢視</a>
               <button class="rbtn" id="btn-ga" title="輸出俯視配置圖（GA Plot Plan，SVG 可列印）"><span class="ric" data-ic="ga"></span>出圖 GA</button>
               <button class="rbtn" id="btn-mto" title="輸出材料表（MTO，CSV）——管線長度統計＋元件＋設備清單"><span class="ric" data-ic="mto"></span>材料表</button>
+              <button class="rbtn" id="btn-batch" title="出圖批次：全場景 GA＋每條管線 ISO＋MTO 打包成 ZIP 下載"><span class="ric" data-ic="batch"></span>批次出圖</button>
             </div>
             <div class="rgroup-label">交付</div>
           </div>
@@ -528,6 +538,20 @@
 
   <div id="ctx-menu"></div>
   <div id="power-wheel"></div>
+
+  <div id="dwg-modal">
+    <div class="modal-box">
+      <div class="panel-title" id="dwg-mtitle">出圖設定</div>
+      <label>圖名</label><input id="dwg-title">
+      <label>圖號</label><input id="dwg-no">
+      <div style="display:flex;gap:10px">
+        <div style="width:96px"><label>Rev</label><input id="dwg-rev"></div>
+        <div style="flex:1"><label>繪製</label><input id="dwg-by" placeholder="繪製者/單位"></div>
+      </div>
+      <button class="tbtn primary" id="dwg-ok" style="width:100%;margin-top:14px">出圖</button>
+      <button class="tbtn" id="dwg-cancel" style="width:100%;margin-top:6px">取消</button>
+    </div>
+  </div>
 
   <div id="open-modal">
     <div class="modal-box">

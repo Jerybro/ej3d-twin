@@ -215,6 +215,9 @@
     /* 量測持久標註 */
     .m-note { padding: 2px 9px; border-radius: 10px; background: rgba(255, 170, 60, 0.92);
       color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; pointer-events: none; }
+    /* 3D 尺寸標註文字（藍，與量測橘做區隔） */
+    .dim-note { padding: 2px 9px; border-radius: 10px; background: rgba(47, 111, 216, 0.94);
+      color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; pointer-events: none; }
 
     /* 剖切盒面手柄（CSS2D） */
     .clip-handle { width: 14px; height: 14px; border-radius: 3px; background: rgba(4,106,251,.8);
@@ -371,6 +374,7 @@
             <div class="rgroup-tools">
               <button class="rbtn warn" id="btn-measure" title="點兩點量距離（可連續；空白鍵重複上次量測）；Esc 結束"><span class="ric" data-ic="measure"></span>距離</button>
               <button class="rbtn warn" id="btn-measure-angle" title="點三點量角度（第一點＝頂點）；Esc 結束"><span class="ric" data-ic="angle"></span>角度</button>
+              <button class="rbtn" id="btn-dim3d" title="點兩點建立持久 3D 尺寸標註（隨場景存檔；右鍵標註可刪除）；Esc 結束"><span class="ric" data-ic="measure"></span>3D 標註</button>
             </div>
             <div class="rgroup-label">量測</div>
           </div>

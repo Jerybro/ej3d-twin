@@ -14,6 +14,7 @@ import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight,
 import { initSprite } from './sprite.js';
 import { runClash, clashKey } from './clash.js';
 import { computeWeights } from './weight.js';
+import { buildDimensions } from './dimensions.js';
 
 // 結構鋼構定位線 Justification 選項（對標 E3D P-line）：柱常用 NA，梁常用 CTOP/TOS
 const JUST_OPTIONS = [
@@ -569,6 +570,7 @@ function loadSceneData(data, id) {
   sceneData.pipes.forEach((pipe, i) => buildPipe(pipe, i));
   rebuildUnderlays(sceneData.underlays);
   rebuildElevs();
+  rebuildDims();
   fitGround([...allEquipment()], sceneData.underlays);
   updateTopbar();
   rebuildTree();
@@ -613,6 +615,8 @@ function setMode(m) {
   ductDraw = false;
   document.getElementById('btn-measure').classList.remove('active');
   document.getElementById('btn-measure-angle').classList.remove('active');
+  document.getElementById('btn-dim3d').classList.remove('active');
+  dimPts = [];
   document.getElementById('pipe-node-btn').classList.remove('active');
   document.getElementById('btn-nozzle').classList.remove('active');
   if (ghost) { scene.remove(ghost); ghost = null; }
@@ -1552,6 +1556,19 @@ function pickObject(e) {
   return null;
 }
 
+// 專門對 3D 標註群做 raycast，回傳命中的 dimIndex（無則 null；供右鍵刪除）
+function pickDim(e) {
+  if (!dimGroup) return null;
+  setPointer(e);
+  raycaster.setFromCamera(pointer, camera);
+  for (const hit of raycaster.intersectObjects(dimGroup.children, true)) {
+    let o = hit.object;
+    while (o && o.userData?.dimIndex === undefined) o = o.parent;
+    if (o && o.userData?.dimIndex !== undefined) return o.userData.dimIndex;
+  }
+  return null;
+}
+
 renderer.domElement.addEventListener('pointermove', (e) => {
   const pt = groundPoint(e);
   if (pt) document.getElementById('st-coords').textContent =
@@ -1677,6 +1694,13 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     return;
   }
 
+  if (mode === 'dim3d') {
+    const hit = pickObject(e);
+    const pt = hit ? hit.point : groundPoint(e);
+    if (pt) addDimPoint(pt);
+    return;
+  }
+
   // placecomp：點擊確認元件位置
   if (mode === 'placecomp' && pendingComp?.at !== undefined) {
     pushUndo();
@@ -1756,6 +1780,16 @@ const VIEW_WHEEL = () => [
 renderer.domElement.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   if (downXY && Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]) > 5) return;
+  // 3D 標註右鍵 → 刪除該筆（在 idle 或 dim3d 模式皆可）
+  if ((mode === 'idle' || mode === 'dim3d') && dimGroup?.children.length) {
+    const di = pickDim(e);
+    if (di !== null) {
+      openCtxMenu(e.clientX, e.clientY, [
+        { label: '刪除標註', danger: true, run: () => deleteDim(di) },
+      ]);
+      return;
+    }
+  }
   // pipenode 模式：節點右鍵 → 輸入數值（E3D Enter Value）
   if (mode === 'pipenode') {
     const hit = pickObject(e);
@@ -2130,6 +2164,60 @@ function clearMeasure() {
   if (measureGroup) { scene.remove(measureGroup); measureGroup = null; }
 }
 
+// ------------------------------------------------------------ 3D 持久尺寸標註（E3D Draw Linear Dimension：sceneData.dims 持久化）
+// 資料：sceneData.dims = [{ a:[x,y,z], b:[x,y,z] }]（公尺 canonical）。
+// 群組由 dimensions.js 純函式重建；切單位（fmtLen 變）、載入場景、增刪皆重建。
+let dimGroup = null;      // 目前的標註群（buildDimensions 產物）
+let dimPts = [];          // 標註模式暫存的第一點
+
+function rebuildDims() {
+  if (dimGroup) {
+    dimGroup.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); });   // 清 CSS2D DOM，防孤兒標籤
+    scene.remove(dimGroup);
+    dimGroup = null;
+  }
+  dimGroup = buildDimensions(sceneData, THREE, fmtLen, CSS2DObject);
+  scene.add(dimGroup);
+}
+
+function startDim() {
+  if (mode === 'dim3d') { setMode('idle'); return; }
+  setMode('dim3d');
+  document.getElementById('btn-dim3d').classList.add('active');
+  setHint('3D 標註：點<b>兩點</b>（設備表面或地面）建立持久尺寸；可連續標，Esc 結束');
+}
+document.getElementById('btn-dim3d').addEventListener('click', startDim);
+
+// 標註模式點擊：收兩點→push 進 sceneData.dims→重建群組並存進場景資料
+function addDimPoint(pt) {
+  dimPts.push(pt.clone());
+  if (dimPts.length === 2) {
+    const [a, b] = dimPts;
+    if (a.distanceTo(b) >= 1e-4) {
+      pushUndo();
+      sceneData.dims = sceneData.dims ?? [];
+      sceneData.dims.push({
+        a: [roundMM(a.x), roundMM(a.y), roundMM(a.z)],
+        b: [roundMM(b.x), roundMM(b.y), roundMM(b.z)],
+      });
+      rebuildDims();
+      setHint(`已建立標註 <b>${fmtLen(a.distanceTo(b))}</b>。繼續點兩點標下一段，Esc 結束`);
+    }
+    dimPts = [];
+  } else {
+    setHint('3D 標註：已收第一點，再點<b>第二點</b>完成；Esc 取消');
+  }
+}
+
+// 右鍵刪除：傳入 pickObject 命中的 userData.dimIndex，移除該筆後重建
+function deleteDim(dimIndex) {
+  if (!sceneData.dims || dimIndex == null || dimIndex < 0 || dimIndex >= sceneData.dims.length) return;
+  pushUndo();
+  sceneData.dims.splice(dimIndex, 1);
+  rebuildDims();
+  setHint(`已刪除標註（剩 ${sceneData.dims.length} 筆）`);
+}
+
 // ------------------------------------------------------------ 剖切（Clip Box＋六平面，對標 E3D Clip and Cap）
 // 六面法向朝內：+X 面 normal(-1,0,0) constant=max.x → 盒內保留
 const clip = {
@@ -2396,6 +2484,7 @@ unitSel.addEventListener('change', () => {
   dispUnit = unitSel.value;
   localStorage.setItem('ej3d-disp-unit', dispUnit);
   refreshPropPanel();
+  rebuildDims();   // 標註文字走 fmtLen，切單位需重建
 });
 applySnapSettings();
 

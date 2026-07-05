@@ -2615,6 +2615,109 @@ function dwgTitleBlock(right, bottom, meta) {
 }
 
 // ------------------------------------------------------------ GA 出圖（俯視配置圖）
+// 對標 E3D ADP Gridline Dimensioning：由設備分佈自動推結構格線位置（公尺 canonical）。
+// 回傳 { ex:[E 座標…], nz:[N 座標…] }，皆為公尺、由小到大排序、無重複。
+function gaGridAxes(b) {
+  const MODULE = 5;                                   // 預設 5m 模組（依設備聚集取整）
+  const snap = (v) => Math.round(v / MODULE) * MODULE;
+  const collect = (vals) => [...new Set(vals.map(snap))].sort((a, x) => a - x);
+  const eqs = allEquipment().filter((e) => !hiddenTags.has(e.tag));
+  let ex = collect(eqs.map((e) => e.pos[0]));
+  let nz = collect(eqs.map((e) => e.pos[2]));
+  // 設備太少或聚集過密/過疏 → 退回沿場界均勻 5m 格線，保證圖面有可讀格網
+  const uniform = (lo, hi) => {
+    const a = [];
+    for (let g = Math.floor(lo / MODULE) * MODULE; g <= hi + 1e-6; g += MODULE) a.push(g);
+    return a;
+  };
+  if (ex.length < 2 || ex.length > 12) ex = uniform(b.min.x, b.max.x);
+  if (nz.length < 2 || nz.length > 12) nz = uniform(b.min.z, b.max.z);
+  return { ex, nz };
+}
+
+// 結構格線層：縱線 1/2/3…（沿 E）、橫線 A/B/C…（沿 N），端點畫圈標號（A-1 式）。
+// sx/sz：公尺→SVG px 映射（沿用 gaSvg 慣例）；drawTop/drawBottom/drawLeft/drawRight：繪圖區 px 邊界。
+function gaGridlineParts(axes, sx, sz, drawTop, drawBottom, drawLeft, drawRight) {
+  const parts = [];
+  const R = 9;                                         // 端點圈半徑 px
+  const off = 16;                                      // 圈心離繪圖邊的 px 距離
+  const colNum = (i) => String(i + 1);                 // 縱線編號 1,2,3…
+  const rowLtr = (i) => String.fromCharCode(65 + (i % 26)) + (i >= 26 ? String(Math.floor(i / 26)) : '');
+  // 縱向格線（沿 E，垂直線）＋上下端圈號（數字）
+  axes.ex.forEach((e, i) => {
+    const x = +sx(e);
+    parts.push(`<line x1="${x}" y1="${drawTop}" x2="${x}" y2="${drawBottom}" stroke="#274b66" stroke-width="0.7" stroke-dasharray="10 4 2 4" opacity="0.55"/>`);
+    for (const cy of [drawTop - off, drawBottom + off]) {
+      parts.push(`<circle cx="${x}" cy="${cy}" r="${R}" fill="#fff" stroke="#274b66" stroke-width="1.2"/>`);
+      parts.push(`<text x="${x}" y="${(cy + 3.2).toFixed(1)}" font-size="9.5" font-weight="700" fill="#12283a" text-anchor="middle">${colNum(i)}</text>`);
+    }
+  });
+  // 橫向格線（沿 N，水平線）＋左右端圈號（字母）
+  axes.nz.forEach((n, i) => {
+    const y = +sz(n);
+    parts.push(`<line x1="${drawLeft}" y1="${y}" x2="${drawRight}" y2="${y}" stroke="#274b66" stroke-width="0.7" stroke-dasharray="10 4 2 4" opacity="0.55"/>`);
+    for (const cx of [drawLeft - off, drawRight + off]) {
+      parts.push(`<circle cx="${cx}" cy="${y}" r="${R}" fill="#fff" stroke="#274b66" stroke-width="1.2"/>`);
+      parts.push(`<text x="${cx}" y="${(y + 3.2).toFixed(1)}" font-size="9.5" font-weight="700" fill="#12283a" text-anchor="middle">${rowLtr(i)}</text>`);
+    }
+  });
+  return parts;
+}
+
+// 尺寸標註鏈：沿圖框上緣標各縱格線間距、沿左緣標各橫格線間距（mm，沿用出圖層 ×1000 慣例）；
+// 並標主要設備中心→最近格線的距離。tickLen=延伸線長 px。
+function gaDimChainParts(axes, sx, sz, chainTop, chainLeft) {
+  const parts = [];
+  const BLUE = '#046AFB';                              // 沿用出圖層 mm 標註色
+  const mm = (m) => (m * 1000).toFixed(0);            // 公尺→mm 字串（出圖層慣例）
+  // 上緣：縱格線間距鏈（水平量測）
+  if (axes.ex.length >= 2) {
+    const y = chainTop;
+    const xs = axes.ex.map((e) => +sx(e));
+    parts.push(`<line x1="${xs[0]}" y1="${y}" x2="${xs[xs.length - 1]}" y2="${y}" stroke="${BLUE}" stroke-width="0.8"/>`);
+    xs.forEach((x) => parts.push(`<line x1="${x}" y1="${y - 4}" x2="${x}" y2="${y + 4}" stroke="${BLUE}" stroke-width="0.8"/>`));
+    for (let i = 0; i < axes.ex.length - 1; i++) {
+      const mx = (xs[i] + xs[i + 1]) / 2;
+      parts.push(`<text x="${mx.toFixed(1)}" y="${y - 5}" font-size="9.5" fill="${BLUE}" text-anchor="middle" font-weight="600">${mm(axes.ex[i + 1] - axes.ex[i])}</text>`);
+    }
+  }
+  // 左緣：橫格線間距鏈（垂直量測，文字旋轉 -90°）
+  if (axes.nz.length >= 2) {
+    const x = chainLeft;
+    const ys = axes.nz.map((n) => +sz(n));
+    parts.push(`<line x1="${x}" y1="${ys[0]}" x2="${x}" y2="${ys[ys.length - 1]}" stroke="${BLUE}" stroke-width="0.8"/>`);
+    ys.forEach((y) => parts.push(`<line x1="${x - 4}" y1="${y}" x2="${x + 4}" y2="${y}" stroke="${BLUE}" stroke-width="0.8"/>`));
+    for (let i = 0; i < axes.nz.length - 1; i++) {
+      const my = (ys[i] + ys[i + 1]) / 2;
+      parts.push(`<text x="${(x - 5).toFixed(1)}" y="${my.toFixed(1)}" font-size="9.5" fill="${BLUE}" text-anchor="middle" font-weight="600" transform="rotate(-90 ${(x - 5).toFixed(1)} ${my.toFixed(1)})">${mm(axes.nz[i + 1] - axes.nz[i])}</text>`);
+    }
+  }
+  // 主要設備中心→最近格線偏置（E 向對最近縱線、N 向對最近橫線），只標非零偏置避免雜訊
+  const nearest = (arr, v) => arr.reduce((a, x) => Math.abs(x - v) < Math.abs(a - v) ? x : a, arr[0]);
+  for (const eq of allEquipment()) {
+    if (hiddenTags.has(eq.tag)) continue;
+    const [ecx, , ecz] = eq.pos;
+    const cx = +sx(ecx), cy = +sz(ecz);
+    if (axes.ex.length) {
+      const g = nearest(axes.ex, ecx), dm = ecx - g;
+      if (Math.abs(dm) >= 0.05) {                      // ≥50mm 才標
+        const gx = +sx(g);
+        parts.push(`<line x1="${gx}" y1="${cy}" x2="${cx}" y2="${cy}" stroke="${BLUE}" stroke-width="0.6" stroke-dasharray="3 2" opacity="0.85"/>`);
+        parts.push(`<text x="${((gx + cx) / 2).toFixed(1)}" y="${(cy - 2).toFixed(1)}" font-size="8" fill="${BLUE}" text-anchor="middle">${mm(Math.abs(dm))}</text>`);
+      }
+    }
+    if (axes.nz.length) {
+      const g = nearest(axes.nz, ecz), dm = ecz - g;
+      if (Math.abs(dm) >= 0.05) {
+        const gy = +sz(g);
+        parts.push(`<line x1="${cx}" y1="${gy}" x2="${cx}" y2="${cy}" stroke="${BLUE}" stroke-width="0.6" stroke-dasharray="3 2" opacity="0.85"/>`);
+        parts.push(`<text x="${(cx + 3).toFixed(1)}" y="${((gy + cy) / 2).toFixed(1)}" font-size="8" fill="${BLUE}">${mm(Math.abs(dm))}</text>`);
+      }
+    }
+  }
+  return parts;
+}
+
 function gaSvg(meta = {}) {
   const b = sceneBounds();
   const pad = 6;
@@ -2653,10 +2756,19 @@ function gaSvg(meta = {}) {
     }
     parts.push(`<text x="${sx(ex)}" y="${(parseFloat(sz(ez)) - (dims.r ? dims.r * S : 8) - 4).toFixed(1)}" font-size="10" font-weight="600" fill="#12283a" text-anchor="middle">${eq.tag}</text>`);
   }
+  // 結構格線 + 尺寸標註鏈（對標 E3D ADP Gridline Dimensioning）
+  // 繪圖區 px 範圍：設備投影落在 [0, W*S]×[0, H*S]（x0/z0 已含 pad=6m 邊界）
+  const axes = gaGridAxes(b);
+  const drawTop = 0, drawBottom = H * S, drawLeft = 0, drawRight = W * S;
+  parts.push(...gaGridlineParts(axes, sx, sz, drawTop, drawBottom, drawLeft, drawRight));
+  // 尺寸鏈畫在格線圈之外（上緣圈 off=16 + R=9，鏈再外推）
+  parts.push(...gaDimChainParts(axes, sx, sz, drawTop - 32, drawLeft - 32));
   // 圖框（雙線）＋制式標題欄＋比例尺
   const now = new Date();
   const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  const PW = W * S, PH = H * S + 78;
+  // 為格線端圈＋尺寸鏈預留邊距（px）：內容整體平移 MARGIN，頁面對應加大
+  const MARGIN = 52;
+  const PW = W * S + MARGIN * 2, PH = H * S + MARGIN * 2 + 78;
   const tb = dwgTitleBlock(PW - 7, PH - 7, {
     project: `設備 ${allEquipment().length}・管線 ${sceneData.pipes.length}${meta.by ? ' · ' + meta.by : ''}`,
     title: meta.title ?? `${sceneData.plant.name}｜GENERAL ARRANGEMENT 配置圖`,
@@ -2667,7 +2779,7 @@ function gaSvg(meta = {}) {
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PW} ${PH}" font-family="Inter,'Noto Sans TC',sans-serif" style="background:#fff">
   <rect x="1" y="1" width="${PW - 2}" height="${PH - 2}" fill="#fdfefe" stroke="#12283a" stroke-width="1.8"/>
   <rect x="7" y="7" width="${PW - 14}" height="${PH - 14}" fill="none" stroke="#12283a" stroke-width="0.7"/>
-  <g clip-path="none">
+  <g transform="translate(${MARGIN} ${MARGIN})" clip-path="none">
   ${parts.join('\n  ')}
   </g>
   <g transform="translate(16 ${PH - 24})">

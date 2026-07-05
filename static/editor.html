@@ -265,7 +265,10 @@
     .st-toggle { cursor: pointer; padding: 1px 8px; border-radius: 5px; border: 1px solid var(--bdr);
       background: none; color: var(--dim); font-family: inherit; font-size: 11px; }
     .st-toggle.on { color: var(--accent); border-color: var(--accent); }
-    #st-coords { min-width: 210px; }
+    #st-coords { min-width: 232px; }
+    .st-mini { display: flex; align-items: center; gap: 4px; }
+    .st-mini select { background: var(--panel); color: var(--text); border: 1px solid var(--bdr);
+      border-radius: 4px; font-family: inherit; font-size: 11px; padding: 1px 4px; cursor: pointer; }
 
     /* ================= 開啟場景 modal ================= */
     #open-modal { position: fixed; inset: 0; z-index: 90; display: none;
@@ -415,6 +418,7 @@
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
+              <button class="rbtn" id="btn-pipelist" title="管線清單（Pipe List）：全場景管線 Spec/DN/Sch/總長一覽，點選定位"><span class="ric" data-ic="pipe"></span>管線清單</button>
               <button class="rbtn" id="btn-iso" title="輸出選中管線的等角 ISO 單管圖（含尺寸標註與元件表）"><span class="ric" data-ic="iso"></span>出 ISO</button>
             </div>
             <div class="rgroup-label">交付</div>
@@ -536,7 +540,11 @@
     <div id="statusbar">
       <span id="st-coords">X: — Y: — Z: —</span>
       <span id="st-sel">選取：無</span>
-      <button class="st-toggle on" id="st-snap" title="放置/節點拖曳吸附 0.5m 網格">捕捉 0.5m</button>
+      <button class="st-toggle on" id="st-snap" title="放置/節點拖曳吸附網格（粒度見右側）">捕捉 25mm</button>
+      <label class="st-mini" title="吸附網格粒度（mm）">網格 <select id="st-snapstep"></select></label>
+      <label class="st-mini" title="顯示與輸入單位">單位 <select id="st-unit">
+        <option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option>
+      </select></label>
       <span id="st-count"></span>
       <span id="st-nav" title="中鍵按住＝目前導航模式；F2 縮放、F3 平移、F5 旋轉">MB2：旋轉</span>
       <span style="margin-left:auto" id="st-mode">就緒</span>

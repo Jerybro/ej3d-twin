@@ -9,9 +9,10 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight,
          buildPrim, buildPipeComponent, PIPE_COMPONENTS,
-         PIPE_SPECS, PIPE_BORES } from './plant-builders.js';
+         PIPE_SPECS, PIPE_BORES, PIPE_SCHEDULES, pipeWall,
+         STEEL_SECTIONS, steelSection } from './plant-builders.js';
 import { initSprite } from './sprite.js';
-import { runClash } from './clash.js';
+import { runClash, clashKey } from './clash.js';
 
 const viewport = document.getElementById('viewport');
 
@@ -69,6 +70,37 @@ document.querySelectorAll('.ric[data-ic]').forEach((el) => {
   const d = ICONS[el.dataset.ic];
   if (d) el.innerHTML = `<svg viewBox="0 0 24 24">${d}</svg>`;
 });
+
+// ---------------------------------------------------------------- 單位系統（對標 E3D）
+// 鐵律：sceneData 內所有數值恆為「公尺」(canonical)。mm 只存在於兩個邊界——
+//   顯示格式化（公尺 ×1000）與 輸入解析（mm ÷1000）。
+//   undo 快照 / 存檔(/api/scenes) / USD 匯出 / plant.json / 孿生檢視 一律讀未轉換的公尺值。
+const DISP_UNITS = {
+  mm: { f: 1000, dp: 0, step: 1,     label: 'mm' },
+  cm: { f: 100,  dp: 1, step: 0.1,   label: 'cm' },
+  m:  { f: 1,    dp: 3, step: 0.001, label: 'm'  },
+};
+let dispUnit = localStorage.getItem('ej3d-disp-unit') || 'mm';
+const U = () => DISP_UNITS[dispUnit] ?? DISP_UNITS.mm;
+const roundMM = (m) => Math.round((m ?? 0) * 1000) / 1000;      // canonical 精度＝1mm，消浮點尾數
+const toDisp = (m) => {                                          // 公尺 → 顯示單位數值（供 input value）
+  const u = U();
+  return u.f === 1000 ? Math.round((m ?? 0) * 1000) : +(roundMM(m) * u.f).toFixed(u.dp);
+};
+const fromDisp = (v) => roundMM((parseFloat(v) || 0) / U().f);  // 顯示單位數值 → 公尺
+const fmtLen = (m, withUnit = true) => {                        // 格式化長度字串（顯示用；先收斂到 1mm 消幽靈小數）
+  const u = U();
+  const s = u.f === 1000 ? String(Math.round((m ?? 0) * 1000)) : (roundMM(m) * u.f).toFixed(u.dp);
+  return withUnit ? `${s} ${u.label}` : s;
+};
+const unitLabel = () => U().label;
+// 吸附網格（mm）——與顯示單位解耦，讓「可輸入精確 mm」為真（E3D 慣例：粗網格＋1mm 微調）
+let snapStepMm = +localStorage.getItem('ej3d-snap-mm') || 25;
+const SNAP_STEPS = [1, 5, 10, 25, 50, 100];
+// 計數型 dims（非長度，不做 mm 轉換）
+const COUNT_DIMS = new Set(['rows', 'bays']);
+// 半徑型 dims：E3D 容器以「直徑」規格，面板顯示/輸入 ⌀＝r×2、寫回 ÷2（canonical 仍存半徑）
+const DIA_DIMS = { r: '直徑 ⌀', r1: '底徑 ⌀', r2: '頂徑 ⌀' };
 
 // ---------------------------------------------------------------- 三維基礎
 const scene = new THREE.Scene();
@@ -128,9 +160,9 @@ transform.addEventListener('dragging-changed', (e) => {
   if (e.value) pushUndo(); // 變換開始前存快照
 });
 scene.add(transform);
-// E3D increment：拖曳中即吸附（0.5m／15°），隨狀態列捕捉開關連動
+// E3D increment：拖曳中即吸附（mm 網格／15°），隨狀態列捕捉開關與網格粒度連動
 function applySnapSettings() {
-  transform.setTranslationSnap(snapOn ? 0.5 : null);
+  transform.setTranslationSnap(snapOn ? snapStepMm / 1000 : null);
   transform.setRotationSnap(snapOn ? THREE.MathUtils.degToRad(15) : null);
 }
 
@@ -310,6 +342,7 @@ function rebuildEquipment(def) {
 
 // ------------------------------------------------------------ 管線渲染
 const pipeMat = std(0x646f7b);
+const insulMat = new THREE.MeshStandardMaterial({ color: 0xcdd6df, transparent: true, opacity: 0.26, roughness: 1 });
 const pipeHi = std(0xffaa3c, { emissive: 0x442a00, emissiveIntensity: 0.6 });
 
 function buildPipe(pipe, index) {
@@ -340,6 +373,14 @@ function buildPipe(pipe, index) {
     cyl.castShadow = !lite;
     cyl.userData.pipeIndex = index;
     group.add(cyl);
+    if (pipe.insul > 0) {   // 保溫外殼（半透明，含保溫外徑）
+      const ins = new THREE.Mesh(new THREE.CylinderGeometry(segR + pipe.insul, segR + pipe.insul, len, lite ? 6 : 12), insulMat);
+      ins.position.copy(cyl.position);
+      ins.quaternion.copy(cyl.quaternion);
+      ins.userData.pipeIndex = index;
+      ins.userData.insul = true;
+      group.add(ins);
+    }
     if (!lite && i < pts.length - 2) {
       // 直角折點畫 quarter-torus 彎頭（E3D elbow 視覺），其餘畫球
       const u = pts[i].clone().sub(pts[i + 1]).normalize();      // 指向前一段
@@ -475,6 +516,7 @@ let ductDraw = false;     // 繪製模式：true=下一條管線為風管
 let ductSize = [0.8, 0.5];
 let ghost = null;
 let selected = null;      // { kind: 'eq', def } | { kind: 'pipe', index }
+let repaintPanel = null;  // 目前右側面板的重繪閉包（切換單位時即時刷新 value/step/單位標籤）
 let pipeDraft = [];       // Vector3[]
 let pipePreview = null;
 let snapOn = true;
@@ -512,9 +554,10 @@ function clearPipeDraft() {
 
 function selectNone() {
   selected = null;
+  repaintPanel = null;
   transform.detach();
   clearNodeHandles();
-  pipeObjects.forEach((p, i) => { if (!p) return; const m = sceneData.pipes[i]?.profile === 'duct' ? ductMat : pipeMat; p.group.traverse((o) => { if (o.isMesh) o.material = m; }); });
+  pipeObjects.forEach((p, i) => { if (!p) return; const m = sceneData.pipes[i]?.profile === 'duct' ? ductMat : pipeMat; p.group.traverse((o) => { if (o.isMesh && !o.userData.insul) o.material = m; }); });
   renderPropEmpty();
   syncTreeSelection();
   document.getElementById('st-sel').textContent = '選取：無';
@@ -538,7 +581,7 @@ function selectPipe(index) {
   selectNone();
   selected = { kind: 'pipe', index };
   const p = pipeObjects[index];
-  if (p) p.group.traverse((o) => { if (o.isMesh) o.material = pipeHi; });
+  if (p) p.group.traverse((o) => { if (o.isMesh && !o.userData.insul) o.material = pipeHi; });
   renderPipeProps(index);
   document.getElementById('st-sel').textContent = `選取：管線 #${index + 1}`;
   if (mode === 'pipenode') buildNodeHandles(index);
@@ -556,14 +599,21 @@ function selectNozzle(tag, nzId) {
   document.getElementById('st-sel').textContent = `選取：${tag} / ${nz.id}（管嘴）`;
 }
 function renderNozzleProps(def, nz) {
+  repaintPanel = () => renderNozzleProps(def, nz);
   document.getElementById('prop-title').textContent = `${def.tag} / ${nz.id}`;
-  const opts = PIPE_BORES.map((b) => `<option ${b.dn === nz.dn ? 'selected' : ''}>${b.dn}</option>`).join('');
+  const opts = PIPE_BORES.map((b) => `<option value="${b.dn}" ${b.dn === nz.dn ? 'selected' : ''}>${b.dn}（⌀${Math.round(b.r * 2000)}mm）</option>`).join('');
+  const NZ_DIRS = [['北 N', [0, 0, -1]], ['南 S', [0, 0, 1]], ['東 E', [1, 0, 0]], ['西 W', [-1, 0, 0]], ['上 U', [0, 1, 0]], ['下 D', [0, -1, 0]]];
+  const curDir = JSON.stringify((nz.dir ?? [0, 0, 1]).map((v) => Math.round(v)));
+  const known = NZ_DIRS.some(([, v]) => JSON.stringify(v) === curDir);
+  const dirOpts = (known ? '' : `<option value="" selected disabled>（自訂 ${nz.dir.map((v) => (+v).toFixed(2)).join(',')}）</option>`)
+    + NZ_DIRS.map(([name, v]) => `<option value='${JSON.stringify(v)}' ${JSON.stringify(v) === curDir ? 'selected' : ''}>${name}</option>`).join('');
   propBody.innerHTML = `
     <div class="pg-section">管嘴 Nozzle</div>
     <div class="pg-grid">
       ${pgRow('位號', `<span>${nz.id}</span>`)}
       ${pgRow('口徑 DN', `<select data-nz="dn">${opts}</select>`)}
-      ${pgRow('方向', `<span>${nz.dir.map((v) => (+v).toFixed(2)).join(', ')}</span>`)}
+      ${pgRow(`標高 U (${unitLabel()})`, `<input data-nz="u" type="number" step="${U().step}" value="${toDisp(nz.pos?.[1] ?? 0)}">`)}
+      ${pgRow('方向 P-line', `<select data-nz="dir">${dirOpts}</select>`)}
       ${pgRow('母設備', `<span class="pg-owner" style="cursor:pointer">${def.tag}</span>`)}
     </div>
     <button class="pbtn" id="nz-selparent">選取母設備</button>
@@ -571,6 +621,20 @@ function renderNozzleProps(def, nz) {
   propBody.querySelector('[data-nz="dn"]').addEventListener('change', (e) => {
     pushUndo();
     nz.dn = e.target.value;
+    rebuildEquipment(def);
+    selectNozzle(def.tag, nz.id);
+  });
+  propBody.querySelector('[data-nz="u"]').addEventListener('change', (e) => {
+    pushUndo();
+    nz.pos = nz.pos ?? [0, 0, 0];
+    nz.pos[1] = fromDisp(e.target.value);
+    rebuildEquipment(def);
+    selectNozzle(def.tag, nz.id);
+  });
+  propBody.querySelector('[data-nz="dir"]').addEventListener('change', (e) => {
+    if (!e.target.value) return;
+    pushUndo();
+    nz.dir = JSON.parse(e.target.value);
     rebuildEquipment(def);
     selectNozzle(def.tag, nz.id);
   });
@@ -600,10 +664,14 @@ function pgRow(label, inner) {
 }
 
 function renderPropPanel(def) {
+  repaintPanel = () => renderPropPanel(def);
   document.getElementById('prop-title').textContent = def.tag;
   const owner = sceneData.plant.units.find((u) => u.equipment.includes(def));
-  const dimRows = Object.entries(def.dims).map(([k, v]) =>
-    pgRow(`尺寸 ${k}`, `<input data-k="dims.${k}" type="number" step="0.1" value="${v}">`)).join('');
+  const dimRows = Object.entries(def.dims).map(([k, v]) => {
+    if (COUNT_DIMS.has(k)) return pgRow(`${k}`, `<input data-k="dims.${k}" type="number" step="1" value="${v}">`);
+    if (DIA_DIMS[k]) return pgRow(`${DIA_DIMS[k]} (${unitLabel()})`, `<input data-k="dims.${k}" type="number" step="${U().step}" value="${toDisp(v * 2)}">`);
+    return pgRow(`尺寸 ${k} (${unitLabel()})`, `<input data-k="dims.${k}" type="number" step="${U().step}" value="${toDisp(v)}">`);
+  }).join('');
   const infoRows = [
     def.pid_ref ? pgRow('P&ID', `<span>${def.pid_ref}</span>`) : '',
     def.design?.['尺寸來源'] ? pgRow('尺寸來源', `<span>${def.design['尺寸來源']}</span>`) : '',
@@ -619,13 +687,20 @@ function renderPropPanel(def) {
     </div>
     <div class="pg-section">Positional</div>
     <div class="pg-grid">
-      ${pgRow('東 E', `<input data-k="pos.0" type="number" step="0.5" value="${def.pos[0]}">`)}
-      ${pgRow('北 N', `<input data-k="pos.2" type="number" step="0.5" value="${def.pos[2]}">`)}
-      ${pgRow('上 U', `<span>0.00</span>`)}
+      ${pgRow(`東 E (${unitLabel()})`, `<input data-k="pos.0" type="number" step="${U().step}" value="${toDisp(def.pos[0])}">`)}
+      ${pgRow(`北 N (${unitLabel()})`, `<input data-k="pos.2" type="number" step="${U().step}" value="${toDisp(def.pos[2])}">`)}
+      ${pgRow(`上 U (${unitLabel()})`, `<span>${toDisp(def.pos[1] ?? 0)}</span>`)}
       ${pgRow('旋轉（度）', `<input data-k="rot" type="number" step="5" value="${Math.round((def.rot_y ?? 0) * 180 / Math.PI)}">`)}
       ${pgRow('WRT', `<span>/WORL</span>`)}
     </div>
     ${dimRows ? `<div class="pg-section">Design Parameters</div><div class="pg-grid">${dimRows}</div>` : ''}
+    ${['scolumn', 'sbeam'].includes(def.type) ? (() => {
+      const s = steelSection(def.section);
+      return `<div class="pg-section">斷面 Section</div><div class="pg-grid">
+        ${pgRow('型鋼', `<select data-k="section" style="width:100%">${STEEL_SECTIONS.map((x) =>
+          `<option value="${x.code}" ${s.code === x.code ? 'selected' : ''}>${x.code}</option>`).join('')}</select>`)}
+        ${pgRow('斷面 (mm)', `<span>D${s.depth}×B${s.flange}｜tw${s.web}／tf${s.tf}</span>`)}</div>`;
+    })() : ''}
     ${def.nozzles?.length ? `<div class="pg-section">管嘴 Nozzles</div><div class="pg-grid">${def.nozzles.map((nz, i) =>
       pgRow(nz.id, `<select data-nzdn="${i}" class="rsel" style="width:86px">${PIPE_BORES.map((b) =>
         `<option ${b.dn === nz.dn ? 'selected' : ''}>${b.dn}</option>`).join('')}</select>
@@ -662,15 +737,24 @@ function renderPropPanel(def) {
         def.name = inp.value;
         rebuildTree();
       } else if (k.startsWith('pos.')) {
-        def.pos[+k.slice(4)] = +inp.value;
+        def.pos[+k.slice(4)] = fromDisp(inp.value);
         eqObjects.get(def.tag).group.position.set(...def.pos);
       } else if (k.startsWith('dims.')) {
-        def.dims[k.slice(5)] = +inp.value;
+        const dk = k.slice(5);
+        def.dims[dk] = COUNT_DIMS.has(dk) ? Math.max(1, Math.round(+inp.value))
+          : DIA_DIMS[dk] ? Math.round(fromDisp(inp.value) / 2 * 10000) / 10000   // ⌀→半徑（保 0.1mm）
+          : fromDisp(inp.value);
         rebuildEquipment(def);
       }
       document.getElementById('prop-title').textContent = def.tag;
       syncTreeSelection();
     });
+  });
+  propBody.querySelector('[data-k="section"]')?.addEventListener('change', (e) => {
+    pushUndo();
+    def.section = e.target.value;
+    rebuildEquipment(def);
+    renderPropPanel(def);
   });
   propBody.querySelectorAll('[data-nzdn]').forEach((sel) => sel.addEventListener('change', () => {
     pushUndo();
@@ -698,7 +782,7 @@ function renderPropPanel(def) {
     buildEquipment(tray);
     rebuildTree();
     updateTopbar();
-    setHint(`已沿 <b>${def.tag}</b> 頂層佈橋架 <b>${tray.tag}</b>（EL.${((def.dims.h ?? 4) + 0.15).toFixed(2)}，儀電圖層）`);
+    setHint(`已沿 <b>${def.tag}</b> 頂層佈橋架 <b>${tray.tag}</b>（EL.${Math.round(((def.dims.h ?? 4) + 0.15) * 1000)}，儀電圖層）`);
   });
   document.getElementById('prop-tray-chain')?.addEventListener('click', () => {
     pushUndo();
@@ -716,15 +800,20 @@ const PRIM_KINDS = {
   cyli: { name: 'CYLI 圓柱', dims: { r: 0.9, h: 1.8 } },
   cone: { name: 'CONE 錐段', dims: { r1: 0.9, r2: 0.45, h: 1.0 } },
   dish: { name: 'DISH 封頭', dims: { r: 0.9 } },
+  snou: { name: 'SNOU 偏心漸縮', dims: { r1: 0.9, r2: 0.45, h: 1.0, off: 0.3 } },
+  pyra: { name: 'PYRA 角錐/漏斗', dims: { bx: 1.4, bz: 1.4, tx: 0.5, tz: 0.5, h: 1.2 } },
+  ctor: { name: 'CTOR 圓環/彎頭', dims: { r: 0.9, rt: 0.2, ang: 90 } },
 };
+// 基元中非長度型的參數（角度等），不做 mm 轉換
+const PRIM_NONLEN = new Set(['ang']);
 const primHeight = (p) => p.kind === 'dish' ? p.dims.r : (p.dims.h ?? 1);
 
 function primsSection(def) {
   const rows = (def.prims ?? []).map((p, i) => {
-    const dimStr = Object.entries(p.dims).map(([k, v]) => `${k}=${v}`).join(' ');
+    const dimStr = Object.entries(p.dims).map(([k, v]) => `${k}=${PRIM_NONLEN.has(k) ? v : toDisp(v)}`).join(' ');
     return `<label>${PRIM_KINDS[p.kind]?.name.split(' ')[0] ?? p.kind} #${i + 1}</label>
       <div class="pg-v" style="display:flex;gap:4px;align-items:center">
-        <span style="flex:1;background:none;padding:4px 6px">${dimStr}｜y=${p.pos?.[1] ?? 0}</span>
+        <span style="flex:1;background:none;padding:4px 6px" title="${unitLabel()}">${dimStr}｜y=${toDisp(p.pos?.[1] ?? 0)}</span>
         <button class="pane-x" data-pedit="${i}" title="編修">…</button>
         <button class="pane-x" data-pdel="${i}" title="刪除">✕</button>
       </div>`;
@@ -756,14 +845,15 @@ function wirePrims(def) {
   }));
   propBody.querySelectorAll('[data-pedit]').forEach((b) => b.addEventListener('click', () => {
     const p = def.prims[+b.dataset.pedit];
-    const cur = Object.entries(p.dims).map(([k, v]) => `${k}=${v}`).join(', ') + `, y=${p.pos?.[1] ?? 0}`;
-    const s = prompt('基元參數（如 r=1.2, h=3, y=2.5）：', cur);
+    const cur = Object.entries(p.dims).map(([k, v]) => `${k}=${PRIM_NONLEN.has(k) ? v : toDisp(v)}`).join(', ') + `, y=${toDisp(p.pos?.[1] ?? 0)}`;
+    const s = prompt(`基元參數（長度 ${unitLabel()}／角度 度，如 r=1200, h=3000, y=2500）：`, cur);
     if (!s) return;
     pushUndo();
     for (const kv of s.split(',')) {
       const [k, v] = kv.split('=').map((x) => x.trim());
       if (!k || Number.isNaN(+v)) continue;
-      if (k === 'y') { p.pos = p.pos ?? [0, 0, 0]; p.pos[1] = +v; } else p.dims[k] = +v;
+      if (k === 'y') { p.pos = p.pos ?? [0, 0, 0]; p.pos[1] = fromDisp(v); }
+      else p.dims[k] = PRIM_NONLEN.has(k) ? +v : fromDisp(v);
     }
     rebuildEquipment(def);
     renderPropPanel(def);
@@ -771,6 +861,7 @@ function wirePrims(def) {
 }
 
 function renderPipeProps(index) {
+  repaintPanel = () => renderPipeProps(index);
   const pipe = sceneData.pipes[index];
   document.getElementById('prop-title').textContent = `管線 #${index + 1}`;
   const isDuct = pipe.profile === 'duct';
@@ -780,7 +871,7 @@ function renderPipeProps(index) {
   const compRows = (pipe.components ?? []).map((c, i) =>
     `<label>${compName[c.kind] ?? c.kind}</label>
      <div class="pg-v" style="display:flex;gap:4px;align-items:center">
-       <input data-cat="${i}" type="number" step="0.5" value="${c.at}" title="距管頭弧長（m）" style="flex:1">
+       <input data-cat="${i}" type="number" step="${U().step}" value="${toDisp(c.at)}" title="距管頭弧長（${unitLabel()}）" style="flex:1">
        <button class="pane-x" data-cdel="${i}" title="刪除">✕</button>
      </div>`).join('');
   const compOpts = compKinds.map((c) => `<option value="${c.kind}">${c.name}</option>`).join('');
@@ -795,11 +886,23 @@ function renderPipeProps(index) {
     <div class="pg-grid">
       ${pgRow('Spec', `<select data-k="spec" style="width:100%">${PIPE_SPECS.map((sp) =>
         `<option value="${sp.code}" ${pipe.spec === sp.code ? 'selected' : ''}>${sp.code}｜${sp.name}</option>`).join('')}</select>`)}
-      ${pgRow('Bore', `<select data-k="dn" style="width:100%">${PIPE_BORES.map((b) =>
-        `<option value="${b.dn}" ${pipe.dn === b.dn || (!pipe.dn && Math.abs(b.r - pipe.r) < 0.01) ? 'selected' : ''}>${b.dn}（r${b.r}）</option>`).join('')}</select>`)}
-      ${pgRow('管徑 r', `<input data-k="r" type="number" step="0.02" value="${pipe.r}">`)}
+      ${pgRow('Bore', `<select data-k="dn" style="width:100%">${
+        (!pipe.dn && !PIPE_BORES.some((b) => Math.abs(b.r - pipe.r) < 0.01))
+          ? '<option value="" selected disabled>（自訂 bore）</option>' : ''}${PIPE_BORES.map((b) =>
+        `<option value="${b.dn}" ${pipe.dn === b.dn || (!pipe.dn && Math.abs(b.r - pipe.r) < 0.01) ? 'selected' : ''}>${b.dn}（⌀${Math.round(b.r * 2000)}mm）</option>`).join('')}</select>`)}
+      ${pgRow(`外徑 ⌀ (${unitLabel()})`, `<input data-k="od" type="number" step="${U().step}" value="${toDisp(pipe.r * 2)}">`)}
+      ${isDuct ? '' : pgRow('Schedule', `<select data-k="sched" style="width:100%">${PIPE_SCHEDULES.map((s) =>
+        `<option value="${s}" ${(pipe.sched ?? 'STD') === s ? 'selected' : ''}>Sch ${s}</option>`).join('')}</select>`)}
+      ${(() => {
+        const wall = isDuct ? null : pipeWall(pipe.dn, pipe.sched ?? 'STD');
+        return wall == null ? ''
+          : pgRow(`壁厚 (${unitLabel()})`, `<span>${fmtLen(wall, false)}</span>`)
+          + pgRow(`內徑 bore (${unitLabel()})`, `<span>${fmtLen(pipe.r * 2 - 2 * wall, false)}</span>`);
+      })()}
+      ${pgRow(`保溫厚 (${unitLabel()})`, `<input data-k="insul" type="number" step="${U().step}" value="${toDisp(pipe.insul ?? 0)}">`)}
+      ${(pipe.insul ?? 0) > 0 ? pgRow(`含保溫外徑 (${unitLabel()})`, `<span>${fmtLen(pipe.r * 2 + 2 * pipe.insul, false)}</span>`) : ''}
       ${pgRow('節點數', `<span>${pipe.pts.length}</span>`)}
-      ${pgRow('總長', `<span>${pipeLength(pipe).toFixed(1)} m</span>`)}
+      ${pgRow('總長', `<span>${fmtLen(pipeLength(pipe))}</span>`)}
     </div>
     <div class="pg-section">Components（管中元件）</div>
     ${compRows ? `<div class="pg-grid">${compRows}</div>` : ''}
@@ -809,9 +912,10 @@ function renderPipeProps(index) {
     </div>
     <button class="pbtn" id="prop-nodes">節點編輯</button>
     <button class="pbtn danger" id="prop-delete">刪除（Delete）</button>`;
-  propBody.querySelector('[data-k="r"]').addEventListener('change', (e) => {
+  propBody.querySelector('[data-k="od"]').addEventListener('change', (e) => {
     pushUndo();
-    pipe.r = +e.target.value;
+    pipe.dn = null;   // 手改外徑＝自訂 bore，清掉 DN 名目避免下拉與實際 r 矛盾（也不污染存檔/USD）
+    pipe.r = Math.round(fromDisp(e.target.value) / 2 * 10000) / 10000;   // 外徑 ÷2 → 半徑（保 0.1mm 精度）
     rebuildAllPipes();
     selectPipe(index);
   });
@@ -827,10 +931,21 @@ function renderPipeProps(index) {
     rebuildAllPipes();
     selectPipe(index);
   });
+  propBody.querySelector('[data-k="sched"]')?.addEventListener('change', (e) => {
+    pushUndo();
+    pipe.sched = e.target.value;
+    selectPipe(index);   // 壁厚僅影響顯示（bore＝OD−2×壁厚），外徑/幾何不變
+  });
+  propBody.querySelector('[data-k="insul"]')?.addEventListener('change', (e) => {
+    pushUndo();
+    pipe.insul = Math.max(0, fromDisp(e.target.value));   // 保溫層厚（公尺）
+    rebuildAllPipes();   // 重建以套用/移除保溫外殼
+    selectPipe(index);
+  });
   propBody.querySelectorAll('[data-cat]').forEach((inp) => inp.addEventListener('change', () => {
     pushUndo();
     pipe.components[+inp.dataset.cat].at =
-      Math.max(0.2, Math.min(+inp.value, pipeLength(pipe) - 0.2));
+      Math.max(0.2, Math.min(fromDisp(inp.value), pipeLength(pipe) - 0.2));
     rebuildAllPipes();
     selectPipe(index);
   }));
@@ -1117,8 +1232,8 @@ function finishAlignPick(dstTag, x, y) {
   mode = 'idle';
   if (!src || !dst || dstTag === alignSrcTag) { alignSrcTag = null; setHint('對齊取消'); return; }
   openCtxMenu(x, y, [
-    { label: `對齊東座標（E＝${dst.pos[0]}）`, run: () => applyAlign(src, dst, true, false) },
-    { label: `對齊北座標（N＝${dst.pos[2]}）`, run: () => applyAlign(src, dst, false, true) },
+    { label: `對齊東座標（E＝${fmtLen(dst.pos[0])}）`, run: () => applyAlign(src, dst, true, false) },
+    { label: `對齊北座標（N＝${fmtLen(dst.pos[2])}）`, run: () => applyAlign(src, dst, false, true) },
     { label: '兩者對齊（重合）', run: () => applyAlign(src, dst, true, true) },
   ]);
 }
@@ -1264,7 +1379,11 @@ function groundPoint(e) {
   return raycaster.ray.intersectPlane(groundPlane, pt) ? pt : null;
 }
 
-function snapVal(v) { return snapOn ? Math.round(v * 2) / 2 : Math.round(v * 100) / 100; }
+// 吸附：開＝對齊 snapStepMm 網格；關＝1mm 精度（取代舊的 0.5m／1cm 粗量化）
+function snapVal(v) {
+  if (snapOn) { const s = snapStepMm / 1000; return roundMM(Math.round(v / s) * s); }
+  return roundMM(v);
+}
 
 // Shift＝正交鎖定（E3D 畫管慣例）：新點強制與上一點同 E 或同 N（取位移大者）
 function orthoLock(pt, e) {
@@ -1314,7 +1433,7 @@ function pickObject(e) {
 renderer.domElement.addEventListener('pointermove', (e) => {
   const pt = groundPoint(e);
   if (pt) document.getElementById('st-coords').textContent =
-    `X: ${pt.x.toFixed(1)}  Y: 0.0  Z: ${pt.z.toFixed(1)}`;
+    `E: ${fmtLen(pt.x, false)}  N: ${fmtLen(pt.z, false)}  U: 0 (${unitLabel()})`;
   if (mode === 'placing' && ghost) {
     if (pt) ghost.position.set(snapVal(pt.x), 0, snapVal(pt.z));
   } else if (mode === 'pipe' && pipeDraft.length) {
@@ -1334,8 +1453,8 @@ renderer.domElement.addEventListener('pointermove', (e) => {
       }
       compGhost.position.copy(near.pos);
       compGhost.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), near.dir);
-      pendingComp.at = Math.round(near.at * 10) / 10;
-      setHint(`放置於距管頭 <b>${pendingComp.at.toFixed(1)} m</b>（點擊確定、Esc 取消）`);
+      pendingComp.at = roundMM(near.at);
+      setHint(`放置於距管頭 <b>${fmtLen(pendingComp.at)}</b>（點擊確定、Esc 取消）`);
     }
   }
 });
@@ -1524,12 +1643,13 @@ renderer.domElement.addEventListener('contextmenu', (e) => {
       openCtxMenu(e.clientX, e.clientY, [{
         label: '輸入數值…（E, U, N）', run: () => {
           const cur = pipe.pts[i];
-          const s = prompt('節點座標 E, U, N（公尺，逗號分隔）：', `${cur[0]}, ${cur[1]}, ${cur[2]}`);
+          const s = prompt(`節點座標 E, U, N（${unitLabel()}，逗號分隔）：`,
+            `${toDisp(cur[0])}, ${toDisp(cur[1])}, ${toDisp(cur[2])}`);
           if (!s) return;
-          const v = s.split(',').map((x) => parseFloat(x.trim()));
-          if (v.length !== 3 || v.some(Number.isNaN)) return;
+          const raw = s.split(',').map((x) => parseFloat(x.trim()));
+          if (raw.length !== 3 || raw.some(Number.isNaN)) return;
           pushUndo();
-          pipe.pts[i] = v;
+          pipe.pts[i] = raw.map((x) => roundMM(x / U().f));
           rebuildAllPipes();
           selectPipe(selected.index);
         },
@@ -1616,7 +1736,7 @@ transform.addEventListener('mouseUp', () => {
   } else if (transform.mode === 'scale') {
     // uniform scale 燒進 dims 後歸一
     const s = (g.scale.x + g.scale.y + g.scale.z) / 3;
-    for (const k of Object.keys(def.dims)) def.dims[k] = Math.round(def.dims[k] * s * 100) / 100;
+    for (const k of Object.keys(def.dims)) if (!COUNT_DIMS.has(k)) def.dims[k] = roundMM(def.dims[k] * s);
     g.scale.set(1, 1, 1);
     rebuildEquipment(def);
     renderPropPanel(def);
@@ -1763,7 +1883,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   const denom = 1 - b * b;
   if (Math.abs(denom) < 1e-6) return;
   let s = (b * d.dot(w) - dir.dot(w)) / denom;
-  s = Math.max(0, snapOn ? Math.round(s * 2) / 2 : Math.round(s * 10) / 10);
+  s = Math.max(0, snapVal(s));   // 延伸量吸附與放置/節點同源（snapStepMm 網格／關＝1mm）
   routeDrag.s = s;
   const tip = base.clone().addScaledVector(dir, s);
   if (pipePreview) scene.remove(pipePreview);
@@ -1771,7 +1891,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   pipePreview = new THREE.Line(geo, new THREE.LineDashedMaterial({ color: 0x46c2e0, dashSize: 0.5, gapSize: 0.3 }));
   pipePreview.computeLineDistances();
   scene.add(pipePreview);
-  setHint(`延伸 <b>${s.toFixed(1)} m</b>（放開確定；轉向自動生成彎頭）`);
+  setHint(`延伸 <b>${fmtLen(s)}</b>（放開確定；轉向自動生成彎頭）`);
 });
 renderer.domElement.addEventListener('pointerup', () => {
   if (!routeDrag) return;
@@ -1782,7 +1902,7 @@ renderer.domElement.addEventListener('pointerup', () => {
     pushUndo();
     const pipe = sceneData.pipes[selected.index];
     const np = base.clone().addScaledVector(dir, s);
-    const pt = [Math.round(np.x * 100) / 100, Math.round(np.y * 100) / 100, Math.round(np.z * 100) / 100];
+    const pt = [roundMM(np.x), roundMM(np.y), roundMM(np.z)];
     if (endIndex === 0) pipe.pts.unshift(pt);
     else pipe.pts.push(pt);
     const idx = selected.index;
@@ -1802,7 +1922,7 @@ function commitNodeDrag() {
   const handle = transform.object;
   if (!handle) { nodeDrag = null; return; }
   const p = handle.position;
-  pipe.pts[nodeDrag.index] = [snapVal(p.x), Math.max(0.1, Math.round(p.y * 100) / 100), snapVal(p.z)];
+  pipe.pts[nodeDrag.index] = [snapVal(p.x), Math.max(0.1, roundMM(p.y)), snapVal(p.z)];
   rebuildAllPipes();
   if (hasSupports(pipe.uid)) { regenSupportsForPipe(pipe); rebuildTree(); }   // 節點編輯完自動重生支撐
   const idx = selected.index;
@@ -1858,7 +1978,7 @@ function addMeasurePoint(pt) {
     measureGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), measureLineMat));
     const d = a.distanceTo(b);
     const dx = Math.abs(a.x - b.x), dy = Math.abs(a.y - b.y), dz = Math.abs(a.z - b.z);
-    measureNote(`${d.toFixed(2)} m（ΔE ${dx.toFixed(2)}・ΔU ${dy.toFixed(2)}・ΔN ${dz.toFixed(2)}）`,
+    measureNote(`${fmtLen(d)}（ΔE ${fmtLen(dx, false)}・ΔU ${fmtLen(dy, false)}・ΔN ${fmtLen(dz, false)}）`,
       a.clone().lerp(b, 0.5).add(new THREE.Vector3(0, 0.4, 0)));
     measurePts = [];
     setHint('量測完成。繼續點兩點量下一段，<b>空白鍵</b>重複、Esc 結束');
@@ -2005,6 +2125,7 @@ function clipClear() {
 
 // 六平面情境面板（占用右側 Properties——E3D 情境編輯面板行為）
 function renderClipPanel() {
+  repaintPanel = renderClipPanel;
   const b = sceneBounds();
   document.getElementById('prop-title').textContent = '六平面剖切';
   const rows = CLIP_AXES.map((cfg, i) => {
@@ -2013,7 +2134,7 @@ function renderClipPanel() {
     const v = clip.box[side][axis];
     const name = `${side === 'min' ? '−' : '＋'}${axis.toUpperCase()}`;
     return `<label><input type="checkbox" data-ci="${i}" ${clip.enabled[i] ? 'checked' : ''}> ${name}</label>
-      <div class="pg-v"><input type="range" data-cs="${i}" min="${lo}" max="${hi}" step="0.5" value="${v}"></div>`;
+      <div class="pg-v"><input type="range" data-cs="${i}" min="${toDisp(lo)}" max="${toDisp(hi)}" step="${U().step}" value="${toDisp(v)}"></div>`;
   }).join('');
   propBody.innerHTML = `<div class="pg-section pg-clip">Clip Planes</div>
     <div class="pg-grid">${rows}</div>
@@ -2025,7 +2146,7 @@ function renderClipPanel() {
   propBody.querySelectorAll('[data-cs]').forEach((sl) => sl.addEventListener('input', () => {
     const i = +sl.dataset.cs;
     const { side, axis } = CLIP_AXES[i];
-    clip.box[side][axis] = +sl.value;
+    clip.box[side][axis] = fromDisp(sl.value);
     clipRebuildPlanes();
     clip.handles.forEach((h, j) => h.position.copy(clipFaceCenter(j)));
   }));
@@ -2123,11 +2244,36 @@ document.getElementById('btn-labels').addEventListener('click', (e) => {
   labelRenderer.domElement.style.display = showLabels ? '' : 'none';
 });
 
-// 捕捉切換
-document.getElementById('st-snap').addEventListener('click', (e) => {
+// 捕捉切換 ＋ 吸附網格粒度（mm）＋ 顯示單位（mm/cm/m）
+const snapBtn = document.getElementById('st-snap');
+const snapSel = document.getElementById('st-snapstep');
+const unitSel = document.getElementById('st-unit');
+snapSel.innerHTML = SNAP_STEPS.map((s) => `<option value="${s}">${s}mm</option>`).join('');
+snapSel.value = String(snapStepMm);
+unitSel.value = dispUnit;
+function updateSnapLabel() { snapBtn.textContent = snapOn ? `捕捉 ${snapStepMm}mm` : '捕捉 關'; }
+function refreshPropPanel() {
+  if (repaintPanel) { repaintPanel(); return; }
+  if (selected?.kind === 'eq') renderPropPanel(selected.def);
+  else if (selected?.kind === 'pipe') renderPipeProps(selected.index);
+}
+updateSnapLabel();
+snapBtn.addEventListener('click', () => {
   snapOn = !snapOn;
-  e.currentTarget.classList.toggle('on', snapOn);
+  snapBtn.classList.toggle('on', snapOn);
   applySnapSettings();
+  updateSnapLabel();
+});
+snapSel.addEventListener('change', () => {
+  snapStepMm = +snapSel.value;
+  localStorage.setItem('ej3d-snap-mm', String(snapStepMm));
+  applySnapSettings();
+  updateSnapLabel();
+});
+unitSel.addEventListener('change', () => {
+  dispUnit = unitSel.value;
+  localStorage.setItem('ej3d-disp-unit', dispUnit);
+  refreshPropPanel();
 });
 applySnapSettings();
 
@@ -2268,7 +2414,7 @@ function isoSvg(idx, meta = {}) {
       const seg = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1], pts[i + 1][2] - pts[i][2]);
       const mx = (+px(P[i]) + +px(P[i + 1])) / 2, my = (+py(P[i]) + +py(P[i + 1])) / 2;
       parts.push(`<text x="${mx}" y="${my - 7}" font-size="11" fill="#046AFB" text-anchor="middle" font-weight="600">${(seg * 1000).toFixed(0)}</text>`);
-      bom.push(`直管段 ${seg.toFixed(2)} m`);
+      bom.push(`直管段 ${(seg * 1000).toFixed(0)}mm`);
     }
   }
   // 節點高程標註（ISO 慣例 EL.）
@@ -2298,7 +2444,7 @@ function isoSvg(idx, meta = {}) {
       parts.push(`<path d="M${cx - 7} ${cy - 5} L${cx + 7} ${cy + 5} L${cx + 7} ${cy - 5} L${cx - 7} ${cy + 5} Z" fill="#fff" stroke="#12283a" stroke-width="1.4"/>`);
     }
     parts.push(`<text x="${cx}" y="${cy + 18}" font-size="9.5" fill="#5b6b7a" text-anchor="middle">${compName[c.kind] ?? c.kind}</text>`);
-    bom.push(`${compName[c.kind] ?? c.kind}（沿管 ${c.at} m）`);
+    bom.push(`${compName[c.kind] ?? c.kind}（沿管 ${(c.at * 1000).toFixed(0)}mm）`);
   }
   // 北向標記（等角：北=右上）
   parts.push(`<g transform="translate(${W - 58} 26)"><path d="M0 14 L10 -4 L20 14" fill="none" stroke="#12283a" stroke-width="1.6"/><text x="10" y="27" font-size="10" text-anchor="middle" fill="#12283a" font-weight="700">N</text></g>`);
@@ -2312,7 +2458,7 @@ function isoSvg(idx, meta = {}) {
     title: meta.title ?? `ISOMETRIC 單管圖｜管線 #${idx + 1}`,
     dwgno: meta.dwgno ?? `${(sceneId ?? 'SCN').toUpperCase()}-ISO-${String(idx + 1).padStart(3, '0')}`,
     rev: meta.rev ?? 'A', date: dateStr,
-    scaleTxt: `${pipe.dn ?? `r${pipe.r}`}｜${pipeLength(pipe).toFixed(1)}m`,
+    scaleTxt: `${pipe.dn ?? `⌀${Math.round(pipe.r * 2000)}mm`}｜${(pipeLength(pipe) * 1000).toFixed(0)}mm`,
   });
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${PH}" font-family="Inter,'Noto Sans TC',sans-serif" style="background:#fff">
@@ -2323,7 +2469,7 @@ function isoSvg(idx, meta = {}) {
     <line x1="7" y1="${H - 110}" x2="${W - 7}" y2="${H - 110}" stroke="#12283a" stroke-width="1"/>
     <text x="14" y="${H - 90}" font-size="12" font-weight="700" fill="#12283a">元件表 BOM</text>
     ${bomRows}${more}
-    <text x="${W - 12}" y="${H - 90}" font-size="10" fill="#5b6b7a" text-anchor="end">Spec ${pipe.spec ?? '—'}｜${pipe.dn ?? `r${pipe.r}`}｜總長 ${pipeLength(pipe).toFixed(2)} m｜尺寸 mm／高程 EL.mm</text>
+    <text x="${W - 12}" y="${H - 90}" font-size="10" fill="#5b6b7a" text-anchor="end">Spec ${pipe.spec ?? '—'}｜${pipe.dn ?? `⌀${Math.round(pipe.r * 2000)}mm`}｜總長 ${(pipeLength(pipe) * 1000).toFixed(0)} mm｜尺寸 mm／高程 EL.mm</text>
   </g>
   ${tb}
 </svg>`;
@@ -2342,6 +2488,32 @@ function exportISO() {
   });
 }
 document.getElementById('btn-iso').addEventListener('click', exportISO);
+
+// ------------------------------------------------------------ 管線清單（Pipe List，對標 E3D Pipe List 報表）
+function renderPipeListPanel() {
+  repaintPanel = renderPipeListPanel;
+  document.getElementById('prop-title').textContent = `管線清單（${sceneData.pipes.length}）`;
+  const rows = sceneData.pipes.map((p, i) => {
+    const dn = p.dn ?? `⌀${Math.round(p.r * 2000)}mm`;
+    const wall = pipeWall(p.dn, p.sched ?? 'STD');
+    const bore = wall != null ? `｜bore ${Math.round((p.r * 2 - 2 * wall) * 1000)}mm` : '';
+    return `<div data-pl="${i}" style="display:flex;gap:8px;padding:6px 4px;border-bottom:1px solid var(--bdr);cursor:pointer;font-size:12px">
+      <span style="width:56px;color:var(--accent);font-weight:600">PIPE ${i + 1}</span>
+      <span style="flex:1">${p.spec ?? '—'}｜${dn}${p.sched ? ' Sch' + p.sched : ''}${bore}</span>
+      <span style="color:var(--dim);white-space:nowrap">${fmtLen(pipeLength(p))}</span>
+    </div>`;
+  }).join('');
+  const totalL = sceneData.pipes.reduce((a, p) => a + pipeLength(p), 0);
+  propBody.innerHTML = `<div class="pg-section">Pipe List</div>
+    ${sceneData.pipes.length
+      ? rows + `<div style="display:flex;gap:8px;padding:8px 4px;font-size:12px;font-weight:600"><span style="flex:1">合計 ${sceneData.pipes.length} 條</span><span>${fmtLen(totalL)}</span></div>`
+      : '<div style="color:var(--dim);font-size:12px;padding:8px 0">尚無管線——切到 PIPING 繪製</div>'}`;
+  propBody.querySelectorAll('[data-pl]').forEach((row) => row.addEventListener('click', () => {
+    selectPipe(+row.dataset.pl);
+    zoomToSelection();
+  }));
+}
+document.getElementById('btn-pipelist').addEventListener('click', renderPipeListPanel);
 
 // ------------------------------------------------------------ 剖面蓋色（Clip and Cap）
 let capOn = false;
@@ -2402,7 +2574,7 @@ function mtoCsv() {
   sceneData.pipes.forEach((p, i) => {
     const L = pipeLength(p);
     const dn = p.dn ?? `r${p.r}`;
-    const comps = (p.components ?? []).map((c) => `${compName[c.kind] ?? c.kind}@${c.at}m`).join('; ');
+    const comps = (p.components ?? []).map((c) => `${compName[c.kind] ?? c.kind}@${c.at.toFixed(2)}m`).join('; ');
     rows.push([`PIPE-${i + 1}`, p.spec ?? '—', dn, L.toFixed(2), comps]);
     const k = `${p.spec ?? '—'}|${dn}`;
     const acc = sums.get(k) ?? { L: 0, n: 0 };
@@ -2722,6 +2894,7 @@ const PP_GHOST = 'width:100%;margin-top:6px;padding:6px 0;border:1px solid var(-
 
 function renderArrayPanel(kind) {
   if (selected?.kind !== 'eq') { setHint(`先選取設備再使用<b>${kind === 'array' ? '陣列' : '鏡射'}</b>`); return; }
+  repaintPanel = () => renderArrayPanel(kind);
   const src = selected.def;
   const isArr = kind === 'array';
   document.getElementById('prop-title').textContent = `${isArr ? '陣列' : '鏡射'}｜${src.tag}`;
@@ -2729,19 +2902,19 @@ function renderArrayPanel(kind) {
     <div style="${PP_ROW}"><span style="width:52px">方向</span><select id="ap-dir" style="${PP_INP}">
       <option value="E+">東（E＋）</option><option value="E-">西（E−）</option>
       <option value="N+">北（N＋）</option><option value="N-">南（N−）</option></select></div>
-    <div style="${PP_ROW}"><span style="width:52px">間距 m</span><input id="ap-gap" type="number" step="0.5" value="5" style="${PP_INP}"></div>
+    <div style="${PP_ROW}"><span style="width:52px">間距 ${unitLabel()}</span><input id="ap-gap" type="number" step="${U().step}" value="${toDisp(5)}" style="${PP_INP}"></div>
     <div style="${PP_ROW}"><span style="width:52px">複製數</span><input id="ap-n" type="number" min="1" max="30" value="2" style="${PP_INP}"></div>
     <button id="ap-go" style="${PP_BTN}">生成陣列</button>
     <button id="ap-done" style="${PP_GHOST}">返回屬性</button>` : `
     <div style="${PP_ROW}"><span style="width:52px">鏡射軸</span><select id="ap-axis" style="${PP_INP}">
       <option value="E">南北向軸（左右翻）</option><option value="N">東西向軸（前後翻）</option></select></div>
-    <div style="${PP_ROW}"><span style="width:52px">軸位置</span><input id="ap-at" type="number" step="0.5" value="${src.pos[0]}" style="${PP_INP}"></div>
+    <div style="${PP_ROW}"><span style="width:52px">軸位置 ${unitLabel()}</span><input id="ap-at" type="number" step="${U().step}" value="${toDisp(src.pos[0])}" style="${PP_INP}"></div>
     <button id="ap-go" style="${PP_BTN}">生成鏡射</button>
     <button id="ap-done" style="${PP_GHOST}">返回屬性</button>`;
   document.getElementById('ap-done').addEventListener('click', () => selectEquipment(src.tag));
   if (!isArr) {
     document.getElementById('ap-axis').addEventListener('change', (e) => {
-      document.getElementById('ap-at').value = e.target.value === 'E' ? src.pos[0] : src.pos[2];
+      document.getElementById('ap-at').value = toDisp(e.target.value === 'E' ? src.pos[0] : src.pos[2]);
     });
   }
   document.getElementById('ap-go').addEventListener('click', () => {
@@ -2751,7 +2924,7 @@ function renderArrayPanel(kind) {
     let lastTag = src.tag;
     if (isArr) {
       const [dx, dz] = { 'E+': [1, 0], 'E-': [-1, 0], 'N+': [0, 1], 'N-': [0, -1] }[document.getElementById('ap-dir').value];
-      const gap = +document.getElementById('ap-gap').value || 5;
+      const gap = fromDisp(document.getElementById('ap-gap').value) || 5;
       const n = Math.min(30, Math.max(1, Math.round(+document.getElementById('ap-n').value || 1)));
       for (let i = 1; i <= n; i++) {
         const d2 = JSON.parse(JSON.stringify(src));
@@ -2765,7 +2938,7 @@ function renderArrayPanel(kind) {
       setHint(`陣列完成：自 <b>${src.tag}</b> 新增 ${n} 台`);
     } else {
       const axis = document.getElementById('ap-axis').value;
-      const at = +document.getElementById('ap-at').value || 0;
+      const at = fromDisp(document.getElementById('ap-at').value);
       const d2 = JSON.parse(JSON.stringify(src));
       d2.tag = nextTag(prefix);
       d2.instruments = [];
@@ -2808,19 +2981,20 @@ function rebuildElevs() {
 }
 
 function renderElevPanel() {
+  repaintPanel = renderElevPanel;
   document.getElementById('prop-title').textContent = '標高基準面';
   const elevs = sceneData.elevs ?? [];
   const rows = elevs.map((h, i) => `
     <div style="display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid var(--bdr);font-size:12.5px">
-      <span style="flex:1;color:var(--text);font-weight:600">EL.${h >= 0 ? '+' : ''}${(h * 1000).toFixed(0)}</span>
+      <span style="flex:1;color:var(--text);font-weight:600">EL.${h >= 0 ? '+' : ''}${fmtLen(h)}</span>
       <button data-edel="${i}" style="border:none;background:none;color:#d03050;cursor:pointer;font-size:11.5px;font-family:inherit">刪除</button>
     </div>`).join('');
   propBody.innerHTML = `
-    <div style="${PP_ROW}"><span style="width:64px">標高 m</span><input id="el-h" type="number" step="0.5" value="3" style="${PP_INP}"></div>
+    <div style="${PP_ROW}"><span style="width:64px">標高 ${unitLabel()}</span><input id="el-h" type="number" step="${U().step}" value="${toDisp(3)}" style="${PP_INP}"></div>
     <button id="el-add" style="${PP_BTN}">加入基準面</button>
     <div style="margin-top:12px">${rows || '<div style="color:var(--dim);font-size:12px;padding:6px 0">尚無基準面——輸入標高後加入（EL.0 為地坪）</div>'}</div>`;
   document.getElementById('el-add').addEventListener('click', () => {
-    const h = +document.getElementById('el-h').value;
+    const h = fromDisp(document.getElementById('el-h').value);
     if (!Number.isFinite(h)) return;
     pushUndo();
     sceneData.elevs = sceneData.elevs ?? [];
@@ -2857,25 +3031,45 @@ function clearClashMarks() {
   clashMarks = [];
 }
 
-document.getElementById('btn-clash-run').addEventListener('click', () => {
+function runClashDock() {
   const t0 = performance.now();
-  const { clashes, capped } = runClash(sceneData, eqObjects, hiddenTags);
+  const { clashes, capped, open, total } = runClash(sceneData, eqObjects, hiddenTags);
   const ms = Math.round(performance.now() - t0);
-  const n = { overlap: 0, touch: 0, pipe: 0 };
-  for (const c of clashes) n[c.type]++;
+  const n = { physical: 0, touch: 0, clearance: 0 };
+  for (const c of clashes) if (n[c.type] !== undefined) n[c.type]++;
   document.getElementById('clash-summary').textContent =
-    `硬碰撞 ${n.overlap}｜淨距 ${n.touch}｜管線干涉 ${n.pipe}（${ms}ms${capped ? '，已截斷' : ''}）`;
+    `Physical ${n.physical}｜Touch ${n.touch}｜Clearance ${n.clearance}　未處理 ${open}/${total}（${ms}ms${capped ? '，已截斷' : ''}）`;
   document.getElementById('clash-count').textContent = `　${clashes.length} 筆`;
   const list = document.getElementById('clash-list');
-  const BADGE = { overlap: ['overlap', '硬碰撞'], touch: ['touch', '淨距'], pipe: ['pipe', '管線'] };
-  list.innerHTML = clashes.length ? clashes.map((c, i) => `
-    <div class="clash-row" data-ci="${i}">
-      <span class="clash-badge ${BADGE[c.type][0]}">${BADGE[c.type][1]}</span>
+  const CB = { physical: ['#d9534f', 'Physical'], touch: ['#e0a800', 'Touch'], clearance: ['#4a90d9', 'Clearance'] };
+  const SB = { held: ['#8e6bd6', 'HELD'], approved: ['#3fae6b', 'APPROVED'] };
+  const badge = (bg, txt) => `<span style="display:inline-block;padding:1px 6px;border-radius:4px;background:${bg};color:#fff;font-size:10px;font-weight:600">${txt}</span>`;
+  list.innerHTML = clashes.length ? clashes.map((c, i) => {
+    const cb = CB[c.type] ?? ['#888', c.type];
+    return `<div class="clash-row" data-ci="${i}" style="opacity:${c.status === 'approved' ? 0.5 : 1}">
+      ${badge(cb[0], cb[1])}
+      <span style="color:var(--dim);font-family:monospace;font-size:11px" title="遮蔽碼 Hard/Soft">${c.code}</span>
       <span>${c.a}</span><span>${c.b}</span>
-      <span style="color:var(--dim)">(${c.point.x.toFixed(1)}, ${c.point.z.toFixed(1)})</span>
-    </div>`).join('')
-    : '<div style="padding:14px;color:var(--dim)">無碰撞——場景乾淨</div>';
+      <span style="color:var(--dim)">(${fmtLen(c.point.x, false)}, ${fmtLen(c.point.z, false)}) ${unitLabel()}</span>
+      ${SB[c.status] ? badge(SB[c.status][0], SB[c.status][1]) : ''}
+      <span style="margin-left:auto;display:flex;gap:4px">
+        <button data-hold="${i}" class="pane-x" title="Hold（追蹤，暫不解）">⏸</button>
+        <button data-appr="${i}" class="pane-x" title="Approve（核可 by-design，抑制）">✓</button>
+      </span>
+    </div>`;
+  }).join('') : '<div style="padding:14px;color:var(--dim)">無碰撞——場景乾淨</div>';
   clashDock.classList.add('show');
+  const setStatus = (i, st) => {
+    const c = clashes[i];
+    pushUndo();
+    sceneData.clashStatus = sceneData.clashStatus ?? {};
+    const key = clashKey(c.a, c.b);
+    if (sceneData.clashStatus[key] === st) delete sceneData.clashStatus[key];   // 再按一次＝取消
+    else sceneData.clashStatus[key] = st;
+    runClashDock();
+  };
+  list.querySelectorAll('[data-hold]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); setStatus(+b.dataset.hold, 'held'); }));
+  list.querySelectorAll('[data-appr]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); setStatus(+b.dataset.appr, 'approved'); }));
   list.querySelectorAll('.clash-row').forEach((row) => row.addEventListener('click', () => {
     list.querySelectorAll('.clash-row').forEach((r) => r.classList.toggle('selected', r === row));
     const c = clashes[+row.dataset.ci];
@@ -2894,7 +3088,8 @@ document.getElementById('btn-clash-run').addEventListener('click', () => {
       c.point.clone().add(new THREE.Vector3(5, 9, 5)));
     frameBox(box, camera.position.clone().sub(controls.target).normalize());
   }));
-});
+}
+document.getElementById('btn-clash-run').addEventListener('click', runClashDock);
 document.getElementById('clash-close').addEventListener('click', () => {
   clashDock.classList.remove('show');
   clearClashMarks();
@@ -3077,7 +3272,7 @@ addEventListener('keydown', (e) => {
     redo();
   } else if (e.key === 'Enter' && mode === 'pipe' && pipeDraft.length >= 2) {
     pushUndo();
-    const ptsOut = pipeDraft.map((p) => [Math.round(p.x * 100) / 100, p.y, Math.round(p.z * 100) / 100]);
+    const ptsOut = pipeDraft.map((p) => [roundMM(p.x), roundMM(p.y), roundMM(p.z)]);
     if (ductDraw) {
       const [w, h] = ductSize;
       sceneData.pipes.push({ r: Math.max(w, h) / 2, profile: 'duct', duct: { w, h }, spec: 'HVAC', dn: `${(w * 1000) | 0}×${(h * 1000) | 0}`, pts: ptsOut });

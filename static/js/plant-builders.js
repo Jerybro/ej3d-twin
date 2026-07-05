@@ -817,6 +817,28 @@ builders.conveyor = function ({ len, h, w }) { // 輸送帶
 // -------------------------------------------------- 自建設備（primitives 堆疊）
 // E3D Create Equipment 流程：BOX/CYLI/CONE/DISH 基元組合成設備
 // def.prims: [{kind, dims, pos:[dx,dy,dz], rot_y}]；builders 第二參數傳 def
+// 矩形截頭錐（PYRA / 漏斗）：8 頂點手工幾何，底 bx×bz、頂 tx×tz、高 h
+function pyraGeometry(bx, bz, tx, tz, h) {
+  const g = new THREE.BufferGeometry();
+  const bX = bx / 2, bZ = bz / 2, tX = tx / 2, tZ = tz / 2;
+  const v = [
+    -bX, 0, -bZ, bX, 0, -bZ, bX, 0, bZ, -bX, 0, bZ,   // 底 0-3
+    -tX, h, -tZ, tX, h, -tZ, tX, h, tZ, -tX, h, tZ,   // 頂 4-7
+  ];
+  const idx = [
+    0, 2, 1, 0, 3, 2,           // 底（朝下）
+    4, 5, 6, 4, 6, 7,           // 頂（朝上）
+    0, 1, 5, 0, 5, 4,           // -Z 面
+    1, 2, 6, 1, 6, 5,           // +X 面
+    2, 3, 7, 2, 7, 6,           // +Z 面
+    3, 0, 4, 3, 4, 7,           // -X 面
+  ];
+  g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
 export function buildPrim(p) {
   const d = p.dims;
   let mesh;
@@ -831,6 +853,18 @@ export function buildPrim(p) {
     mesh.geometry.translate(0, d.h / 2, 0);
   } else if (p.kind === 'dish') {
     mesh = new THREE.Mesh(new THREE.SphereGeometry(d.r, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), std(0x9aa7b4));
+  } else if (p.kind === 'snou') {
+    // SNOU 偏心漸縮：漸縮錐 + 頂面沿 X 偏移 off（eccentric reducer）
+    const h = d.h ?? 1;
+    const g = new THREE.CylinderGeometry(d.r2 ?? 0.45, d.r1 ?? 0.9, h, 28);
+    g.translate(0, h / 2, 0);
+    g.applyMatrix4(new THREE.Matrix4().set(1, (d.off ?? 0.3) / h, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1));
+    mesh = new THREE.Mesh(g, std(0x9aa7b4));
+  } else if (p.kind === 'pyra') {
+    mesh = new THREE.Mesh(pyraGeometry(d.bx ?? 1.4, d.bz ?? 1.4, d.tx ?? 0.6, d.tz ?? 0.6, d.h ?? 1.2), std(0x9aa7b4));
+  } else if (p.kind === 'ctor') {
+    // CTOR 圓環／彎頭：環中心半徑 r、管半徑 rt、弧角 ang（度）
+    mesh = new THREE.Mesh(new THREE.TorusGeometry(d.r ?? 0.9, d.rt ?? 0.2, 16, 28, (d.ang ?? 90) * Math.PI / 180), std(0x9aa7b4));
   } else {
     mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), std(0x8a97a5));
   }
@@ -850,30 +884,52 @@ builders.assembly = function (_dims, def) {
 
 // -------------------------------------------------- 結構鋼構（STRUCTURES 專業）
 const steelMat = std(0x9aa4ad, { metalness: 0.5, roughness: 0.55 });
-function hSection(len, depth = 0.24, flange = 0.18, t = 0.028) {
-  // 沿 Y 軸的 H 型鋼（柱姿態），樑用旋轉擺放
+// 標準鋼構斷面目錄（對標 E3D Structural section catalogue）——真實 mm 尺寸(EN/UK)
+// depth=斷面高 D，flange=翼板寬 B，web=腹板厚 tw，tf=翼板厚（單位 mm，用時 /1000）
+export const STEEL_SECTIONS = [
+  { code: 'IPE200', depth: 200, flange: 100, web: 5.6, tf: 8.5 },
+  { code: 'IPE300', depth: 300, flange: 150, web: 7.1, tf: 10.7 },
+  { code: 'IPE400', depth: 400, flange: 180, web: 8.6, tf: 13.5 },
+  { code: 'IPE500', depth: 500, flange: 200, web: 10.2, tf: 16 },
+  { code: 'HEA300', depth: 290, flange: 300, web: 8.5, tf: 14 },
+  { code: 'HEB200', depth: 200, flange: 200, web: 9, tf: 15 },
+  { code: 'HEB300', depth: 300, flange: 300, web: 11, tf: 19 },
+  { code: 'HEB400', depth: 400, flange: 300, web: 13.5, tf: 24 },
+  { code: 'UB305x165x40', depth: 303.4, flange: 165, web: 6, tf: 10.2 },
+  { code: 'UC254x254x73', depth: 254.1, flange: 254.6, web: 8.6, tf: 14.2 },
+];
+const STEEL_DEFAULT = STEEL_SECTIONS[6];   // HEB300 為預設（近似原本寫死斷面）
+export function steelSection(code) {
+  return STEEL_SECTIONS.find((s) => s.code === code) ?? STEEL_DEFAULT;
+}
+function hSection(len, sec = STEEL_DEFAULT) {
+  // 沿 Y 軸的 I/H 型鋼（柱姿態），樑用旋轉擺放；斷面尺寸 mm→m
+  const D = sec.depth / 1000, B = sec.flange / 1000, tw = sec.web / 1000, tf = sec.tf / 1000;
   const g = new THREE.Group();
-  const web = new THREE.Mesh(new THREE.BoxGeometry(t, len, depth - 2 * t), steelMat);
-  const f1 = new THREE.Mesh(new THREE.BoxGeometry(flange, len, t), steelMat);
-  f1.position.z = (depth - t) / 2;
+  const web = new THREE.Mesh(new THREE.BoxGeometry(tw, len, D - 2 * tf), steelMat);
+  const f1 = new THREE.Mesh(new THREE.BoxGeometry(B, len, tf), steelMat);
+  f1.position.z = (D - tf) / 2;
   const f2 = f1.clone();
-  f2.position.z = -(depth - t) / 2;
+  f2.position.z = -(D - tf) / 2;
   g.add(web, f1, f2);
   g.children.forEach((c) => c.geometry.translate(0, len / 2, 0));
   return g;
 }
 
-builders.scolumn = function ({ h }) {
+builders.scolumn = function ({ h }, def) {
+  const sec = steelSection(def?.section);
   const g = new THREE.Group();
-  const base = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.03, 0.42), steelMat);
+  const bp = Math.max(0.42, sec.flange / 1000 + 0.12);   // 底板隨翼板寬
+  const base = new THREE.Mesh(new THREE.BoxGeometry(bp, 0.03, bp), steelMat);
   base.position.y = 0.015;
-  g.add(base, hSection(h));
+  g.add(base, hSection(h, sec));
   return g;
 };
 
-builders.sbeam = function ({ len, elev }) {
+builders.sbeam = function ({ len, elev }, def) {
+  const sec = steelSection(def?.section);
   const g = new THREE.Group();
-  const beam = hSection(len);
+  const beam = hSection(len, sec);
   beam.rotation.z = -Math.PI / 2;             // 轉水平（沿 +X）
   beam.position.set(-len / 2, elev ?? 3, 0);
   g.add(beam);
@@ -1539,6 +1595,19 @@ export const PIPE_BORES = [
   { dn: 'DN200', r: 0.11 }, { dn: 'DN250', r: 0.14 }, { dn: 'DN300', r: 0.16 },
   { dn: 'DN400', r: 0.21 }, { dn: 'DN500', r: 0.26 },
 ];
+// E3D Schedule（管壁厚）：pipe.r＝外半徑固定不變，schedule 決定壁厚→內徑 bore
+// 壁厚採 ASME B36.10 實值（mm）；本 DN 範圍內 STD≈Sch40、XS≈Sch80
+export const PIPE_SCHEDULES = ['STD', '40', '80', 'XS'];
+const PIPE_WALL_40 = { DN25: 3.38, DN40: 3.68, DN50: 3.91, DN80: 5.49, DN100: 6.02,
+  DN150: 7.11, DN200: 8.18, DN250: 9.27, DN300: 10.31, DN400: 12.70, DN500: 15.09 };
+const PIPE_WALL_80 = { DN25: 4.55, DN40: 5.08, DN50: 5.54, DN80: 7.62, DN100: 8.56,
+  DN150: 10.97, DN200: 12.70, DN250: 15.09, DN300: 17.48, DN400: 21.44, DN500: 26.19 };
+// 回傳管壁厚（公尺）；查無 DN 或自訂外徑時回 null
+export function pipeWall(dn, sched) {
+  if (!dn) return null;
+  const t = (sched === '80' || sched === 'XS') ? PIPE_WALL_80 : PIPE_WALL_40;
+  return t[dn] != null ? t[dn] / 1000 : null;
+}
 
 // 素材目錄（編輯器面板用）
 export const ASSET_CATEGORIES = [

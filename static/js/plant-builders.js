@@ -956,41 +956,120 @@ builders.sbeam = function ({ len, elev }, def) {
   return g;
 };
 
-builders.stairs = function ({ w, h, run }) {
+// 樓梯：依總高與踏步 going 自動算級數(工安 rise≈0.18m)，畫踏板(格柵)+斜梁(stringer)
+// +兩側斜扶手(頂桿1.0m/中桿+立柱)+頂端承接平台+踢腳板。
+// dims {w:梯寬, h:總高, run:水平投影}(沿用既有 key)，可另給 {going:單階水平, rise:單階高}。
+builders.stairs = function ({ w, h, run, going, rise }) {
   const g = new THREE.Group();
-  const n = Math.max(3, Math.round(h / 0.2));
+  const W = Math.max(0.6, w ?? 1.0);
+  const H = Math.max(0.4, h ?? 3);
+  // 級數：優先用給定 rise，否則以 ~0.18m/級 推算（工安 165~190mm）
+  const stepRise = rise && rise > 0.05 ? rise : 0.18;
+  const n = Math.max(2, Math.round(H / stepRise));
+  const r = H / n;                              // 實際每級升高
+  const RUN = Math.max(0.8, run ?? n * (going && going > 0.15 ? going : 0.28));
+  const gRun = going && going > 0.15 ? going : RUN / n;   // 每級水平投影(踏面深)
+  const railH = 1.0;                            // 扶手頂桿高（斜面法向約1.0~1.1m）
+  const stringerH = 0.22, stringerT = 0.04;     // 斜梁斷面
+  const treadTh = 0.045, tnose = 0.03;          // 踏板厚、突沿
+  const x0 = -RUN / 2;                          // 底階前緣 x
+
+  // --- 踏板（格柵條紋示意：主板+兩道防滑條）
+  const treadDepth = gRun + tnose;
   for (let i = 0; i < n; i++) {
-    const step = new THREE.Mesh(new THREE.BoxGeometry(run / n, 0.05, w), steelMat);
-    step.position.set(-run / 2 + (i + 0.5) * (run / n), (i + 1) * (h / n), 0);
-    g.add(step);
+    const cx = x0 + i * gRun + treadDepth / 2 - tnose;
+    const cy = (i + 1) * r - treadTh / 2;
+    const tread = new THREE.Mesh(new THREE.BoxGeometry(treadDepth, treadTh, W), steelMat);
+    tread.position.set(cx, cy, 0);
+    g.add(tread);
+    for (const gz of [-W * 0.28, W * 0.28]) {   // 防滑條
+      const grip = new THREE.Mesh(new THREE.BoxGeometry(treadDepth * 0.9, treadTh + 0.012, 0.03), steelMat);
+      grip.position.set(cx, cy + 0.004, gz);
+      g.add(grip);
+    }
   }
-  for (const side of [-1, 1]) {  // 斜樑
-    const s = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(run, h), 0.16, 0.05), steelMat);
-    s.position.set(0, h / 2, side * (w / 2 + 0.03));
-    s.rotation.z = Math.atan2(h, run);
+
+  // --- 兩側斜梁 stringer（沿斜線）
+  const slopeLen = Math.hypot(RUN, H);
+  const ang = Math.atan2(H, RUN);
+  const sideZ = W / 2 + stringerT / 2;
+  for (const side of [-1, 1]) {
+    const s = new THREE.Mesh(new THREE.BoxGeometry(slopeLen + 0.12, stringerH, stringerT), steelMat);
+    s.position.set(0, H / 2 - stringerH * 0.15, side * sideZ);
+    s.rotation.z = ang;
     g.add(s);
-    const rail = s.clone();
-    rail.position.y = h / 2 + 0.95;
-    rail.scale.set(1, 0.25, 1);
-    g.add(rail);
+  }
+
+  // --- 斜向扶手（兩側）：立柱 + 頂桿 + 中桿
+  const nPost = Math.max(2, Math.round(RUN / 1.4) + 1);
+  const railTopGeo = new THREE.CylinderGeometry(0.022, 0.022, slopeLen, 8);
+  const railMidGeo = new THREE.CylinderGeometry(0.018, 0.018, slopeLen, 8);
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < nPost; i++) {
+      const t = i / (nPost - 1);
+      const px = x0 + t * RUN;
+      const py = t * H + 0.02;                  // 沿斜面踏緣高度
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, railH + 0.02, 8), steelMat);
+      post.position.set(px, py + railH / 2, side * sideZ);
+      g.add(post);
+    }
+    for (const [geo, off] of [[railTopGeo, railH], [railMidGeo, railH * 0.52]]) {
+      const rail = new THREE.Mesh(geo, steelMat);
+      rail.position.set(0, H / 2 + off, side * sideZ);
+      rail.rotation.z = ang + Math.PI / 2;      // 圓柱本地Y沿斜線
+      g.add(rail);
+    }
+  }
+
+  // --- 頂端承接平台（格柵）+ 踢腳板 + 平台護欄立柱
+  const platD = Math.max(0.9, gRun + 0.6);
+  const platX = RUN / 2 + platD / 2 - tnose;
+  const platY = H;
+  const plat = new THREE.Mesh(new THREE.BoxGeometry(platD, treadTh + 0.01, W), std(0x77828d, { roughness: 0.9 }));
+  plat.position.set(platX, platY - treadTh / 2, 0);
+  g.add(plat);
+  for (const side of [-1, 1]) {                 // 平台踢腳板
+    const toe = new THREE.Mesh(new THREE.BoxGeometry(platD, 0.1, 0.02), steelMat);
+    toe.position.set(platX, platY + 0.05, side * (W / 2));
+    g.add(toe);
+    // 平台段扶手（頂桿+中桿+立柱，接續斜扶手）
+    for (const px of [RUN / 2 + 0.03, platX + platD / 2 - 0.03]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, railH, 8), steelMat);
+      post.position.set(px, platY + railH / 2, side * sideZ);
+      g.add(post);
+    }
+    for (const off of [railH, railH * 0.52]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(platD, 0.036, 0.036), steelMat);
+      rail.position.set(platX, platY + off, side * sideZ);
+      g.add(rail);
+    }
   }
   return g;
 };
 
-builders.srail = function ({ len }) {
+// 欄杆/扶手：立柱(每~1.5m)+頂桿(預設1.1m)+中桿(~0.52×高)+踢腳板 toe board(100mm)。
+// dims {len:總長}(沿用既有 key)，可另給 {h:欄杆高}。工安：頂桿1.1m、中桿約其半、踢腳板100mm。
+builders.srail = function ({ len, h }) {
   const g = new THREE.Group();
-  const n = Math.max(2, Math.round(len / 1.5) + 1);
+  const L = Math.max(0.5, len ?? 4);
+  const railH = Math.max(0.7, h ?? 1.1);        // 頂桿高
+  const midH = railH * 0.52;
+  const n = Math.max(2, Math.round(L / 1.5) + 1);   // 立柱數（間距≤1.5m）
+  const postGeo = new THREE.CylinderGeometry(0.024, 0.024, railH, 8);
   for (let i = 0; i < n; i++) {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1.1, 8), steelMat);
-    post.position.set(-len / 2 + (i / (n - 1)) * len, 0.55, 0);
+    const post = new THREE.Mesh(postGeo, steelMat);
+    post.position.set(-L / 2 + (i / (n - 1)) * L, railH / 2, 0);
     g.add(post);
   }
-  for (const y of [1.1, 0.6]) {
-    const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, len, 8), steelMat);
+  for (const [y, rr] of [[railH, 0.022], [midH, 0.018]]) {   // 頂桿+中桿
+    const rail = new THREE.Mesh(new THREE.CylinderGeometry(rr, rr, L, 8), steelMat);
     rail.rotation.z = Math.PI / 2;
     rail.position.y = y;
     g.add(rail);
   }
+  const toe = new THREE.Mesh(new THREE.BoxGeometry(L, 0.1, 0.025), steelMat);   // 踢腳板
+  toe.position.set(0, 0.06, 0);
+  g.add(toe);
   return g;
 };
 
@@ -1327,26 +1406,63 @@ builders.safetyshower = function ({ h }) {
   return g;
 };
 
+// 直爬梯(含安全護籠)：兩立桿+橫踏桿(間距~0.3m)+2.2m以上護籠環箍(每~1.4m一環)
+// +連接環箍的縱條(cage stays)+頂端出口延伸扶手。dims {h:總高}。
+// 工安：踏桿間距≤300mm、護籠自2.2m起、環箍半徑約350~400mm。
 builders.cageladder = function ({ h }) {
   const g = new THREE.Group();
+  const H = Math.max(0.6, h ?? 6);
   const railMat = std(0x8d99a6);
-  for (const sx of [-0.22, 0.22]) {
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.05, h, 0.05), railMat);
-    rail.position.set(sx, h / 2, 0);
+  const cageMat = std(0xe8b83a, { metalness: 0.3, roughness: 0.6 });   // 護籠安全黃
+  const halfW = 0.22;                             // 立桿半間距
+  // 立桿（兩側，方鋼）
+  const stileTop = H + (H > 2.2 ? 1.1 : 0);       // 出口段立桿延伸（登頂護欄）
+  for (const sx of [-halfW, halfW]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.05, stileTop, 0.05), railMat);
+    rail.position.set(sx, stileTop / 2, 0);
     g.add(rail);
   }
-  const rungs = Math.floor(h / 0.3);
+  // 橫踏桿（~0.3m 間距）
+  const step = 0.3;
+  const rungs = Math.floor(H / step);
+  const rungGeo = new THREE.CylinderGeometry(0.016, 0.016, halfW * 2 + 0.04, 8);
   for (let i = 1; i <= rungs; i++) {
-    const rung = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.44, 6), railMat);
+    const rung = new THREE.Mesh(rungGeo, railMat);
     rung.rotation.z = Math.PI / 2;
-    rung.position.y = i * 0.3;
+    rung.position.y = i * step;
     g.add(rung);
   }
-  for (let y = 2.2; y < h - 0.2; y += 0.6) {      // 2.2m 以上護籠圈
-    const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.02, 6, 16, Math.PI), railMat);
-    hoop.rotation.x = -Math.PI / 2;
-    hoop.position.set(0, y, 0.05);
-    g.add(hoop);
+  // 安全護籠：2.2m 以上，全環(370半徑)偏爬梯背面，每~1.4m 一環
+  const cageR = 0.37, cageStart = 2.2;
+  const hoopYs = [];
+  if (H > cageStart + 0.3) {
+    for (let y = cageStart; y <= H - 0.1; y += 1.4) hoopYs.push(y);
+    const hoopGeo = new THREE.TorusGeometry(cageR, 0.02, 6, 24);
+    for (const y of hoopYs) {
+      const hoop = new THREE.Mesh(hoopGeo, cageMat);
+      hoop.rotation.x = Math.PI / 2;             // 環面水平
+      hoop.position.set(0, y, cageR - halfW);    // 圓心偏爬梯背側，環繞人員
+      g.add(hoop);
+    }
+    // 縱條（cage stays）：連接各環箍，繞背側半圈布置 5 條
+    if (hoopYs.length >= 2) {
+      const yLo = hoopYs[0], yHi = hoopYs[hoopYs.length - 1];
+      const stayLen = yHi - yLo;
+      const stayGeo = new THREE.CylinderGeometry(0.012, 0.012, stayLen, 6);
+      const cz = cageR - halfW;                  // 環心 z
+      for (let k = 0; k < 5; k++) {
+        const a = Math.PI * (0.15 + 0.7 * (k / 4));   // 背側半圈分布
+        const stay = new THREE.Mesh(stayGeo, cageMat);
+        stay.position.set(Math.cos(a) * cageR, (yLo + yHi) / 2, cz + Math.sin(a) * cageR);
+        g.add(stay);
+      }
+    }
+    // 頂端出口延伸扶手（登頂抓握）
+    const exitTopGeo = new THREE.CylinderGeometry(0.02, 0.02, halfW * 2 + 0.04, 8);
+    const exitTop = new THREE.Mesh(exitTopGeo, railMat);
+    exitTop.rotation.z = Math.PI / 2;
+    exitTop.position.y = stileTop;
+    g.add(exitTop);
   }
   return g;
 };

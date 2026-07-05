@@ -374,6 +374,14 @@ from .sprite import router as sprite_router  # noqa: E402
 
 app.include_router(sprite_router)
 
+from .model_api import router as model_api_router  # noqa: E402
+
+app.include_router(model_api_router)
+
+from .data_api import router as data_api_router  # noqa: E402
+
+app.include_router(data_api_router)
+
 # --------------------------------------------------------- 登入與權限（Google OAuth）
 from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
 
@@ -384,6 +392,15 @@ app.include_router(auth_router)
 app.middleware("http")(auth_guard)                      # 內層：登入守衛
 app.add_middleware(SessionMiddleware, secret_key=secret_key(),
                    same_site="lax", https_only=False)   # 外層：簽名 cookie session
+
+
+@app.middleware("http")
+async def _static_no_cache(request, call_next):
+    # /static 一律強制重新驗證（避免瀏覽器把舊版 JS 模組快取在 module map，開發期抓不到新版）
+    resp = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return resp
 
 # --------------------------------------------------------- P&ID 圖面管理
 UPLOADS_DIR = BASE_DIR / "uploads"

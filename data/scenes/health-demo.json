@@ -1,0 +1,37 @@
+{
+  "plant": {
+    "id": "HEALTH-DEMO",
+    "name": "設備健康度預警 Demo",
+    "units": [
+      {
+        "id": "U-K100",
+        "name": "壓縮區",
+        "equipment": [
+          {
+            "tag": "K-101",
+            "type": "compressor",
+            "name": "原料氣壓縮機",
+            "pos": [0, 0, 0],
+            "dims": { "l": 4.0, "w": 2.0, "h": 2.5 },
+            "pid_ref": "",
+            "design": {},
+            "instruments": ["TI-K101", "VI-K101", "II-K101"],
+            "model": {
+              "model_key": "cbb35484_10002",
+              "product_type": "occ",
+              "kind": "health",
+              "title": "健康度預警",
+              "note": "IsolationForest 異常偵測，發布自壓縮機運轉資料；block 呼叫 /agatha/model/{model_key}/predict/"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "pipes": [],
+  "instruments": {},
+  "scenarios": [{ "id": "normal", "name": "正常運轉", "kind": "normal", "desc": "" }],
+  "scan_models": [],
+  "props": [],
+  "underlays": []
+}

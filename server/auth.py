@@ -92,7 +92,8 @@ async def auth_guard(request: Request, call_next):
             request.url.path.startswith(p) for p in PUBLIC_PREFIXES):
         return await call_next(request)
     if not current_user(request):
-        if request.url.path.startswith("/api/") or request.url.path.startswith("/ws"):
+        if (request.url.path.startswith("/api/") or request.url.path.startswith("/ws")
+                or request.url.path.startswith("/agatha")):
             return JSONResponse({"detail": "未登入"}, status_code=401)
         return RedirectResponse(f"/login?next={urllib.parse.quote(str(request.url.path))}", 302)
     return await call_next(request)

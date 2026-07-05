@@ -1,0 +1,29 @@
+# EJ_3D 數位孿生平台（J.S Process Intelligence）— Python 依賴
+# 由實測環境盤點鎖版（2026-07-05）。安裝：pip install -r requirements.txt
+# Python 3.13（x64）驗證通過。
+
+# --- 核心：Web 框架 + 檔案上傳 ---
+fastapi==0.128.8
+uvicorn==0.40.0
+starlette==0.52.1
+pydantic==2.12.5
+python-multipart==0.0.32       # UploadFile / 表單上傳（缺→上傳端點報錯）
+
+# --- 資料工作台 + AutoML 建模 ---
+numpy==2.2.6
+pandas==2.3.1
+scipy==1.16.0
+scikit-learn==1.9.0
+joblib==1.5.3
+pyarrow==24.0.0                # dataprep 以 parquet 存資料集（缺→/api/data/upload 500）
+openpyxl==3.1.5                # 讀寫 .xlsx（Excel 上傳與匯出）
+
+# --- 離線工具（tools/train_surrogate.py 等，伺服器本身不需要）---
+matplotlib==3.10.3
+
+# --- 選用：廠端即時數據源（sources.py，lazy import；未接真數據可略）---
+asyncua==1.1.8                 # OPC UA client
+# pymodbus>=3.6                # Modbus TCP（目前未安裝）
+
+# --- 選用：資料工作台物性模組 /api/data/props/*（目前未安裝）---
+# CoolProp>=6.6

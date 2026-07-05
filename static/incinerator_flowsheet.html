@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>焚化爐全廠 flowsheet — 每個 block 綁模型 API</title>
+<style>
+  :root{--bg:#0e131c;--card:#182231;--line:#28374d;--tx:#e7eef7;--mut:#8ba0bd;
+        --ok:#2fbf71;--warn:#e8a33d;--crit:#e5484d;--opt:#8b5cf6;--pred:#0aa2c0;--acc:#046afb;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--tx);font-family:"Segoe UI",system-ui,"Microsoft JhengHei",sans-serif;}
+  .wrap{max-width:1240px;margin:0 auto;padding:20px 18px 60px;}
+  h1{font-size:20px;margin:0 0 2px;}
+  .sub{color:var(--mut);font-size:13px;margin-bottom:16px;}
+  .sub code{background:#0c1420;border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:#bcd;}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;}
+  .bar .lbl{color:var(--mut);font-size:12px;margin-right:4px;}
+  button{background:#0c1420;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:7px 13px;font-size:13px;cursor:pointer;}
+  button.active{border-color:var(--acc);background:#12325e;}
+  button:hover{border-color:var(--acc);}
+  /* flowsheet */
+  .flow{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding:6px 2px 14px;}
+  .blk{flex:0 0 148px;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:11px 11px 12px;position:relative;transition:border-color .4s;}
+  .blk .ico{font-size:22px;}
+  .blk .tag{font-size:11px;color:var(--mut);font-weight:700;letter-spacing:.03em;}
+  .blk .nm{font-size:12.5px;font-weight:600;margin:1px 0 7px;line-height:1.25;height:32px;}
+  .badge{display:inline-block;font-size:10px;padding:1px 7px;border-radius:999px;font-weight:700;}
+  .b-optimize{background:#2b2350;color:#c4b5fd;}.b-predict{background:#0b3a44;color:#7fe0f0;}
+  .b-health{background:#12324a;color:#8fd6ff;}
+  .val{font-size:22px;font-weight:800;margin-top:8px;font-variant-numeric:tabular-nums;line-height:1;}
+  .unit{font-size:11px;color:var(--mut);}
+  .st{display:inline-block;margin-top:8px;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;}
+  .key{position:absolute;top:10px;right:10px;width:9px;height:9px;border-radius:50%;background:#334;}
+  .mk{font-size:9.5px;color:#5b6f8c;margin-top:8px;word-break:break-all;}
+  .arrow{flex:0 0 26px;display:flex;align-items:center;justify-content:center;color:#40536e;font-size:18px;}
+  .branch{margin:2px 0 0 0;padding-left:150px;}
+  .branch .blk{flex-basis:170px;}
+  .steamlbl{color:var(--mut);font-size:11px;margin:4px 0 2px 150px;}
+  /* summary + log */
+  .grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-top:16px;}
+  @media(max-width:860px){.grid2{grid-template-columns:1fr;}}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:14px 16px;}
+  .panel h2{font-size:12px;letter-spacing:.04em;color:var(--mut);margin:0 0 10px;text-transform:uppercase;}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .kpi{background:#0c1420;border:1px solid var(--line);border-radius:8px;padding:9px 10px;}
+  .kpi .k{font-size:11px;color:var(--mut);}.kpi .v{font-size:18px;font-weight:800;margin-top:2px;}
+  #log{font-size:11.5px;font-family:ui-monospace,Consolas,monospace;color:#9db4d0;height:190px;overflow-y:auto;
+       background:#0c1420;border:1px solid var(--line);border-radius:8px;padding:8px 10px;white-space:pre-wrap;}
+  .hz{font-size:11px;color:var(--mut);}
+  .ctrls{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:12px 16px;margin-bottom:14px;}
+  .ctrl{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mut);min-width:168px;}
+  .ctrl b{color:var(--tx);font-size:13px;font-weight:600;}
+  .ctrl .cv{color:#7fb0ff;font-variant-numeric:tabular-nums;}
+  .ctrl input[type=range]{width:100%;accent-color:var(--acc);}
+  .ctrl .opt{margin-top:5px;padding:4px 9px;font-size:11px;border-color:var(--opt);color:#c4b5fd;background:#1b1637;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>焚化爐全廠數位孿生 — flowsheet × 模型 API</h1>
+  <div class="sub">8 個 block 各自綁一個<b>已發布的模型 API</b>（<code>model_key</code> 存在場景資料裡）。耦合模擬即時運轉，每拍每個 block 拿自己的即時讀值 call 它的模型端點。
+    調下面的<b>操作設點</b>（尿素/活性碳/λ）→ 全廠模型即時反應；「⚙ 自動最佳化」讓 block 自己去 <code>/optimize/</code> 算最佳設點。這就是 <i>活的 flowsheet：監控 + 決策</i>。</div>
+
+  <div class="bar">
+    <span class="lbl">運轉情境</span>
+    <button data-s="normal" class="active">正常運轉</button>
+    <button data-s="lhv_drop">進料熱值下降</button>
+    <button data-s="bag_clog">濾袋阻塞</button>
+    <button data-s="fan_degrade">風機軸承劣化</button>
+    <span class="hz" id="hz" style="margin-left:auto"></span>
+  </div>
+
+  <div class="ctrls" id="ctrls"></div>
+
+  <div class="flow" id="flow"></div>
+  <div class="steamlbl">↳ 蒸汽支線</div>
+  <div class="branch" id="branch"></div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>全廠即時指標</h2>
+      <div class="kpis" id="kpis"></div>
+    </div>
+    <div class="panel">
+      <h2>模型 API 呼叫紀錄（即時）</h2>
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SCENE='incinerator-plant';
+// 各 block 的即時指標顯示：{取值鍵, 單位, 好=低/高, warn, crit}（regression 用；health 用模型輸出）
+const BAND={
+ "B-101":{unit:"mg/Nm³",better:"low",warn:340,crit:385,ico:"🔥"},
+ "B-201":{unit:"mg/Nm³",better:"low",warn:230,crit:300,ico:"💨"},
+ "B-301":{unit:"t/h",better:"high",warn:52,crit:46,ico:"♨️"},
+ "B-401":{unit:"mg/Nm³",better:"low",warn:340,crit:420,ico:"🌫️"},
+ "B-501":{unit:"µg/Nm³",better:"low",warn:15,crit:25,ico:"⚫"},
+ "B-601":{unit:"健康",better:"health",ico:"🧹"},
+ "B-701":{unit:"健康",better:"health",ico:"🌀"},
+ "B-801":{unit:"MW",better:"high",warn:14,crit:11,ico:"⚡"},
+};
+const GAS_ORDER=["B-101","B-201","B-301","B-401","B-501","B-601","B-701"]; // 氣路
+let BLOCKS={}, scenario="normal", tickN=0;
+
+const $=id=>document.getElementById(id);
+function logln(s){const l=$('log'); l.textContent=(`${new Date().toLocaleTimeString('zh-TW',{hour12:false})}  ${s}\n`)+l.textContent; if(l.textContent.length>4000)l.textContent=l.textContent.slice(0,4000);}
+
+// ---------------- 操作設點（what-if）：滑桿直接驅動全廠模型 ----------------
+const SLIDERS=[
+ {key:'lam',label:'過剩空氣 λ → 爐溫/脫硝',min:1.30,max:1.85,step:0.01,val:1.55,dec:2},
+ {key:'urea',label:'尿素噴注 (L/h) → B-201 NOx',min:60,max:200,step:5,val:120,dec:0,opt:1},
+ {key:'carbon',label:'活性碳 (kg/h) → B-501 Hg',min:4,max:28,step:1,val:12,dec:0},
+];
+function ctrl(key,def){const el=document.getElementById('sl_'+key);return el?+el.value:def;}
+function buildCtrls(){
+  $('ctrls').innerHTML=SLIDERS.map(s=>`<label class="ctrl"><b>${s.label} <span class="cv" id="cv_${s.key}">${(+s.val).toFixed(s.dec)}</span></b>
+    <input type="range" id="sl_${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${s.val}"
+      oninput="document.getElementById('cv_${s.key}').textContent=(+this.value).toFixed(${s.dec})">
+    ${s.opt?`<button class="opt" onclick="optimizeUrea()">⚙ 自動最佳化 → 最小 NOx</button>`:''}</label>`).join('');
+}
+async function optimizeUrea(){
+  logln('⚙ 呼叫 B-201 /optimize/ 求最小出口 NOx …');
+  try{
+    const r=await fetch('/agatha/model/d99cf30d_10014/optimize/',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({mode:'min',knobs:['urea_inject_L_h']})}).then(x=>x.json());
+    const best=r.best.urea_inject_L_h, sl=document.getElementById('sl_urea');
+    sl.value=Math.round(best); document.getElementById('cv_urea').textContent=Math.round(best);
+    logln(`⚙ 建議尿素 ${best.toFixed(0)} L/h → 出口 NOx 預估 ${r.baseline_pred.toFixed(0)}→${r.pred.toFixed(0)} mg/Nm³（已套用到滑桿）`);
+  }catch(e){logln('⚙ 最佳化失敗：'+e);}
+}
+
+// ---------------- 耦合廠級模擬器：輸出以「特徵名」為鍵的 S ----------------
+const P={feed:20,lhv:9500,s:1,cl:1,hg:1,lam:1.55,pf:.62,grate:12,pat:180,urea:120,feedw:62,drum:40,lime:180,water:4,carbon:12,pulse:20,fouling:2,bag_extra:0,fan_vib_x:0,fan_brg_x:0};
+function drift(v,t,k){return v+(t-v)*k+(Math.random()-.5)*Math.abs(t||1)*0.01;}
+function sim(){
+  const sc=scenario;
+  P.feed=drift(P.feed,20,.15); P.lhv=drift(P.lhv, sc==="lhv_drop"?7800:9500,.12);
+  P.s=drift(P.s,1,.1); P.cl=drift(P.cl,1,.1); P.hg=drift(P.hg,1,.1);
+  // 操作設點來自滑桿（what-if）；未建立前用預設
+  P.lam=ctrl('lam',1.55); P.urea=ctrl('urea',120); P.lime=ctrl('lime',180); P.carbon=ctrl('carbon',12);
+  P.grate=drift(P.grate,12,.1); P.pat=drift(P.pat,180,.1);
+  P.fouling=Math.min(18,P.fouling+0.004);
+  P.bag_extra=drift(P.bag_extra, sc==="bag_clog"?13:0,.06);
+  P.fan_vib_x=drift(P.fan_vib_x, sc==="fan_degrade"?5.5:0,.06);
+  P.fan_brg_x=drift(P.fan_brg_x, sc==="fan_degrade"?20:0,.06);
+  const feed=P.feed,lhv=P.lhv,lam=P.lam,pf=P.pf;
+  const heat=feed*lhv/3600, stoich=feed*1000*4.6/1000, total=lam*stoich;
+  const primary=total*pf, secondary=total*(1-pf), o2=21*(1-1/lam);
+  const furnace=1000-300*(lam-1.30)+5.5*(heat-52)+0.25*(P.pat-180);
+  const flue=total*1.15, fexit=furnace-42;
+  const raw_nox=Math.max(150,300+0.5*(furnace-950)+16*(o2-6));
+  const raw_hcl=Math.max(20,850*P.cl), raw_hg=Math.max(3,40*P.hg);
+  const raw_dust=Math.max(1,4+0.5*(feed-20));
+  const tw=Math.exp(-Math.pow((furnace-950)/70,2));
+  const denox=Math.min(92,Math.max(5,88*tw*(1-Math.exp(-P.urea/90))));
+  const out_nox=raw_nox*(1-denox/100);
+  const steam=Math.max(30,heat*1.25*0.98+0.3*(P.feedw-62));
+  const steam_temp=400-0.6*P.fouling, boiler_exit=183+P.fouling+0.3*(feed-20);
+  const scrub_exit=150-3*P.water, lime_ratio=P.lime/(0.6*raw_hcl+0.4*(230*P.s)+50);
+  const hcl_rem=Math.min(99.8,Math.max(70,99*(1-Math.exp(-lime_ratio*1.4))*(1-(scrub_exit-140)/220)));
+  const out_hcl=raw_hcl*(1-hcl_rem/100);
+  const hg_rem=Math.min(99.5,Math.max(40,99*(1-Math.exp(-P.carbon/8)))), out_hg=raw_hg*(1-hg_rem/100);
+  const inlet_dust=raw_dust+P.lime/1000+P.carbon/2000;
+  const bag_dP=8+0.7*inlet_dust+0.12*P.pulse+9*Math.min(1,tickN/400)+P.bag_extra;
+  const collect=99.92-0.0006*bag_dP, out_dust=inlet_dust*1000*(1-collect/100);
+  const fan_curr=80+0.4*(flue-120)+0.9*bag_dP;
+  const fan_vib=2.2+1.6*Math.min(1,tickN/400)+P.fan_vib_x;
+  const fan_brg=60+0.25*(fan_curr-100)+6*Math.min(1,tickN/400)+P.fan_brg_x;
+  const cond_vac=-92;
+  return {waste_feed_t_h:feed,waste_LHV_kJ_kg:lhv,primary_air_kNm3_h:primary,secondary_air_kNm3_h:secondary,
+    grate_speed_m_h:P.grate,primary_air_temp_C:P.pat,urea_inject_L_h:P.urea,furnace_temp_C:furnace,
+    inlet_NOx_mg_Nm3:raw_nox,flue_gas_flow_kNm3_h:flue,heat_release_MW:heat,feedwater_t_h:P.feedw,
+    drum_pressure_bar:P.drum,boiler_inlet_gas_C:fexit,lime_slurry_kg_h:P.lime,water_inject_m3_h:P.water,
+    inlet_HCl_mg_Nm3:raw_hcl,scrubber_exit_temp_C:scrub_exit,carbon_inject_kg_h:P.carbon,inlet_Hg_ug_Nm3:raw_hg,
+    bag_dP_mbar:bag_dP,collection_eff_pct:collect,outlet_dust_mg_Nm3:out_dust,inlet_dust_g_Nm3:inlet_dust,
+    fan_motor_current_A:fan_curr,fan_vibration_mm_s:fan_vib,fan_bearing_temp_C:fan_brg,
+    inlet_steam_t_h:steam,inlet_steam_temp_C:steam_temp,condenser_vac_kPa:cond_vac,
+    _out_nox:out_nox,_out_hcl:out_hcl,_out_dust:out_dust,_steam:steam};
+}
+
+// ---------------- 初始化 ----------------
+async function boot(){
+  const scene=await fetch(`/api/scenes/${SCENE}`).then(r=>r.json());
+  const eq=scene.plant.units.flatMap(u=>u.equipment).filter(e=>e.model&&e.model.model_key);
+  eq.forEach(e=>BLOCKS[e.tag]={tag:e.tag,name:e.name,m:e.model});
+  const flow=$('flow'), branch=$('branch');
+  GAS_ORDER.forEach((tag,i)=>{
+    flow.insertAdjacentHTML('beforeend',card(BLOCKS[tag]));
+    if(i<GAS_ORDER.length-1) flow.insertAdjacentHTML('beforeend','<div class="arrow">→</div>');
+  });
+  branch.insertAdjacentHTML('beforeend',card(BLOCKS["B-801"]));
+  buildCtrls();
+  logln(`已載入場景，${eq.length} 個 block 各綁定 model_key ✓`);
+  tick(); setInterval(tick,2000);
+}
+function card(b){const bd=BAND[b.tag]||{}; const kind=b.m.kind;
+  return `<div class="blk" id="blk_${b.tag}">
+    <span class="key" id="key_${b.tag}"></span>
+    <div class="ico">${bd.ico||"■"}</div>
+    <div class="tag">${b.tag}</div>
+    <div class="nm">${b.name}</div>
+    <span class="badge b-${kind}">${kind==='optimize'?'最佳化':kind==='health'?'健康預警':'預測'}</span>
+    <div class="val" id="val_${b.tag}">--<span class="unit"> ${bd.unit||''}</span></div>
+    <div class="st" id="st_${b.tag}" style="background:#243247;color:#8ba0bd">等待</div>
+    <div class="mk">API ${b.m.model_key}</div>
+  </div>`;
+}
+
+document.querySelector('.bar').addEventListener('click',e=>{
+  const btn=e.target.closest('button[data-s]'); if(!btn)return;
+  scenario=btn.dataset.s;
+  document.querySelectorAll('.bar button').forEach(x=>x.classList.toggle('active',x===btn));
+  logln(`▶ 切換情境：${btn.textContent}`);
+});
+
+async function tick(){
+  tickN++;
+  const S=sim();
+  // 每個 block 用自己的即時讀值 call 自己的模型 API
+  await Promise.all(Object.values(BLOCKS).map(async b=>{
+    const inputs={}; b.m.inputs.forEach(f=>inputs[f]=+(S[f]).toFixed(3));
+    let out;
+    try{ out=await fetch(`/agatha/model/${b.m.model_key}/predict/`,{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({inputs,source:'flowsheet'})}).then(r=>r.json()); }
+    catch(e){ return; }
+    render(b,(out.predictions&&out.predictions[0])||{});
+  }));
+  // 全廠指標
+  $('kpis').innerHTML=[
+    ['煙囪 NOx',S._out_nox.toFixed(0),'mg/Nm³'],['煙囪 HCl',S._out_hcl.toFixed(1),'mg/Nm³'],
+    ['煙囪粉塵',S._out_dust.toFixed(1),'mg/Nm³'],['蒸汽產量',S._steam.toFixed(1),'t/h'],
+    ['爐膛溫度',S.furnace_temp_C.toFixed(0),'°C']
+  ].map(k=>`<div class="kpi"><div class="k">${k[0]}</div><div class="v">${k[1]} <span class="unit">${k[2]}</span></div></div>`).join('');
+  $('hz').textContent=`● 每 2s · 8 blocks × predict · 第 ${tickN} 拍`;
+}
+
+function render(b,p){
+  const bd=BAND[b.tag]||{}; const V=$('val_'+b.tag),ST=$('st_'+b.tag),K=$('key_'+b.tag),BLK=$('blk_'+b.tag);
+  let col='var(--ok)',label='正常',shown='--';
+  if(b.m.kind==='health'){
+    const h=p.health, over=p.over_threshold;
+    shown=(h!=null?Math.round(h):'--');
+    col = over?'var(--crit)':h>=70?'var(--ok)':h>=50?'var(--warn)':'var(--crit)';
+    label = over?'⚠ 超標告警':h>=70?'健康':h>=50?'注意':'劣化';
+    V.innerHTML=`${shown}<span class="unit"> /100</span>`;
+    logln(`${b.tag} predict → health ${h!=null?h.toFixed(1):'--'}${over?' ⚠超標':''}`);
+  }else{
+    const v=p.value; shown=(v!=null?(Math.abs(v)>=100?v.toFixed(0):v.toFixed(1)):'--');
+    if(bd.better==='low'){ col=v>=bd.crit?'var(--crit)':v>=bd.warn?'var(--warn)':'var(--ok)';
+      label=v>=bd.crit?'偏高':v>=bd.warn?'注意':'正常'; }
+    else{ col=v<=bd.crit?'var(--crit)':v<=bd.warn?'var(--warn)':'var(--ok)';
+      label=v<=bd.crit?'偏低':v<=bd.warn?'注意':'正常'; }
+    V.innerHTML=`${shown}<span class="unit"> ${bd.unit||''}</span>`;
+    logln(`${b.tag} predict → ${bd.unit==='健康'?'':''}${shown} ${bd.unit||''}`);
+  }
+  ST.textContent=label; ST.style.background=col; ST.style.color='#0b0f16';
+  K.style.background=col; BLK.style.borderColor=(col==='var(--crit)')?'var(--crit)':'var(--line)';
+}
+
+boot().catch(e=>{document.getElementById('flow').textContent='初始化失敗：'+e;});
+</script>
+</body>
+</html>

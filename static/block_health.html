@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>設備健康度預警 — 孿生 Block ×  模型 API</title>
+<style>
+  :root { --bg:#0f1420; --card:#1a2230; --line:#2a3547; --tx:#e6edf6; --mut:#8aa0bd;
+          --ok:#2fbf71; --warn:#e8a33d; --crit:#e5484d; --accent:#046afb; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--tx);
+         font-family:"Segoe UI",system-ui,"Microsoft JhengHei",sans-serif; }
+  .wrap { max-width:1080px; margin:0 auto; padding:22px 20px 60px; }
+  h1 { font-size:20px; margin:0 0 2px; }
+  .sub { color:var(--mut); font-size:13px; margin-bottom:18px; }
+  .grid { display:grid; grid-template-columns:1.15fr 1fr; gap:16px; }
+  @media (max-width:820px){ .grid{ grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .card h2 { font-size:13px; letter-spacing:.04em; color:var(--mut); margin:0 0 12px; text-transform:uppercase; }
+  /* block */
+  .block { display:flex; align-items:center; gap:16px; }
+  .machine { width:150px; height:120px; flex:none; }
+  .btag { font-size:22px; font-weight:700; }
+  .bname { color:var(--mut); font-size:13px; }
+  .bind { margin-top:10px; font-size:12px; color:var(--mut); line-height:1.6; }
+  .bind code { background:#0d1522; border:1px solid var(--line); border-radius:5px; padding:1px 6px; color:#cfe0f5; }
+  /* gauge */
+  .gaugewrap { display:flex; align-items:center; gap:18px; }
+  .gauge { width:150px; height:150px; flex:none; }
+  .gnum { font-size:40px; font-weight:800; }
+  .gunit { font-size:14px; color:var(--mut); }
+  .status { display:inline-block; padding:4px 12px; border-radius:999px; font-weight:700; font-size:13px; margin-top:8px; }
+  .risk { color:var(--mut); font-size:13px; margin-top:10px; }
+  .risk b { color:var(--tx); }
+  /* sensors */
+  .sensor { display:grid; grid-template-columns:120px 1fr 74px; align-items:center; gap:10px; margin:7px 0; font-size:13px; }
+  .sensor .nm { color:var(--mut); }
+  .bar { height:8px; background:#0d1522; border-radius:6px; overflow:hidden; }
+  .bar > i { display:block; height:100%; background:var(--accent); border-radius:6px; transition:width .5s, background .5s; }
+  .sensor .vv { text-align:right; font-variant-numeric:tabular-nums; }
+  /* controls */
+  .btns { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+  button { background:#0d1522; color:var(--tx); border:1px solid var(--line); border-radius:8px;
+           padding:8px 14px; font-size:13px; cursor:pointer; }
+  button.active { border-color:var(--accent); background:#12325e; }
+  button:hover { border-color:var(--accent); }
+  /* api panel */
+  pre { background:#0d1522; border:1px solid var(--line); border-radius:8px; padding:10px 12px;
+        font-size:12px; color:#bcd; overflow-x:auto; margin:6px 0 0; white-space:pre-wrap; word-break:break-all; }
+  .ep { font-size:12px; color:var(--mut); }
+  .ep b { color:#7fb0ff; }
+  .pill { font-size:11px; color:var(--mut); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>設備健康度預警 — 孿生 Block × 模型 API</h1>
+  <div class="sub">這個 block 的 <code style="color:#7fb0ff">model_key</code> 來自場景資料（不是寫死在頁面）；即時讀值由 block 送進
+    <b>發布好的模型 API</b> 算出健康度。這就是 L3：<i>孿生 block → call 模型 API</i>。</div>
+
+  <div class="grid">
+    <!-- 左：Block + 健康度 -->
+    <div class="card">
+      <h2>孿生 Block</h2>
+      <div class="block">
+        <svg class="machine" id="machine" viewBox="0 0 150 120" aria-hidden="true">
+          <rect x="8" y="45" width="104" height="52" rx="6" fill="#243247" stroke="#3a4a63"/>
+          <rect x="20" y="30" width="34" height="18" rx="3" fill="#2c3d57" stroke="#3a4a63"/>
+          <circle id="rotor" cx="78" cy="71" r="18" fill="#1a2637" stroke="#4a5f80" stroke-width="3"/>
+          <circle cx="78" cy="71" r="4" fill="#5a7195"/>
+          <rect x="112" y="60" width="30" height="22" rx="3" fill="#2c3d57" stroke="#3a4a63"/>
+          <rect x="8" y="97" width="104" height="7" rx="2" fill="#1a2637"/>
+          <circle id="beacon" cx="37" cy="39" r="6" fill="#2fbf71"/>
+        </svg>
+        <div>
+          <div class="btag" id="btag">K-101</div>
+          <div class="bname" id="bname">原料氣壓縮機</div>
+          <div class="bind" id="bind">載入中…</div>
+        </div>
+      </div>
+
+      <h2 style="margin-top:18px">健康度</h2>
+      <div class="gaugewrap">
+        <svg class="gauge" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="50" fill="none" stroke="#0d1522" stroke-width="12"/>
+          <circle id="arc" cx="60" cy="60" r="50" fill="none" stroke="#2fbf71" stroke-width="12"
+                  stroke-linecap="round" stroke-dasharray="314" stroke-dashoffset="314"
+                  transform="rotate(-90 60 60)"/>
+          <text id="gnum" x="60" y="60" text-anchor="middle" dominant-baseline="central"
+                class="gnum" fill="#e6edf6">--</text>
+          <text x="60" y="84" text-anchor="middle" class="gunit" fill="#8aa0bd">/ 100</text>
+        </svg>
+        <div>
+          <span class="status" id="status" style="background:#243247;color:#8aa0bd">等待資料</span>
+          <div class="risk">風險值 <b id="risk">--</b> ／ 門檻 <b id="thr">--</b></div>
+          <div class="risk" id="ovr"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右：即時讀值 + 情境 -->
+    <div class="card">
+      <h2>即時讀值（模擬 DCS）</h2>
+      <div class="btns" id="scn">
+        <button data-s="healthy" class="active">健康運轉</button>
+        <button data-s="warn">逐步劣化</button>
+        <button data-s="crit">急遽劣化</button>
+      </div>
+      <div id="sensors"></div>
+    </div>
+  </div>
+
+  <!-- 下：API 透明面板 -->
+  <div class="card" style="margin-top:16px">
+    <h2>Block 正在呼叫的模型 API <span class="pill" id="hz"></span></h2>
+    <div class="ep">POST <b id="epurl">/agatha/model/…/predict/</b></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px">
+      <div><div class="pill">request（block 送出的即時讀值）</div><pre id="req">--</pre></div>
+      <div><div class="pill">response（模型 API 回傳）</div><pre id="res">--</pre></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SCENE = 'health-demo';
+const FEAT_LABEL = {
+  suction_bar:['吸入壓','bar',1.6,2.4], discharge_bar:['排出壓','bar',7.4,8.8],
+  motor_current_A:['馬達電流','A',110,150], bearing_temp_C:['軸承溫度','°C',60,100],
+  vibration_mm_s:['振動','mm/s',2,11], oil_press_bar:['潤滑油壓','bar',3.0,4.0],
+  flow_Nm3h:['流量','Nm³/h',900,1100]
+};
+// 各情境的目標值（模擬器朝目標漂移）
+const TARGET = {
+  healthy:{suction_bar:2.0,discharge_bar:8.0,motor_current_A:120,bearing_temp_C:65,vibration_mm_s:2.5,oil_press_bar:3.5,flow_Nm3h:1000},
+  warn:   {suction_bar:2.0,discharge_bar:8.1,motor_current_A:130,bearing_temp_C:81,vibration_mm_s:6.2,oil_press_bar:3.4,flow_Nm3h:1000},
+  crit:   {suction_bar:1.98,discharge_bar:8.2,motor_current_A:141,bearing_temp_C:95,vibration_mm_s:9.6,oil_press_bar:3.3,flow_Nm3h:1000}
+};
+let MODEL_KEY=null, FEATURES=[], THRESHOLD=null, scenario='healthy';
+let cur = {...TARGET.healthy};
+
+const $=id=>document.getElementById(id);
+
+async function boot(){
+  // 1) 從場景資料取出 block 綁定的 model_key（證明模型「在 block 裡」）
+  const scene = await fetch(`/api/scenes/${SCENE}`).then(r=>r.json());
+  let eq=null;
+  for(const u of scene.plant.units){ for(const e of (u.equipment||[])){ if(e.model&&e.model.model_key){eq=e;break;} } if(eq)break; }
+  if(!eq){ $('bind').textContent='場景中找不到帶 model 綁定的設備'; return; }
+  MODEL_KEY = eq.model.model_key;
+  $('btag').textContent = eq.tag; $('bname').textContent = eq.name||eq.tag;
+  $('epurl').textContent = `/agatha/model/${MODEL_KEY}/predict/`;
+
+  // 2) 查模型契約（需要哪些 input、門檻）
+  const cap = await fetch(`/agatha/model/${MODEL_KEY}/capability/`).then(r=>r.json());
+  FEATURES = cap.input_schema.features.map(f=>f.name);
+  const info = await fetch(`/agatha/model/${MODEL_KEY}/info/`).then(r=>r.json());
+  THRESHOLD = info.threshold; $('thr').textContent = THRESHOLD!=null?THRESHOLD.toFixed(3):'（動態）';
+  $('bind').innerHTML = `綁定模型 <code>${MODEL_KEY}</code><br>類型 ${eq.model.title||eq.model.product_type} · ${info.task} · ${FEATURES.length} 個輸入特徵`;
+
+  buildSensors();
+  tick();                    // 立刻跑一次
+  setInterval(tick, 1600);   // 之後每 1.6s 一拍（模擬即時）
+}
+
+function buildSensors(){
+  const box=$('sensors'); box.innerHTML='';
+  FEATURES.forEach(f=>{
+    const [nm]=FEAT_LABEL[f]||[f];
+    const row=document.createElement('div'); row.className='sensor';
+    row.innerHTML=`<span class="nm">${nm}</span><span class="bar"><i id="bar_${f}"></i></span><span class="vv" id="v_${f}">--</span>`;
+    box.appendChild(row);
+  });
+}
+
+document.getElementById('scn').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b)return;
+  scenario=b.dataset.s;
+  [...document.querySelectorAll('#scn button')].forEach(x=>x.classList.toggle('active',x===b));
+});
+
+let spin=0;
+async function tick(){
+  if(!MODEL_KEY) return;
+  // 讀值朝情境目標漂移 + 小雜訊
+  const tgt=TARGET[scenario];
+  const inputs={};
+  FEATURES.forEach(f=>{
+    const t=tgt[f]!=null?tgt[f]:cur[f];
+    cur[f]=cur[f]+(t-cur[f])*0.35 + (Math.random()-0.5)*Math.abs(t)*0.004;
+    inputs[f]=+cur[f].toFixed(3);
+    const [nm,unit,lo,hi]=FEAT_LABEL[f]||[f,'',0,1];
+    const pct=Math.max(2,Math.min(100,(cur[f]-lo)/(hi-lo)*100));
+    const bar=$('bar_'+f); if(bar){ bar.style.width=pct+'%';
+      bar.style.background = pct>85?'var(--crit)':pct>65?'var(--warn)':'var(--accent)'; }
+    const vv=$('v_'+f); if(vv) vv.textContent=cur[f].toFixed(f==='flow_Nm3h'?0:2)+' '+unit;
+  });
+
+  // === 這就是 block → 模型 API 的呼叫 ===
+  $('req').textContent = JSON.stringify({inputs}, null, 1);
+  let out;
+  try{
+    const r=await fetch(`/agatha/model/${MODEL_KEY}/predict/`,{
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({inputs, source:'twin-block'})
+    });
+    out=await r.json();
+  }catch(err){ $('res').textContent='呼叫失敗：'+err; return; }
+  $('res').textContent = JSON.stringify(out, null, 1);
+  const p=(out.predictions&&out.predictions[0])||{};
+  render(p);
+  spin=(spin+40)%360; $('rotor').setAttribute('transform',`rotate(${spin} 78 71)`);
+  $('hz').textContent='● 每 1.6s 呼叫一次';
+}
+
+function render(p){
+  const health=p.health, risk=p.risk, over=p.over_threshold;
+  const col = over? 'var(--crit)' : health>=70?'var(--ok)': health>=50?'var(--warn)':'var(--crit)';
+  const label = over? '⚠ 超標告警' : health>=70?'正常':health>=50?'注意':'劣化警示';
+  // gauge
+  const off = 314 - 314*Math.max(0,Math.min(100,health))/100;
+  $('arc').setAttribute('stroke-dashoffset', off);
+  $('arc').setAttribute('stroke', col);
+  $('gnum').textContent = health!=null?Math.round(health):'--';
+  $('gnum').setAttribute('fill', col);
+  const st=$('status'); st.textContent=label; st.style.background=col; st.style.color='#0b0f16';
+  $('risk').textContent = risk!=null?risk.toFixed(4):'--';
+  $('ovr').innerHTML = over? '<span style="color:var(--crit)">● 風險值已超過門檻，建議安排檢修</span>':'';
+  // block 顏色回饋
+  $('beacon').setAttribute('fill', col);
+  document.querySelector('.machine rect').setAttribute('stroke', over?'var(--crit)':'#3a4a63');
+}
+
+boot().catch(e=>{ document.getElementById('bind').textContent='初始化失敗：'+e; });
+</script>
+</body>
+</html>

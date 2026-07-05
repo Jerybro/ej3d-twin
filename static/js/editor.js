@@ -13,6 +13,7 @@ import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight,
          STEEL_SECTIONS, steelSection } from './plant-builders.js';
 import { initSprite } from './sprite.js';
 import { runClash, clashKey } from './clash.js';
+import { computeWeights } from './weight.js';
 
 const viewport = document.getElementById('viewport');
 
@@ -2514,6 +2515,76 @@ function renderPipeListPanel() {
   }));
 }
 document.getElementById('btn-pipelist').addEventListener('click', renderPipeListPanel);
+
+// ------------------------------------------------------------ 重量與重心（Weight & CoG）報表
+// 對標 E3D PROPCON：逐設備估質量→彙總全場總重＋重心。長度用 fmtLen 隨單位切換重繪。
+function renderWeightPanel() {
+  repaintPanel = renderWeightPanel;
+  const rep = computeWeights(sceneData, eqObjects);
+  document.getElementById('prop-title').textContent = `重量與重心（${rep.count}）`;
+  const kg = (v) => (v >= 1000 ? (v / 1000).toFixed(2) + ' t' : Math.round(v) + ' kg');
+  const rows = rep.items
+    .slice()
+    .sort((a, b) => b.mass_kg - a.mass_kg)
+    .map((it) => `<div data-wt="${it.tag}" style="display:flex;gap:8px;padding:6px 4px;border-bottom:1px solid var(--bdr);cursor:pointer;font-size:12px">
+      <span style="width:70px;color:var(--accent);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.tag}</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.name}${it.method !== 'solid' ? '｜' + it.methodLabel : ''}</span>
+      <span style="color:var(--dim);white-space:nowrap">${kg(it.mass_kg)}</span>
+    </div>`).join('');
+  const tt = rep.total_kg;
+  const cog = rep.cog;
+  propBody.innerHTML = `<div class="pg-section">Weight & CoG</div>
+    ${rep.count
+      ? rows
+        + `<div style="display:flex;gap:8px;padding:8px 4px;font-size:12px;font-weight:600;border-top:2px solid var(--bdr)">
+            <span style="flex:1">設備總重 ${rep.count} 台</span>
+            <span>${Math.round(tt).toLocaleString()} kg</span>
+          </div>
+          <div style="display:flex;gap:8px;padding:2px 4px;font-size:12px;color:var(--accent);font-weight:600">
+            <span style="flex:1"></span><span>${(tt / 1000).toFixed(2)} tonne</span>
+          </div>`
+        + (rep.pipe_kg > 0.5
+          ? `<div style="display:flex;gap:8px;padding:2px 4px;font-size:12px;color:var(--dim)"><span style="flex:1">管線估重（另計）</span><span>${kg(rep.pipe_kg)}</span></div>` : '')
+        + `<div class="pg-section" style="margin-top:8px">重心 CoG（設備）</div>
+          <div class="pg-grid">
+            ${pgRow(`東 E (${unitLabel()})`, `<span>${fmtLen(cog[0])}</span>`)}
+            ${pgRow(`上 U (${unitLabel()})`, `<span>${fmtLen(cog[1])}</span>`)}
+            ${pgRow(`北 N (${unitLabel()})`, `<span>${fmtLen(cog[2])}</span>`)}
+          </div>
+          <div style="padding:8px 4px 2px"><button class="rbtn" id="btn-weight-csv" style="width:100%"><span class="ric" data-ic="mto"></span>匯出重量表 CSV</button></div>
+          <div style="font-size:11px;color:var(--dim);padding:8px 4px;line-height:1.5">估算法：${rep.method}</div>`
+      : '<div style="color:var(--dim);font-size:12px;padding:8px 0">尚無設備——先在設備 tab 佈設</div>'}`;
+  propBody.querySelectorAll('[data-wt]').forEach((row) => row.addEventListener('click', () => {
+    const entry = eqObjects.get(row.dataset.wt);
+    if (entry) { selectEquipment(row.dataset.wt); zoomToSelection(); }
+  }));
+  const csvBtn = document.getElementById('btn-weight-csv');
+  if (csvBtn) csvBtn.addEventListener('click', () => exportWeightCsv(rep));
+}
+function exportWeightCsv(rep) {
+  const r = rep ?? computeWeights(sceneData, eqObjects);
+  const esc = (v) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const rows = [];
+  rows.push(['J.S_3D Studio 重量與重心報表（Weight & CoG）', sceneData.plant?.name ?? sceneId ?? '']);
+  rows.push(['輸出時間', new Date().toLocaleString('zh-TW', { hour12: false })]);
+  rows.push(['估算法', r.method]);
+  rows.push([]);
+  rows.push(['位號', '名稱', '類型', '材料', '估法', '質量(kg)', '重心 X(m)', '重心 Y(m)', '重心 Z(m)']);
+  for (const it of r.items) {
+    rows.push([it.tag, it.name, it.type, it.material, it.methodLabel ?? (it.shell ? '薄殼' : '實心'),
+      it.mass_kg.toFixed(1), it.cog[0].toFixed(3), it.cog[1].toFixed(3), it.cog[2].toFixed(3)]);
+  }
+  rows.push([]);
+  rows.push(['[彙總]']);
+  rows.push(['設備總重(kg)', r.total_kg.toFixed(1), '設備總重(tonne)', (r.total_kg / 1000).toFixed(3)]);
+  rows.push(['管線估重(kg)', r.pipe_kg.toFixed(1)]);
+  rows.push(['總重含管線(kg)', r.grand_total_kg.toFixed(1)]);
+  rows.push(['全場重心 CoG(m)', r.cog[0].toFixed(3), r.cog[1].toFixed(3), r.cog[2].toFixed(3)]);
+  const csv = '﻿' + rows.map((row) => row.map(esc).join(',')).join('\r\n');
+  saveBlob(`${sceneId ?? 'scene'}-Weight.csv`, csv, 'text/csv;charset=utf-8', false);
+  setHint(`重量表已輸出：設備 ${r.count} 台、總重 ${(r.total_kg / 1000).toFixed(2)} t（CSV）`);
+}
+document.getElementById('btn-weight').addEventListener('click', renderWeightPanel);
 
 // ------------------------------------------------------------ 剖面蓋色（Clip and Cap）
 let capOn = false;

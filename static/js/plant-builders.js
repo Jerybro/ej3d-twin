@@ -1609,6 +1609,17 @@ export const PIPE_SPECS = [
   { code: 'B4B', name: '合金鋼 600#', color: 0x7d6a55 },
   { code: 'PVC', name: 'PVC 化工', color: 0x9a8fb0 },
 ];
+// 管線服務別 / 流體別（對標 E3D 依 service 著色）：工業慣用色（近似 ANSI/ISO 流體識別）
+// code 存於 pipe.service（純中繼屬性，不影響幾何/存檔 canonical）；無 service 時沿用 spec 灰預設色。
+export const PIPE_SERVICES = [
+  { code: 'process', name: '製程 Process', color: 0xb0862b },  // 製程流體：赭黃
+  { code: 'steam',   name: '蒸汽 Steam',   color: 0xe07b1a },  // 蒸汽：橙
+  { code: 'water',   name: '冷卻水 Water', color: 0x2f7fd1 },  // 水：藍
+  { code: 'air',     name: '儀錶空氣 Air', color: 0x3fa64a },  // 空氣：綠
+  { code: 'gas',     name: '燃氣 Gas',     color: 0xc9a227 },  // 燃氣：黃
+  { code: 'drain',   name: '排水 Drain',   color: 0x6b7a45 },  // 排水/汙水：橄欖
+  { code: 'flare',   name: '放空 Flare',   color: 0xd23b2e },  // 放空/火炬：紅
+];
 export const PIPE_BORES = [
   { dn: 'DN25', r: 0.017 }, { dn: 'DN40', r: 0.024 }, { dn: 'DN50', r: 0.03 },
   { dn: 'DN80', r: 0.045 }, { dn: 'DN100', r: 0.057 }, { dn: 'DN150', r: 0.084 },

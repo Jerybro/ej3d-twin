@@ -9,7 +9,7 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight,
          buildPrim, buildPipeComponent, PIPE_COMPONENTS,
-         PIPE_SPECS, PIPE_BORES, PIPE_SCHEDULES, pipeWall,
+         PIPE_SPECS, PIPE_SERVICES, PIPE_BORES, PIPE_SCHEDULES, pipeWall,
          STEEL_SECTIONS, steelSection } from './plant-builders.js';
 import { initSprite } from './sprite.js';
 import { runClash, clashKey } from './clash.js';
@@ -293,7 +293,13 @@ function applyLayers() {
   for (const entry of eqObjects.values()) {
     entry.group.visible = !hiddenTags.has(entry.def.tag) && eqLayerOn(entry.def);
   }
-  pipeObjects.forEach((p, i) => { if (p) p.group.visible = sceneData.pipes[i]?.profile === 'duct' ? LAYERS.hvac : LAYERS.pipe; });
+  pipeObjects.forEach((p, i) => {
+    if (!p) return;
+    const pipe = sceneData.pipes[i];
+    const layerOn = pipe?.profile === 'duct' ? LAYERS.hvac : LAYERS.pipe;
+    const svcKey = pipeServiceKey(pipe);   // 風管→null（不受服務篩選）；管線→service code 或 '__none__'
+    p.group.visible = layerOn && !(svcKey && hiddenServices.has(svcKey));   // 服務圖例篩選：隱藏該服務別
+  });
 }
 
 function emptyScene(name) {
@@ -358,6 +364,24 @@ const pipeMat = std(0x646f7b);
 const insulMat = new THREE.MeshStandardMaterial({ color: 0xcdd6df, transparent: true, opacity: 0.26, roughness: 1 });
 const pipeHi = std(0xffaa3c, { emissive: 0x442a00, emissiveIntensity: 0.6 });
 
+// 服務別著色：每個 service code 一個共用材質快取（避免每段 new）。無 service→回傳預設 pipeMat（維持現況灰）。
+const SERVICE_BY_CODE = Object.fromEntries(PIPE_SERVICES.map((s) => [s.code, s]));
+const serviceMats = new Map();
+function serviceMat(code) {
+  const svc = SERVICE_BY_CODE[code];
+  if (!svc) return pipeMat;                                 // 無此服務別→沿用預設灰
+  if (!serviceMats.has(code)) serviceMats.set(code, std(svc.color));
+  return serviceMats.get(code);
+}
+// 管段「基底材質」（非選取狀態的還原目標）：風管用 ductMat；管線有 service 用服務色，否則 pipeMat。
+function pipeBaseMat(pipe) {
+  if (pipe?.profile === 'duct') return ductMat;
+  return pipe?.service ? serviceMat(pipe.service) : pipeMat;
+}
+// UI 狀態：被圖例隱藏的服務別（不入存檔）。'__none__' 代表「無服務別」的管線群。
+const hiddenServices = new Set();
+const pipeServiceKey = (pipe) => (pipe?.profile === 'duct' ? null : (pipe?.service || '__none__'));
+
 // 坡度：slope 存「‰（每公尺水平落差 mm）」canonical，預設 0（水平）。
 // 落差只在渲染層套用——pts 仍為水平公尺 canonical，twin/USD 讀 pts 不受污染。
 // dpts[i].y = pts[i].y − (slope/1000)×(至第 i 節點的水平弧長)。
@@ -383,6 +407,7 @@ function buildPipe(pipe, index) {
   // 坡度：僅渲染層下降 Y（pts 不變）。pts 供 arcToPose/報表使用仍是水平 canonical。
   const pts = slopedDisplayPts(pipe, ptsRaw);
   const slopePM = pipeSlopePermille(pipe);
+  const baseMat = pipeBaseMat(pipe);   // 服務別著色：有 pipe.service 用服務色，否則沿用預設 pipeMat（現況灰）
   // P&ID 自動抽取場景管線量大：降面數/關陰影，維持可選取
   const lite = sceneData.pipes.length > 60;
   // 異徑管後段變徑：依元件弧長位置建立管徑分段表
@@ -400,7 +425,7 @@ function buildPipe(pipe, index) {
     const segR = radiusAt(arcAcc + len / 2);
     arcAcc += len;
     if (len < 1e-4) continue;
-    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(segR, segR, len, lite ? 6 : 12), pipeMat);
+    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(segR, segR, len, lite ? 6 : 12), baseMat);
     cyl.position.copy(a).addScaledVector(dir, 0.5);
     cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
     cyl.castShadow = !lite;
@@ -422,13 +447,13 @@ function buildPipe(pipe, index) {
       let joint;
       if (angle > 82 && angle < 98) {
         const R = pipe.r * 1.8;
-        joint = new THREE.Mesh(new THREE.TorusGeometry(R, pipe.r, 8, 10, Math.PI / 2), pipeMat);
+        joint = new THREE.Mesh(new THREE.TorusGeometry(R, pipe.r, 8, 10, Math.PI / 2), baseMat);
         const X = u.clone().negate(), Y = v.clone().negate();
         const Z = new THREE.Vector3().crossVectors(X, Y).normalize();
         joint.setRotationFromMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
         joint.position.copy(pts[i + 1]).addScaledVector(u, R).addScaledVector(v, R);
       } else {
-        joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
+        joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), baseMat);
         joint.position.copy(pts[i + 1]);
       }
       joint.userData.pipeIndex = index;
@@ -709,7 +734,7 @@ function selectNone() {
   repaintPanel = null;
   transform.detach();
   clearNodeHandles();
-  pipeObjects.forEach((p, i) => { if (!p) return; const m = sceneData.pipes[i]?.profile === 'duct' ? ductMat : pipeMat; p.group.traverse((o) => { if (o.isMesh && !o.userData.insul && !o.userData.slopeMarker) o.material = m; }); });
+  pipeObjects.forEach((p, i) => { if (!p) return; const m = pipeBaseMat(sceneData.pipes[i]); p.group.traverse((o) => { if (o.isMesh && !o.userData.insul && !o.userData.slopeMarker) o.material = m; }); });
   renderPropEmpty();
   syncTreeSelection();
   document.getElementById('st-sel').textContent = '選取：無';
@@ -1062,6 +1087,8 @@ function renderPipeProps(index) {
       })() : ''}
       ${isDuct ? '' : pgRow('Spec', `<select data-k="spec" style="width:100%">${PIPE_SPECS.map((sp) =>
         `<option value="${sp.code}" ${pipe.spec === sp.code ? 'selected' : ''}>${sp.code}｜${sp.name}</option>`).join('')}</select>`)}
+      ${isDuct ? '' : pgRow('服務別 Service', `<select data-k="service" style="width:100%"><option value="" ${!pipe.service ? 'selected' : ''}>（無）＝用 Spec 色</option>${PIPE_SERVICES.map((sv) =>
+        `<option value="${sv.code}" ${pipe.service === sv.code ? 'selected' : ''}>${sv.name}</option>`).join('')}</select>`)}
       ${isDuct ? '' : pgRow('Bore', `<select data-k="dn" style="width:100%">${
         (!pipe.dn && !PIPE_BORES.some((b) => Math.abs(b.r - pipe.r) < 0.01))
           ? '<option value="" selected disabled>（自訂 bore）</option>' : ''}${PIPE_BORES.map((b) =>
@@ -1107,6 +1134,12 @@ function renderPipeProps(index) {
   propBody.querySelector('[data-k="spec"]')?.addEventListener('change', (e) => {   // 風管不渲染此欄→null-safe
     pushUndo();
     pipe.spec = e.target.value;
+    selectPipe(index);
+  });
+  propBody.querySelector('[data-k="service"]')?.addEventListener('change', (e) => {   // 服務別著色（風管不渲染此欄→null-safe）
+    pushUndo();
+    pipe.service = e.target.value || undefined;   // 空＝無服務別，存 undefined（回用 Spec 色、不污染存檔）
+    rebuildAllPipes();   // 重建以套用服務色材質（材質在 buildPipe 決定）
     selectPipe(index);
   });
   propBody.querySelector('[data-k="dn"]')?.addEventListener('change', (e) => {   // 風管不渲染此欄→null-safe
@@ -2827,6 +2860,49 @@ function renderPipeListPanel() {
   }));
 }
 document.getElementById('btn-pipelist').addEventListener('click', renderPipeListPanel);
+
+// ------------------------------------------------------------ 服務別圖例／篩選（對標 E3D 依 service 著色圖例）
+// 各服務色塊＋名稱＋管線數量；點列切換該服務別管線顯示/隱藏（filter，走 applyLayers）。
+// repaintPanel 設為自身，切單位/重繪時保持面板。純 UI 狀態（hiddenServices），不入存檔。
+const hex6 = (c) => '#' + (c >>> 0).toString(16).padStart(6, '0').slice(-6);
+function renderServiceLegend() {
+  repaintPanel = renderServiceLegend;
+  document.getElementById('prop-title').textContent = '服務別圖例';
+  // 逐服務別統計管線數（僅計非風管管線）
+  const counts = {};
+  let noneCount = 0;
+  for (const p of sceneData.pipes) {
+    if (p.profile === 'duct') continue;
+    if (p.service && SERVICE_BY_CODE[p.service]) counts[p.service] = (counts[p.service] ?? 0) + 1;
+    else noneCount++;
+  }
+  const legendRow = (key, name, colorInt, n) => {
+    const hidden = hiddenServices.has(key);
+    return `<div data-svc="${key}" title="點擊切換顯示/隱藏" style="display:flex;gap:8px;align-items:center;padding:6px 4px;border-bottom:1px solid var(--bdr);cursor:pointer;font-size:12px;opacity:${hidden ? 0.42 : 1}">
+      <span style="width:16px;height:16px;border-radius:3px;flex:none;background:${hex6(colorInt)};border:1px solid rgba(0,0,0,.25)"></span>
+      <span style="flex:1">${name}</span>
+      <span style="color:var(--dim);white-space:nowrap">${n} 條${hidden ? '｜隱藏' : ''}</span>
+    </div>`;
+  };
+  const rows = PIPE_SERVICES.map((sv) => legendRow(sv.code, sv.name, sv.color, counts[sv.code] ?? 0)).join('')
+    + legendRow('__none__', '（無服務別）＝Spec 色', 0x646f7b, noneCount);
+  propBody.innerHTML = `<div class="pg-section">Service 服務別著色</div>
+    <div style="color:var(--dim);font-size:11px;padding:2px 0 6px">點色塊列切換該服務別管線顯示／隱藏</div>
+    ${rows}
+    <button class="pbtn" id="svc-showall" style="margin-top:8px">全部顯示</button>`;
+  propBody.querySelectorAll('[data-svc]').forEach((row) => row.addEventListener('click', () => {
+    const key = row.dataset.svc;
+    if (hiddenServices.has(key)) hiddenServices.delete(key); else hiddenServices.add(key);
+    applyLayers();          // 套用可見性（不重建幾何，僅切 group.visible）
+    renderServiceLegend();  // 重繪圖例列狀態
+  }));
+  document.getElementById('svc-showall').addEventListener('click', () => {
+    hiddenServices.clear();
+    applyLayers();
+    renderServiceLegend();
+  });
+}
+document.getElementById('btn-service-legend')?.addEventListener('click', renderServiceLegend);
 
 // ------------------------------------------------------------ 重量與重心（Weight & CoG）報表
 // 對標 E3D PROPCON：逐設備估質量→彙總全場總重＋重心。長度用 fmtLen 隨單位切換重繪。

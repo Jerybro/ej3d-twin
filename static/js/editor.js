@@ -2800,6 +2800,95 @@ function exportMTO() {
 }
 document.getElementById('btn-mto').addEventListener('click', exportMTO);
 
+// ------------------------------------------------------------ 設備排程表（Equipment Schedule，CSV｜長度單位固定 mm）
+// 對標 E3D Equipment Report：逐設備一列。長度一律 mm（canonical 公尺 ×1000 取整），表頭已標單位。
+// 尺寸換算沿用 renderPropPanel 的 dims 規則：DIA_DIMS 存半徑→顯示直徑（×2）；COUNT_DIMS 為計數不換算。
+function eqScheduleCsv() {
+  const typeName = new Map(ASSET_CATEGORIES.flatMap((c) => c.items.map((it) => [it.type, it.name])));
+  const esc = (v) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const mm = (m) => Math.round((m ?? 0) * 1000);         // 公尺 → mm（整數），與顯示單位解耦
+  // 關鍵尺寸字串：把 def.dims 攤成人類可讀（⌀xxx / 高 xxx / 長 xxx…），長度皆 mm
+  const dimStr = (dims) => Object.entries(dims ?? {}).map(([k, v]) => {
+    if (COUNT_DIMS.has(k)) return `${k} ${v}`;
+    if (DIA_DIMS[k]) return `${DIA_DIMS[k].replace('直徑 ', '').replace('底徑 ', '底')
+      .replace('頂徑 ', '頂')}${mm(v * 2)}`;             // 半徑→直徑 mm
+    return `${k} ${mm(v)}`;
+  }).join(' × ');
+  const rows = [];
+  rows.push(['J.S_3D Studio 設備排程表（Equipment Schedule）', sceneData.plant?.name ?? sceneId ?? '']);
+  rows.push(['輸出時間', new Date().toLocaleString('zh-TW', { hour12: false })]);
+  rows.push(['長度單位', 'mm']);
+  rows.push([]);
+  rows.push(['位號 Tag', '名稱 Name', '型別 Type', '所屬 ZONE', '關鍵尺寸(mm)', '鋼構斷面 Section', '材質 Material', 'P&ID']);
+  let eqN = 0;
+  for (const unit of sceneData.plant.units) {
+    for (const eq of unit.equipment) {
+      eqN += 1;
+      const zone = `${unit.id ?? ''}${unit.name ? '｜' + unit.name : ''}` || (unit.name ?? unit.id ?? '');
+      // 鋼構斷面：僅型鋼件（scolumn/sbeam）帶斷面，展開 D×B｜tw/tf
+      let section = '';
+      if (['scolumn', 'sbeam'].includes(eq.type) || eq.section) {
+        const s = steelSection(eq.section);
+        section = `${s.code}（D${s.depth}×B${s.flange}｜tw${s.web}/tf${s.tf}）`;
+      }
+      const material = eq.material ?? eq.design?.['材質'] ?? '';
+      rows.push([eq.tag, eq.name ?? typeName.get(eq.type) ?? '', eq.type, zone,
+        dimStr(eq.dims), section, material, eq.pid_ref ?? '']);
+    }
+  }
+  rows.push([]);
+  rows.push(['[統計]', `設備 ${eqN} 台`]);
+  return '﻿' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
+}
+function exportEqSchedule() {
+  saveBlob(`${sceneId ?? 'scene'}-EquipmentSchedule.csv`, eqScheduleCsv(), 'text/csv;charset=utf-8', false);
+  setHint(`設備排程表已輸出：設備 ${allEquipment().length} 台（CSV）`);
+}
+document.getElementById('btn-eq-schedule').addEventListener('click', exportEqSchedule);
+
+// ------------------------------------------------------------ 管嘴排程表（Nozzle Schedule，CSV｜長度單位固定 mm）
+// 對標 E3D Nozzle Schedule：遍歷所有設備的 def.nozzles，逐管嘴一列。
+// 口徑由 nz.dn 查 PIPE_BORES 得 bore（半徑 r → 直徑 r×2000 mm）；標高＝nz.pos[1]（U 向）×1000 mm。
+function nzScheduleCsv() {
+  const esc = (v) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const mm = (m) => Math.round((m ?? 0) * 1000);
+  // 方向向量 → 方位字（對標 renderNozzleProps 的 NZ_DIRS）
+  const DIR_NAMES = [[[0, 0, -1], '北 N'], [[0, 0, 1], '南 S'], [[1, 0, 0], '東 E'],
+    [[-1, 0, 0], '西 W'], [[0, 1, 0], '上 U'], [[0, -1, 0], '下 D']];
+  const dirLabel = (dir) => {
+    if (!dir) return '';
+    const key = JSON.stringify(dir.map((v) => Math.round(v)));
+    const hit = DIR_NAMES.find(([v]) => JSON.stringify(v) === key);
+    return hit ? hit[1] : dir.map((v) => (+v).toFixed(2)).join(',');
+  };
+  const rows = [];
+  rows.push(['J.S_3D Studio 管嘴排程表（Nozzle Schedule）', sceneData.plant?.name ?? sceneId ?? '']);
+  rows.push(['輸出時間', new Date().toLocaleString('zh-TW', { hour12: false })]);
+  rows.push(['長度單位', 'mm']);
+  rows.push([]);
+  rows.push(['母設備 Tag', '管嘴 Nozzle', '口徑 DN', '口徑 bore(mm)', '標高 U(mm)', '方向 Dir']);
+  let nzN = 0;
+  for (const unit of sceneData.plant.units) {
+    for (const eq of unit.equipment) {
+      for (const nz of (eq.nozzles ?? [])) {
+        nzN += 1;
+        const bore = PIPE_BORES.find((b) => b.dn === nz.dn);
+        const boreMm = bore ? Math.round(bore.r * 2000) : '';     // 內徑代表值：r×2（直徑）→mm
+        rows.push([eq.tag, nz.id, nz.dn ?? '', boreMm, mm(nz.pos?.[1] ?? 0), dirLabel(nz.dir)]);
+      }
+    }
+  }
+  rows.push([]);
+  rows.push(['[統計]', `管嘴 ${nzN} 支`]);
+  return '﻿' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
+}
+function exportNzSchedule() {
+  const nzTotal = allEquipment().reduce((a, eq) => a + (eq.nozzles?.length ?? 0), 0);
+  saveBlob(`${sceneId ?? 'scene'}-NozzleSchedule.csv`, nzScheduleCsv(), 'text/csv;charset=utf-8', false);
+  setHint(`管嘴排程表已輸出：管嘴 ${nzTotal} 支（CSV）`);
+}
+document.getElementById('btn-nz-schedule').addEventListener('click', exportNzSchedule);
+
 // ------------------------------------------------------------ 出圖工具：制式圖框彈窗＋批次打包 ZIP
 let dwgLastBy = '';
 let dwgOnOk = null;

@@ -380,7 +380,8 @@ function pipeBaseMat(pipe) {
 }
 // UI 狀態：被圖例隱藏的服務別（不入存檔）。'__none__' 代表「無服務別」的管線群。
 const hiddenServices = new Set();
-const pipeServiceKey = (pipe) => (pipe?.profile === 'duct' ? null : (pipe?.service || '__none__'));
+const pipeServiceKey = (pipe) => (pipe?.profile === 'duct' ? null
+  : ((pipe?.service && SERVICE_BY_CODE[pipe.service]) ? pipe.service : '__none__'));   // 未知/舊 code 也歸 __none__（與計數/著色一致）
 
 // 坡度：slope 存「‰（每公尺水平落差 mm）」canonical，預設 0（水平）。
 // 落差只在渲染層套用——pts 仍為水平公尺 canonical，twin/USD 讀 pts 不受污染。
@@ -2663,8 +2664,15 @@ function gaGridAxes(b) {
     for (let g = Math.floor(lo / MODULE) * MODULE; g <= hi + 1e-6; g += MODULE) a.push(g);
     return a;
   };
-  if (ex.length < 2 || ex.length > 12) ex = uniform(b.min.x, b.max.x);
-  if (nz.length < 2 || nz.length > 12) nz = uniform(b.min.z, b.max.z);
+  // 退回均勻格線時封頂 ≤12 條（過寬場景抽稀），避免比想避開的 >12 更密
+  const capUniform = (lo, hi) => {
+    const raw = uniform(lo, hi);
+    if (raw.length <= 12) return raw;
+    const stride = Math.ceil(raw.length / 12);
+    return raw.filter((_, i) => i % stride === 0);
+  };
+  if (ex.length < 2 || ex.length > 12) ex = capUniform(b.min.x, b.max.x);
+  if (nz.length < 2 || nz.length > 12) nz = capUniform(b.min.z, b.max.z);
   return { ex, nz };
 }
 

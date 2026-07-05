@@ -357,11 +357,31 @@ const pipeMat = std(0x646f7b);
 const insulMat = new THREE.MeshStandardMaterial({ color: 0xcdd6df, transparent: true, opacity: 0.26, roughness: 1 });
 const pipeHi = std(0xffaa3c, { emissive: 0x442a00, emissiveIntensity: 0.6 });
 
+// 坡度：slope 存「‰（每公尺水平落差 mm）」canonical，預設 0（水平）。
+// 落差只在渲染層套用——pts 仍為水平公尺 canonical，twin/USD 讀 pts 不受污染。
+// dpts[i].y = pts[i].y − (slope/1000)×(至第 i 節點的水平弧長)。
+const pipeSlopePermille = (pipe) => (pipe.profile === 'duct' ? 0 : (+pipe.slope || 0));
+// 產生「已套坡度」的顯示節點陣列（不改 pipe.pts）；坡度 0 時回傳原始節點。
+function slopedDisplayPts(pipe, pts) {
+  const s = pipeSlopePermille(pipe);
+  if (!s) return pts;
+  const out = [];
+  let hArc = 0;                                            // 累積水平弧長（XZ 平面）
+  for (let i = 0; i < pts.length; i++) {
+    if (i > 0) hArc += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+    out.push(new THREE.Vector3(pts[i].x, pts[i].y - (s / 1000) * hArc, pts[i].z));
+  }
+  return out;
+}
+
 function buildPipe(pipe, index) {
   const group = new THREE.Group();
   group.userData.pipeIndex = index;
-  const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
-  if (pipe.profile === 'duct') { buildDuctBody(pipe, index, group, pts); scene.add(group); pipeObjects[index] = { group }; return; }
+  const ptsRaw = pipe.pts.map((p) => new THREE.Vector3(...p));   // canonical 水平節點（勿改）
+  if (pipe.profile === 'duct') { buildDuctBody(pipe, index, group, ptsRaw); scene.add(group); pipeObjects[index] = { group }; return; }
+  // 坡度：僅渲染層下降 Y（pts 不變）。pts 供 arcToPose/報表使用仍是水平 canonical。
+  const pts = slopedDisplayPts(pipe, ptsRaw);
+  const slopePM = pipeSlopePermille(pipe);
   // P&ID 自動抽取場景管線量大：降面數/關陰影，維持可選取
   const lite = sceneData.pipes.length > 60;
   // 異徑管後段變徑：依元件弧長位置建立管徑分段表
@@ -420,12 +440,58 @@ function buildPipe(pipe, index) {
     if (!pose) continue;
     const comp = buildPipeComponent(c.kind, radiusAt(c.at - 0.01));
     comp.position.copy(pose.pos);
+    if (slopePM) comp.position.y -= (slopePM / 1000) * horizArcTo(ptsRaw, c.at);   // 坡度：元件跟著渲染層下降
     comp.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), pose.dir);
     comp.traverse((o) => { o.userData.pipeIndex = index; });
     group.add(comp);
   }
+  // 坡度標註：於管頭放小箭頭＋‰ 標籤（僅坡度非 0 時），純視覺、可跟隨 layer 隱藏
+  if (slopePM && pts.length >= 2) addSlopeMarker(group, pipe, pts, slopePM, index);
   scene.add(group);
   pipeObjects[index] = { group };
+}
+
+// 至弧長 at（沿 pts 3D 弧長）對應的「水平弧長」（XZ 平面），供坡度落差計算。
+// 坡度落差以水平長度為基準；3D 弧長與水平弧長在水平管段相等，故直接沿段累積水平投影。
+function horizArcTo(pts, at) {
+  let arc = 0, hArc = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const seg = pts[i + 1].distanceTo(pts[i]);
+    const hSeg = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].z - pts[i].z);
+    if (arc + seg >= at) {                                   // at 落在本段：線性插值水平弧長
+      const t = seg > 1e-9 ? (at - arc) / seg : 0;
+      return hArc + hSeg * Math.max(0, Math.min(1, t));
+    }
+    arc += seg; hArc += hSeg;
+  }
+  return hArc;
+}
+
+// 管頭坡度標記：一個朝下坡方向的小箭頭 + 顯示 ‰ 與 1:N 的 CSS2D 標籤。
+function addSlopeMarker(group, pipe, dpts, slopePM, index) {
+  const a = dpts[0], b = dpts[1];
+  const seg = b.clone().sub(a);
+  const r = Math.max(pipe.r ?? 0.05, 0.05);
+  // 小箭頭：沿第一段走向，長度約 6×半徑（有上限），顏色橙色標示流向/下坡
+  const arrowLen = Math.min(Math.max(r * 6, 0.3), seg.length() || 0.3);
+  const arrow = new THREE.ArrowHelper(seg.clone().normalize(), a.clone(), arrowLen, 0xff8a1e, arrowLen * 0.4, r * 1.6);
+  arrow.traverse((o) => { o.userData.pipeIndex = index; o.userData.slopeMarker = true; });   // 標記：選取上/下色不改坡度箭頭材質
+  group.add(arrow);
+  const el = document.createElement('div');
+  el.className = 'pipe-slope-label';
+  el.style.cssText = 'padding:1px 6px;border-radius:4px;background:rgba(255,138,30,.92);color:#fff;font-size:10px;font-weight:700;white-space:nowrap;pointer-events:none;';
+  el.textContent = slopeLabelText(slopePM);
+  const lbl = new CSS2DObject(el);
+  lbl.position.copy(a).add(new THREE.Vector3(0, r * 2.2 + 0.15, 0));
+  lbl.userData.pipeIndex = index;
+  group.add(lbl);
+}
+
+// 坡度字串：以 ‰ 與 1:N 併陳（N=1000/‰，四捨五入）。下坡以負號/DN 語意保留數值原樣。
+function slopeLabelText(slopePM) {
+  const abs = Math.abs(slopePM);
+  const ratio = abs > 1e-6 ? `1:${Math.round(1000 / abs)}` : '—';
+  return `坡度 ${slopePM}‰（${ratio}）`;
 }
 
 // ------------------------------------------------------------ 風管路由（profile:'duct' 復用管線子系統）
@@ -548,7 +614,10 @@ function buildDuctFitting(kind, w, h, duct) {
 }
 
 function rebuildAllPipes() {
-  for (const p of pipeObjects) if (p) scene.remove(p.group);
+  for (const p of pipeObjects) if (p) {
+    p.group.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); });   // 清坡度標籤 DOM，防孤兒鬼標籤
+    scene.remove(p.group);
+  }
   pipeObjects.length = 0;
   sceneData.pipes.forEach((pipe, i) => buildPipe(pipe, i));
   applyLayers();
@@ -635,7 +704,7 @@ function selectNone() {
   repaintPanel = null;
   transform.detach();
   clearNodeHandles();
-  pipeObjects.forEach((p, i) => { if (!p) return; const m = sceneData.pipes[i]?.profile === 'duct' ? ductMat : pipeMat; p.group.traverse((o) => { if (o.isMesh && !o.userData.insul) o.material = m; }); });
+  pipeObjects.forEach((p, i) => { if (!p) return; const m = sceneData.pipes[i]?.profile === 'duct' ? ductMat : pipeMat; p.group.traverse((o) => { if (o.isMesh && !o.userData.insul && !o.userData.slopeMarker) o.material = m; }); });
   renderPropEmpty();
   syncTreeSelection();
   document.getElementById('st-sel').textContent = '選取：無';
@@ -659,7 +728,7 @@ function selectPipe(index) {
   selectNone();
   selected = { kind: 'pipe', index };
   const p = pipeObjects[index];
-  if (p) p.group.traverse((o) => { if (o.isMesh && !o.userData.insul) o.material = pipeHi; });
+  if (p) p.group.traverse((o) => { if (o.isMesh && !o.userData.insul && !o.userData.slopeMarker) o.material = pipeHi; });
   renderPipeProps(index);
   document.getElementById('st-sel').textContent = `選取：管線 #${index + 1}`;
   if (mode === 'pipenode') buildNodeHandles(index);
@@ -1003,6 +1072,15 @@ function renderPipeProps(index) {
       })()}
       ${pgRow(`保溫厚 (${unitLabel()})`, `<input data-k="insul" type="number" step="${U().step}" value="${toDisp(pipe.insul ?? 0)}">`)}
       ${(pipe.insul ?? 0) > 0 ? pgRow(`含保溫外徑 (${unitLabel()})`, `<span>${fmtLen(pipe.r * 2 + 2 * pipe.insul, false)}</span>`) : ''}
+      ${isDuct ? '' : pgRow('坡度 Slope (‰)', `<input data-k="slope" type="number" step="1" value="${+pipe.slope || 0}" title="每公尺水平落差 mm（‰）；下坡為正。0＝水平">`)}
+      ${isDuct ? '' : (() => {
+        const s = +pipe.slope || 0;
+        if (!s) return '';   // 水平不顯 Fall 列，維持面板精簡
+        const hLen = pipeHorizLength(pipe);          // 水平長度（公尺 canonical）
+        const fall = (s / 1000) * hLen;              // 總落差＝水平長度×坡度
+        const ratio = `1:${Math.round(1000 / Math.abs(s))}`;
+        return pgRow('總落差 Fall', `<span>${fmtLen(fall)}（${ratio}／水平 ${fmtLen(hLen)}）</span>`);
+      })()}
       ${pgRow('節點數', `<span>${pipe.pts.length}</span>`)}
       ${pgRow('總長', `<span>${fmtLen(pipeLength(pipe))}</span>`)}
     </div>
@@ -1042,6 +1120,14 @@ function renderPipeProps(index) {
     pushUndo();
     pipe.insul = Math.max(0, fromDisp(e.target.value));   // 保溫層厚（公尺）
     rebuildAllPipes();   // 重建以套用/移除保溫外殼
+    selectPipe(index);
+  });
+  propBody.querySelector('[data-k="slope"]')?.addEventListener('change', (e) => {   // 風管不渲染此欄→null-safe
+    pushUndo();
+    // 坡度存 ‰（每公尺水平落差 mm）；純中繼屬性，只影響渲染/報表，不改 pipe.pts。
+    const v = Math.round(parseFloat(e.target.value) || 0);   // 收斂為整數 ‰
+    pipe.slope = v || undefined;   // 0 存 undefined，維持水平預設乾淨（不污染存檔）
+    rebuildAllPipes();   // 重建以套用/移除坡度視覺落差與標記
     selectPipe(index);
   });
   // 風管斷面形狀：切換 rect/circ/oval，改變後重繪面板（切換 W/H↔⌀ 欄位）並重建
@@ -1095,6 +1181,17 @@ function pipeLength(pipe) {
   for (let i = 0; i < pipe.pts.length - 1; i++) {
     L += Math.hypot(pipe.pts[i + 1][0] - pipe.pts[i][0],
                     pipe.pts[i + 1][1] - pipe.pts[i][1],
+                    pipe.pts[i + 1][2] - pipe.pts[i][2]);
+  }
+  return L;
+}
+
+// 水平長度（XZ 平面投影，公尺 canonical）：供坡度總落差 Fall＝水平長度×坡度 使用。
+// pts 為水平 canonical，故此值≈pipeLength；仍以 XZ 投影計算以求語意正確且不受既有 Y 影響。
+function pipeHorizLength(pipe) {
+  let L = 0;
+  for (let i = 0; i < pipe.pts.length - 1; i++) {
+    L += Math.hypot(pipe.pts[i + 1][0] - pipe.pts[i][0],
                     pipe.pts[i + 1][2] - pipe.pts[i][2]);
   }
   return L;

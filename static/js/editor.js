@@ -432,51 +432,117 @@ function buildPipe(pipe, index) {
 const ductMat = std(0xaeb6bf, { metalness: 0.5, roughness: 0.35 });
 function buildDuctBody(pipe, index, group, pts) {
   const w = pipe.duct?.w ?? 0.8, h = pipe.duct?.h ?? 0.5;
+  const shape = pipe.duct?.shape ?? 'rect';          // 'rect'（矩形）/'circ'（圓，直徑 w）/'oval'（橢圓 w×h）
+  const d = pipe.duct?.d ?? w;                        // 圓形直徑（公尺）；沿用 w 作為預設避免舊資料破圖
+  // 依斷面形狀建立一段直管幾何（本地座標：矩形沿 Z、圓/橢圓沿 Y 對齊流向）
+  const buildSeg = (len) => {
+    if (shape === 'circ') {                            // 圓：等徑圓柱
+      const r = d / 2;
+      return { mesh: new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 20), ductMat), axis: new THREE.Vector3(0, 1, 0) };
+    }
+    if (shape === 'oval') {                            // 橢圓：圓柱非等比縮放 X=w、Y=h
+      const cyl = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, len, 20), ductMat);
+      cyl.scale.set(w, 1, h);
+      return { mesh: cyl, axis: new THREE.Vector3(0, 1, 0) };
+    }
+    return { mesh: new THREE.Mesh(new THREE.BoxGeometry(w, h, len), ductMat), axis: new THREE.Vector3(0, 0, 1) };
+  };
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i], b = pts[i + 1];
     const dir = b.clone().sub(a), len = dir.length();
     if (len < 1e-4) continue;
-    const seg = new THREE.Mesh(new THREE.BoxGeometry(w, h, len), ductMat);
+    const { mesh: seg, axis } = buildSeg(len);
     seg.position.copy(a).addScaledVector(dir, 0.5);
-    seg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().normalize());
+    seg.quaternion.setFromUnitVectors(axis, dir.clone().normalize());
     seg.castShadow = true;
     seg.userData.pipeIndex = index;
     group.add(seg);
-    if (i < pts.length - 2) {                          // 內角：方形彎頭盒（elbow 自動）
-      const el = new THREE.Mesh(new THREE.BoxGeometry(w * 1.06, h * 1.06, Math.max(w, h) * 1.06), ductMat);
+    if (i < pts.length - 2) {                          // 內角：彎頭（矩形→方盒；圓/橢圓→球）
+      let el;
+      if (shape === 'rect') {
+        el = new THREE.Mesh(new THREE.BoxGeometry(w * 1.06, h * 1.06, Math.max(w, h) * 1.06), ductMat);
+      } else {
+        const r = shape === 'circ' ? d / 2 : Math.max(w, h) / 2;
+        el = new THREE.Mesh(new THREE.SphereGeometry(r * 1.06, 14, 12), ductMat);
+        if (shape === 'oval') el.scale.set(w / Math.max(w, h), 1, h / Math.max(w, h));
+      }
       el.position.copy(pts[i + 1]);
       el.userData.pipeIndex = index;
       group.add(el);
     }
   }
-  for (const c of pipe.components ?? []) {              // 三通/風門 沿風管弧長定位
+  for (const c of pipe.components ?? []) {              // 三通/風門/漸縮 沿風管弧長定位
     const pose = arcToPose(pipe, c.at);
     if (!pose) continue;
-    const comp = buildDuctFitting(c.kind, w, h);
+    const comp = buildDuctFitting(c.kind, w, h, pipe.duct);
     comp.position.copy(pose.pos);
     comp.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), pose.dir);
     comp.traverse((o) => { o.userData.pipeIndex = index; });
     group.add(comp);
   }
 }
-function buildDuctFitting(kind, w, h) {
+// duct：風管元件幾何。本地 X 軸＝流向（放置時 setFromUnitVectors(1,0,0)→pose.dir）。
+function buildDuctFitting(kind, w, h, duct) {
   const g = new THREE.Group();
+  const shape = duct?.shape ?? 'rect';
+  const d = duct?.d ?? w;
+  // 依斷面畫一片薄「端面套環」（本地 X 為流向厚度方向）
+  const collarAt = (thick, scale = 1.12) => {
+    if (shape === 'circ') {
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(d / 2 * scale, d / 2 * scale, thick, 20), ductMat);
+      c.rotation.z = Math.PI / 2;                       // 圓柱 Y 軸→轉到 X（流向）
+      return c;
+    }
+    if (shape === 'oval') {
+      // 單位圓柱（直徑1，軸沿本地 Y）先縮放再旋轉：Three 合成序為 T·R·S，故 scale 作用於旋轉前的本地軸。
+      // 目標：世界 X(厚度)=thick、世界 Y(高)=h、世界 Z(寬)=w。旋轉 z=π/2 後 本地Y→世界X、本地X→世界Y、本地Z→世界Z。
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, thick, 20), ductMat);
+      c.scale.set(h * scale, 1, w * scale);            // 本地X→高(世界Y)=h、本地Y→厚(世界X)=thick、本地Z→寬(世界Z)=w
+      c.rotation.z = Math.PI / 2;
+      return c;
+    }
+    return new THREE.Mesh(new THREE.BoxGeometry(thick, h * scale, w * scale), ductMat);
+  };
   if (kind === 'tee') {
-    const collar = new THREE.Mesh(new THREE.BoxGeometry(w * 0.36, h * 1.14, w * 1.14), ductMat);
+    const collar = collarAt(w * 0.36, 1.14);
     const neck = new THREE.Mesh(new THREE.BoxGeometry(w * 0.5, h * 0.4, w * 0.5), ductMat);
     neck.position.y = h * 0.34;
     const branch = new THREE.Mesh(new THREE.BoxGeometry(w * 0.7, h * 0.7, w * 0.7), ductMat);
     branch.position.y = h * 0.68;
     g.add(collar, neck, branch);
   } else if (kind === 'damper') {
-    const collar = new THREE.Mesh(new THREE.BoxGeometry(w * 0.22, h * 1.12, w * 1.12), ductMat);
+    const collar = collarAt(w * 0.22, 1.12);
     const flap = new THREE.Mesh(new THREE.BoxGeometry(0.02, h * 0.88, w * 0.88), std(0x3a4a5a));
     flap.rotation.x = 0.5;
     const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.26, 6), std(0x9aa4ad));
     handle.position.y = h * 0.62;
     g.add(collar, flap, handle);
+  } else if (kind === 'transition') {
+    // 漸縮：一段沿流向(X)的錐狀過渡，入口＝本管斷面、出口＝縮小約 0.6 倍
+    const L = Math.max(w, h) * 0.9;                     // 過渡段長
+    const half = L / 2;
+    const t = 0.02;                                    // 端面薄板厚
+    const inFace = collarAt(t, 1.0);  inFace.position.x = -half;
+    const outFace = shape === 'rect'
+      ? new THREE.Mesh(new THREE.BoxGeometry(t, h * 0.6, w * 0.6), ductMat)
+      : shape === 'circ'
+        ? (() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(d / 2 * 0.6, d / 2 * 0.6, t, 20), ductMat); m.rotation.z = Math.PI / 2; return m; })()
+        : (() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, t, 20), ductMat); m.scale.set(h * 0.6, 1, w * 0.6); m.rotation.z = Math.PI / 2; return m; })();
+    outFace.position.x = half;
+    // 斜壁：用一段沿 X 的方錐（BoxGeometry 兩端不同尺寸以 4 片斜板近似不易，改用四稜台 Cylinder 近似）
+    const rIn = (shape === 'circ' ? d / 2 : Math.max(w, h) / 2);
+    const rOut = rIn * 0.6;
+    const cone = new THREE.Mesh(new THREE.CylinderGeometry(rOut, rIn, L, shape === 'rect' ? 4 : 20), ductMat);
+    if (shape === 'oval') cone.scale.set(h / Math.max(w, h), 1, w / Math.max(w, h)); // 本地X→高、本地Y→長(保持)、本地Z→寬
+    if (shape === 'rect') cone.rotation.y = Math.PI / 4; // 4-gon 錐頂點在 45°→繞自身軸轉正，使方形面對齊
+    // 用外層 group 承接「軸→流向」旋轉，避免和上面的自轉在同一 Euler 疊加出錯
+    const coneWrap = new THREE.Group();
+    coneWrap.rotation.z = Math.PI / 2;                  // 錐 Y 軸→X（流向）
+    coneWrap.add(cone);
+    cone.userData.transCone = true;
+    g.add(coneWrap, inFace, outFace);
   } else {
-    g.add(new THREE.Mesh(new THREE.BoxGeometry(w * 0.3, h * 1.12, w * 1.12), ductMat));
+    g.add(collarAt(w * 0.3, 1.12));
   }
   return g;
 }
@@ -886,7 +952,8 @@ function renderPipeProps(index) {
   const pipe = sceneData.pipes[index];
   document.getElementById('prop-title').textContent = `管線 #${index + 1}`;
   const isDuct = pipe.profile === 'duct';
-  const DUCT_FITTINGS = [{ kind: 'tee', name: '風管三通' }, { kind: 'damper', name: '風門' }];
+  const DUCT_FITTINGS = [{ kind: 'tee', name: '風管三通' }, { kind: 'damper', name: '風門' }, { kind: 'transition', name: '漸縮' }];
+  const DUCT_SHAPES = [{ v: 'rect', name: '矩形' }, { v: 'circ', name: '圓形' }, { v: 'oval', name: '橢圓' }];
   const compKinds = isDuct ? DUCT_FITTINGS : PIPE_COMPONENTS;
   const compName = Object.fromEntries([...PIPE_COMPONENTS, ...DUCT_FITTINGS].map((c) => [c.kind, c.name]));
   const compRows = (pipe.components ?? []).map((c, i) =>
@@ -905,13 +972,27 @@ function renderPipeProps(index) {
     </div>
     <div class="pg-section">Specification</div>
     <div class="pg-grid">
-      ${pgRow('Spec', `<select data-k="spec" style="width:100%">${PIPE_SPECS.map((sp) =>
+      ${isDuct ? (() => {
+        const duct = pipe.duct ?? {};
+        const shape = duct.shape ?? 'rect';
+        const w = duct.w ?? 0.8, h = duct.h ?? 0.5, dd = duct.d ?? w;
+        let rows = pgRow('斷面形狀', `<select data-duct="shape" style="width:100%">${DUCT_SHAPES.map((s) =>
+          `<option value="${s.v}" ${shape === s.v ? 'selected' : ''}>${s.name}</option>`).join('')}</select>`);
+        if (shape === 'circ') {
+          rows += pgRow(`直徑 ⌀ (${unitLabel()})`, `<input data-duct="d" type="number" step="${U().step}" value="${toDisp(dd)}">`);
+        } else {
+          rows += pgRow(`寬 W (${unitLabel()})`, `<input data-duct="w" type="number" step="${U().step}" value="${toDisp(w)}">`);
+          rows += pgRow(`高 H (${unitLabel()})`, `<input data-duct="h" type="number" step="${U().step}" value="${toDisp(h)}">`);
+        }
+        return rows;
+      })() : ''}
+      ${isDuct ? '' : pgRow('Spec', `<select data-k="spec" style="width:100%">${PIPE_SPECS.map((sp) =>
         `<option value="${sp.code}" ${pipe.spec === sp.code ? 'selected' : ''}>${sp.code}｜${sp.name}</option>`).join('')}</select>`)}
-      ${pgRow('Bore', `<select data-k="dn" style="width:100%">${
+      ${isDuct ? '' : pgRow('Bore', `<select data-k="dn" style="width:100%">${
         (!pipe.dn && !PIPE_BORES.some((b) => Math.abs(b.r - pipe.r) < 0.01))
           ? '<option value="" selected disabled>（自訂 bore）</option>' : ''}${PIPE_BORES.map((b) =>
         `<option value="${b.dn}" ${pipe.dn === b.dn || (!pipe.dn && Math.abs(b.r - pipe.r) < 0.01) ? 'selected' : ''}>${b.dn}（⌀${Math.round(b.r * 2000)}mm）</option>`).join('')}</select>`)}
-      ${pgRow(`外徑 ⌀ (${unitLabel()})`, `<input data-k="od" type="number" step="${U().step}" value="${toDisp(pipe.r * 2)}">`)}
+      ${isDuct ? '' : pgRow(`外徑 ⌀ (${unitLabel()})`, `<input data-k="od" type="number" step="${U().step}" value="${toDisp(pipe.r * 2)}">`)}
       ${isDuct ? '' : pgRow('Schedule', `<select data-k="sched" style="width:100%">${PIPE_SCHEDULES.map((s) =>
         `<option value="${s}" ${(pipe.sched ?? 'STD') === s ? 'selected' : ''}>Sch ${s}</option>`).join('')}</select>`)}
       ${(() => {
@@ -933,19 +1014,19 @@ function renderPipeProps(index) {
     </div>
     <button class="pbtn" id="prop-nodes">節點編輯</button>
     <button class="pbtn danger" id="prop-delete">刪除（Delete）</button>`;
-  propBody.querySelector('[data-k="od"]').addEventListener('change', (e) => {
+  propBody.querySelector('[data-k="od"]')?.addEventListener('change', (e) => {   // 風管不渲染此欄→null-safe
     pushUndo();
     pipe.dn = null;   // 手改外徑＝自訂 bore，清掉 DN 名目避免下拉與實際 r 矛盾（也不污染存檔/USD）
     pipe.r = Math.round(fromDisp(e.target.value) / 2 * 10000) / 10000;   // 外徑 ÷2 → 半徑（保 0.1mm 精度）
     rebuildAllPipes();
     selectPipe(index);
   });
-  propBody.querySelector('[data-k="spec"]').addEventListener('change', (e) => {
+  propBody.querySelector('[data-k="spec"]')?.addEventListener('change', (e) => {   // 風管不渲染此欄→null-safe
     pushUndo();
     pipe.spec = e.target.value;
     selectPipe(index);
   });
-  propBody.querySelector('[data-k="dn"]').addEventListener('change', (e) => {
+  propBody.querySelector('[data-k="dn"]')?.addEventListener('change', (e) => {   // 風管不渲染此欄→null-safe
     pushUndo();
     pipe.dn = e.target.value;
     pipe.r = PIPE_BORES.find((b) => b.dn === pipe.dn)?.r ?? pipe.r;
@@ -963,6 +1044,24 @@ function renderPipeProps(index) {
     rebuildAllPipes();   // 重建以套用/移除保溫外殼
     selectPipe(index);
   });
+  // 風管斷面形狀：切換 rect/circ/oval，改變後重繪面板（切換 W/H↔⌀ 欄位）並重建
+  propBody.querySelector('[data-duct="shape"]')?.addEventListener('change', (e) => {
+    pushUndo();
+    pipe.duct = pipe.duct ?? {};
+    pipe.duct.shape = e.target.value;
+    if (pipe.duct.shape === 'circ' && pipe.duct.d == null) pipe.duct.d = pipe.duct.w ?? 0.8;  // 圓形沿用寬作預設直徑
+    rebuildAllPipes();
+    selectPipe(index);   // 觸發 renderPipeProps 重繪，換出對應尺寸欄位
+  });
+  // 風管斷面尺寸（mm 顯示、公尺寫回 pipe.duct）
+  propBody.querySelectorAll('[data-duct="w"], [data-duct="h"], [data-duct="d"]').forEach((inp) =>
+    inp.addEventListener('change', (e) => {
+      pushUndo();
+      pipe.duct = pipe.duct ?? {};
+      pipe.duct[inp.dataset.duct] = Math.max(0.001, fromDisp(e.target.value));   // 顯示值→公尺，下限 1mm
+      rebuildAllPipes();
+      selectPipe(index);
+    }));
   propBody.querySelectorAll('[data-cat]').forEach((inp) => inp.addEventListener('change', () => {
     pushUndo();
     pipe.components[+inp.dataset.cat].at =
@@ -1465,7 +1564,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
     if (near.pos) {
       if (!compGhost) {
         compGhost = pipe.profile === 'duct'
-          ? buildDuctFitting(pendingComp.kind, pipe.duct?.w ?? 0.8, pipe.duct?.h ?? 0.5)
+          ? buildDuctFitting(pendingComp.kind, pipe.duct?.w ?? 0.8, pipe.duct?.h ?? 0.5, pipe.duct)
           : buildPipeComponent(pendingComp.kind, pipe.r);
         compGhost.traverse((o) => {
           if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.55; }

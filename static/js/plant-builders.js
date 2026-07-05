@@ -902,9 +902,24 @@ const STEEL_DEFAULT = STEEL_SECTIONS[6];   // HEB300 為預設（近似原本寫
 export function steelSection(code) {
   return STEEL_SECTIONS.find((s) => s.code === code) ?? STEEL_DEFAULT;
 }
-function hSection(len, sec = STEEL_DEFAULT) {
+// 定位線 Justification（對標 E3D P-line）：斷面在其斷面平面內偏移，使指定基準貼定位線。
+// hSection 本地座標：長度沿 Y，斷面高 depth 沿 Z（頂面 +Z），翼板寬 flange 沿 X。
+// NA=形心（不偏移）；CTOP/TOS=頂面貼線（往 -Z 移 D/2）；CBOT/BOS=底面貼線（往 +Z 移 D/2）；
+// LEFT/RIGHT=翼板邊貼線（沿 X ±B/2）。柱直接用此本地偏移；樑旋轉後偏移隨之轉向，方向自動正確。
+function justOffset(sec, just = 'NA') {
+  const D = sec.depth / 1000, B = sec.flange / 1000;
+  switch (just) {
+    case 'CTOP': case 'TOS': return { dx: 0, dz: -D / 2 };  // 頂面對齊：斷面下移
+    case 'CBOT': case 'BOS': return { dx: 0, dz: D / 2 };   // 底面對齊：斷面上移
+    case 'LEFT': return { dx: B / 2, dz: 0 };               // 左翼板邊對齊
+    case 'RIGHT': return { dx: -B / 2, dz: 0 };             // 右翼板邊對齊
+    default: return { dx: 0, dz: 0 };                       // NA：形心
+  }
+}
+function hSection(len, sec = STEEL_DEFAULT, just = 'NA') {
   // 沿 Y 軸的 I/H 型鋼（柱姿態），樑用旋轉擺放；斷面尺寸 mm→m
   const D = sec.depth / 1000, B = sec.flange / 1000, tw = sec.web / 1000, tf = sec.tf / 1000;
+  const { dx, dz } = justOffset(sec, just);   // 定位線偏移（本地斷面平面）
   const g = new THREE.Group();
   const web = new THREE.Mesh(new THREE.BoxGeometry(tw, len, D - 2 * tf), steelMat);
   const f1 = new THREE.Mesh(new THREE.BoxGeometry(B, len, tf), steelMat);
@@ -912,24 +927,26 @@ function hSection(len, sec = STEEL_DEFAULT) {
   const f2 = f1.clone();
   f2.position.z = -(D - tf) / 2;
   g.add(web, f1, f2);
-  g.children.forEach((c) => c.geometry.translate(0, len / 2, 0));
+  g.children.forEach((c) => c.geometry.translate(dx, len / 2, dz));
   return g;
 }
 
 builders.scolumn = function ({ h }, def) {
   const sec = steelSection(def?.section);
+  const just = def?.just ?? 'NA';
   const g = new THREE.Group();
   const bp = Math.max(0.42, sec.flange / 1000 + 0.12);   // 底板隨翼板寬
   const base = new THREE.Mesh(new THREE.BoxGeometry(bp, 0.03, bp), steelMat);
-  base.position.y = 0.015;
-  g.add(base, hSection(h, sec));
+  base.position.y = 0.015;                    // 底板留在定位線節點，僅斷面依 just 偏移
+  g.add(base, hSection(h, sec, just));
   return g;
 };
 
 builders.sbeam = function ({ len, elev }, def) {
   const sec = steelSection(def?.section);
+  const just = def?.just ?? 'NA';
   const g = new THREE.Group();
-  const beam = hSection(len, sec);
+  const beam = hSection(len, sec, just);      // 定位線偏移於本地斷面平面套用，隨旋轉轉向
   beam.rotation.z = -Math.PI / 2;             // 轉水平（沿 +X）
   beam.position.set(-len / 2, elev ?? 3, 0);
   g.add(beam);

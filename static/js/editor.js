@@ -14,6 +14,17 @@ import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight,
 import { initSprite } from './sprite.js';
 import { runClash, clashKey } from './clash.js';
 
+// 結構鋼構定位線 Justification 選項（對標 E3D P-line）：柱常用 NA，梁常用 CTOP/TOS
+const JUST_OPTIONS = [
+  { v: 'NA', t: 'NA 中性軸（形心）' },
+  { v: 'CTOP', t: 'CTOP 頂面中心' },
+  { v: 'CBOT', t: 'CBOT 底面中心' },
+  { v: 'TOS', t: 'TOS 頂面' },
+  { v: 'BOS', t: 'BOS 底面' },
+  { v: 'LEFT', t: 'LEFT 左翼板邊' },
+  { v: 'RIGHT', t: 'RIGHT 右翼板邊' },
+];
+
 const viewport = document.getElementById('viewport');
 
 // ---------------------------------------------------------------- 圖示系統
@@ -696,10 +707,13 @@ function renderPropPanel(def) {
     ${dimRows ? `<div class="pg-section">Design Parameters</div><div class="pg-grid">${dimRows}</div>` : ''}
     ${['scolumn', 'sbeam'].includes(def.type) ? (() => {
       const s = steelSection(def.section);
+      const jv = def.just ?? 'NA';
       return `<div class="pg-section">斷面 Section</div><div class="pg-grid">
         ${pgRow('型鋼', `<select data-k="section" style="width:100%">${STEEL_SECTIONS.map((x) =>
           `<option value="${x.code}" ${s.code === x.code ? 'selected' : ''}>${x.code}</option>`).join('')}</select>`)}
-        ${pgRow('斷面 (mm)', `<span>D${s.depth}×B${s.flange}｜tw${s.web}／tf${s.tf}</span>`)}</div>`;
+        ${pgRow('斷面 (mm)', `<span>D${s.depth}×B${s.flange}｜tw${s.web}／tf${s.tf}</span>`)}
+        ${pgRow('定位線 Justification', `<select data-k="just" style="width:100%">${JUST_OPTIONS.map((o) =>
+          `<option value="${o.v}" ${jv === o.v ? 'selected' : ''}>${o.t}</option>`).join('')}</select>`)}</div>`;
     })() : ''}
     ${def.nozzles?.length ? `<div class="pg-section">管嘴 Nozzles</div><div class="pg-grid">${def.nozzles.map((nz, i) =>
       pgRow(nz.id, `<select data-nzdn="${i}" class="rsel" style="width:86px">${PIPE_BORES.map((b) =>
@@ -753,6 +767,12 @@ function renderPropPanel(def) {
   propBody.querySelector('[data-k="section"]')?.addEventListener('change', (e) => {
     pushUndo();
     def.section = e.target.value;
+    rebuildEquipment(def);
+    renderPropPanel(def);
+  });
+  propBody.querySelector('[data-k="just"]')?.addEventListener('change', (e) => {
+    pushUndo();
+    def.just = e.target.value;
     rebuildEquipment(def);
     renderPropPanel(def);
   });

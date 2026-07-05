@@ -1050,6 +1050,7 @@ function renderPipeProps(index) {
     pipe.duct = pipe.duct ?? {};
     pipe.duct.shape = e.target.value;
     if (pipe.duct.shape === 'circ' && pipe.duct.d == null) pipe.duct.d = pipe.duct.w ?? 0.8;  // 圓形沿用寬作預設直徑
+    pipe.r = Math.max(pipe.duct.w ?? 0, pipe.duct.h ?? 0, pipe.duct.d ?? 0) / 2;   // 同步等效半徑（clash/支撐用）
     rebuildAllPipes();
     selectPipe(index);   // 觸發 renderPipeProps 重繪，換出對應尺寸欄位
   });
@@ -1059,6 +1060,7 @@ function renderPipeProps(index) {
       pushUndo();
       pipe.duct = pipe.duct ?? {};
       pipe.duct[inp.dataset.duct] = Math.max(0.001, fromDisp(e.target.value));   // 顯示值→公尺，下限 1mm
+      pipe.r = Math.max(pipe.duct.w ?? 0, pipe.duct.h ?? 0, pipe.duct.d ?? 0) / 2;   // 同步等效半徑（clash/支撐用）
       rebuildAllPipes();
       selectPipe(index);
     }));

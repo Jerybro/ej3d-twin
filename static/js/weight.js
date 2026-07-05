@@ -111,6 +111,13 @@ function geomOfDims(d) {
     const area = 4 * Math.PI * r * r;
     return { vol, height: 2 * r, area };
   }
+  // 僅 h（無斷面尺寸）：細長桿/塔架（flare 火炬、lightpole 燈桿、detector 桿等）——以預設等效半徑估
+  if (h != null) {
+    const rr = 0.3;
+    const vol = Math.PI * rr * rr * h;
+    const area = 2 * Math.PI * rr * h + 2 * Math.PI * rr * rr;
+    return { vol, height: h, area };
+  }
   return { vol: 0, height: 0, area: 0 };
 }
 

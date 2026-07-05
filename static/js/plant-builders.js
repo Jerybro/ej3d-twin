@@ -946,8 +946,11 @@ builders.sbeam = function ({ len, elev }, def) {
   const sec = steelSection(def?.section);
   const just = def?.just ?? 'NA';
   const g = new THREE.Group();
-  const beam = hSection(len, sec, just);      // 定位線偏移於本地斷面平面套用，隨旋轉轉向
-  beam.rotation.z = -Math.PI / 2;             // 轉水平（沿 +X）
+  const beam = hSection(len, sec, just);
+  // 樑姿態：長度(本地Y)→世界X、斷面高 depth(本地Z)→世界Y(垂直)、翼板寬(本地X)→世界Z(水平)。
+  // 用 makeBasis 讓 depth 立起來，justOffset 的 TOS/BOS(本地Z→世界Y) 才是垂直對齊、LEFT/RIGHT 才是水平。
+  beam.setRotationFromMatrix(new THREE.Matrix4().makeBasis(
+    new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0)));
   beam.position.set(-len / 2, elev ?? 3, 0);
   g.add(beam);
   return g;

@@ -628,9 +628,10 @@ function rebuildAllPipes() {
 function loadSceneData(data, id) {
   transform.detach();
   clearNodeHandles();
-  for (const { group } of eqObjects.values()) scene.remove(group);
+  // 移除群組前先清 CSS2D 標籤 DOM（設備/管嘴/坡度 ‰ 標籤掛在 overlay，scene.remove 不回收 → undo/redo 會殘留孤兒）
+  for (const { group } of eqObjects.values()) { group.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); }); scene.remove(group); }
   eqObjects.clear();
-  for (const p of pipeObjects) if (p) scene.remove(p.group);
+  for (const p of pipeObjects) if (p) { p.group.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); }); scene.remove(p.group); }
   pipeObjects.length = 0;
 
   sceneData = data;
@@ -2269,7 +2270,11 @@ let dimPts = [];          // 標註模式暫存的第一點
 
 function rebuildDims() {
   if (dimGroup) {
-    dimGroup.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); });   // 清 CSS2D DOM，防孤兒標籤
+    dimGroup.traverse((o) => {
+      if (o.isCSS2DObject) { o.element.remove(); return; }   // 清 CSS2D DOM，防孤兒標籤
+      o.geometry?.dispose();                                  // 釋放 GPU 資源，防切單位/增刪反覆重建洩漏
+      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
+    });
     scene.remove(dimGroup);
     dimGroup = null;
   }

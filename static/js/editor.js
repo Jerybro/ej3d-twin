@@ -3575,7 +3575,9 @@ function renderNozzles(group, def) {
 function nozzleWorld(def, nz) {
   const dir = new THREE.Vector3(...nz.dir).normalize();
   const p = new THREE.Vector3(...nz.pos).add(dir.multiplyScalar(0.32));
-  p.applyAxisAngle(new THREE.Vector3(0, 1, 0), def.rot_y ?? 0);
+  // 用完整三軸 Euler（與 group.rotation.set(rot_x,rot_y,rot_z) 'XYZ' 一致），
+  // 否則設備繞 X/Z 旋轉時 nozzle 世界座標會與畫面分岔，污染 updateConnectedPipes 寫回的 canonical pts。
+  p.applyEuler(new THREE.Euler(def.rot_x ?? 0, def.rot_y ?? 0, def.rot_z ?? 0, 'XYZ'));
   return p.add(new THREE.Vector3(...def.pos));
 }
 
@@ -3592,9 +3594,11 @@ function addNozzleAt(tag, hit) {
   const k = comps.indexOf(Math.max(...comps));
   const dirW = new THREE.Vector3(0, 0, 0);
   dirW.setComponent(k, Math.sign(n.getComponent(k)) || 1);
-  const yAxis = new THREE.Vector3(0, 1, 0);
-  const local = hit.point.clone().sub(new THREE.Vector3(...def.pos)).applyAxisAngle(yAxis, -(def.rot_y ?? 0));
-  const dirL = dirW.clone().applyAxisAngle(yAxis, -(def.rot_y ?? 0));
+  // 反轉完整三軸旋轉（world→local），與 nozzleWorld 的正向 Euler 對稱
+  const qi = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(def.rot_x ?? 0, def.rot_y ?? 0, def.rot_z ?? 0, 'XYZ')).invert();
+  const local = hit.point.clone().sub(new THREE.Vector3(...def.pos)).applyQuaternion(qi);
+  const dirL = dirW.clone().applyQuaternion(qi);
   def.nozzles = def.nozzles ?? [];
   const usedNz = new Set(def.nozzles.map((n) => n.id));
   let nzi = 1; while (usedNz.has(`N${nzi}`)) nzi++;

@@ -1008,10 +1008,12 @@ function buildCHS(len, sec, g) {
   const RS = 24;
   const outer = new THREE.Mesh(new THREE.CylinderGeometry(ro, ro, len, RS, 1, true), steelMat);
   const inner = new THREE.Mesh(new THREE.CylinderGeometry(ri, ri, len, RS, 1, true), steelMat);
-  const ring1 = new THREE.Mesh(new THREE.RingGeometry(ri, ro, RS), steelMat);
-  ring1.rotation.x = -Math.PI / 2; ring1.position.y = len / 2;
-  const ring2 = ring1.clone(); ring2.rotation.x = Math.PI / 2; ring2.position.y = -len / 2;
-  g.add(outer, inner, ring1, ring2);
+  // 端環用「純幾何」變換：躺平(法線沿Y)＋各自移到本地 ∓len/2，之後由 sectionSolid 的
+  // 統一 geometry.translate(dx,len/2,dz) 帶到兩端（y=0 與 y=len）。不可用 mesh.rotation/position，
+  // 否則會被那一輪 geometry.translate 的 len/2 旋轉污染而飄離管軸；分開建 geometry 也避免共用被重複平移。
+  const rg1 = new THREE.RingGeometry(ri, ro, RS); rg1.rotateX(-Math.PI / 2); rg1.translate(0, -len / 2, 0);
+  const rg2 = new THREE.RingGeometry(ri, ro, RS); rg2.rotateX(Math.PI / 2); rg2.translate(0, len / 2, 0);
+  g.add(outer, inner, new THREE.Mesh(rg1, steelMat), new THREE.Mesh(rg2, steelMat));
 }
 // 依 shape 分派建立斷面實體；本地座標：長度沿 Y、depth 沿 Z、寬沿 X。
 // 各子件幾何最後平移 (dx, len/2, dz)：len/2 讓實體自 Y=0 往上長（沿用既有慣例），dx/dz 為定位線偏移。

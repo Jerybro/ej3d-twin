@@ -886,17 +886,36 @@ builders.assembly = function (_dims, def) {
 const steelMat = std(0x9aa4ad, { metalness: 0.5, roughness: 0.55 });
 // 標準鋼構斷面目錄（對標 E3D Structural section catalogue）——真實 mm 尺寸(EN/UK)
 // depth=斷面高 D，flange=翼板寬 B，web=腹板厚 tw，tf=翼板厚（單位 mm，用時 /1000）
+// shape 欄位（向後相容：I/H 型皆標 shape:'I'，缺 shape 者一律視為 'I'）：
+//   I  → I/H 型鋼：{depth,flange,web(tw),tf}
+//   L  → 角鋼：    {shape:'L',depth,flange,t}（等/不等邊，depth=長邊、flange=短邊、t=肢厚）
+//   C  → 槽鋼PFC： {shape:'C',depth,flange,web(tw),tf}（腹板+同側上下翼板）
+//   RHS→ 矩形中空： {shape:'RHS',depth,flange,t}（depth 沿 Z、flange 沿 X、t=壁厚）
+//   SHS→ 方形中空： {shape:'SHS',side,t}
+//   CHS→ 圓形中空： {shape:'CHS',od,t}（od=外徑）
 export const STEEL_SECTIONS = [
-  { code: 'IPE200', depth: 200, flange: 100, web: 5.6, tf: 8.5 },
-  { code: 'IPE300', depth: 300, flange: 150, web: 7.1, tf: 10.7 },
-  { code: 'IPE400', depth: 400, flange: 180, web: 8.6, tf: 13.5 },
-  { code: 'IPE500', depth: 500, flange: 200, web: 10.2, tf: 16 },
-  { code: 'HEA300', depth: 290, flange: 300, web: 8.5, tf: 14 },
-  { code: 'HEB200', depth: 200, flange: 200, web: 9, tf: 15 },
-  { code: 'HEB300', depth: 300, flange: 300, web: 11, tf: 19 },
-  { code: 'HEB400', depth: 400, flange: 300, web: 13.5, tf: 24 },
-  { code: 'UB305x165x40', depth: 303.4, flange: 165, web: 6, tf: 10.2 },
-  { code: 'UC254x254x73', depth: 254.1, flange: 254.6, web: 8.6, tf: 14.2 },
+  { code: 'IPE200', shape: 'I', depth: 200, flange: 100, web: 5.6, tf: 8.5 },
+  { code: 'IPE300', shape: 'I', depth: 300, flange: 150, web: 7.1, tf: 10.7 },
+  { code: 'IPE400', shape: 'I', depth: 400, flange: 180, web: 8.6, tf: 13.5 },
+  { code: 'IPE500', shape: 'I', depth: 500, flange: 200, web: 10.2, tf: 16 },
+  { code: 'HEA300', shape: 'I', depth: 290, flange: 300, web: 8.5, tf: 14 },
+  { code: 'HEB200', shape: 'I', depth: 200, flange: 200, web: 9, tf: 15 },
+  { code: 'HEB300', shape: 'I', depth: 300, flange: 300, web: 11, tf: 19 },
+  { code: 'HEB400', shape: 'I', depth: 400, flange: 300, web: 13.5, tf: 24 },
+  { code: 'UB305x165x40', shape: 'I', depth: 303.4, flange: 165, web: 6, tf: 10.2 },
+  { code: 'UC254x254x73', shape: 'I', depth: 254.1, flange: 254.6, web: 8.6, tf: 14.2 },
+  // 角鋼 L（等邊）
+  { code: 'L100x100x10', shape: 'L', depth: 100, flange: 100, t: 10 },
+  { code: 'L150x150x15', shape: 'L', depth: 150, flange: 150, t: 15 },
+  // 槽鋼 PFC（歐規 channel）
+  { code: 'PFC200x90', shape: 'C', depth: 200, flange: 90, web: 7, tf: 12.5 },
+  { code: 'PFC300x100', shape: 'C', depth: 300, flange: 100, web: 9, tf: 16.5 },
+  // 矩形中空 RHS
+  { code: 'RHS200x100x8', shape: 'RHS', depth: 200, flange: 100, t: 8 },
+  // 方形中空 SHS
+  { code: 'SHS150x150x8', shape: 'SHS', side: 150, t: 8 },
+  // 圓形中空 CHS
+  { code: 'CHS168x8', shape: 'CHS', od: 168.3, t: 8 },
 ];
 const STEEL_DEFAULT = STEEL_SECTIONS[6];   // HEB300 為預設（近似原本寫死斷面）
 export function steelSection(code) {
@@ -906,39 +925,110 @@ export function steelSection(code) {
 // hSection 本地座標：長度沿 Y，斷面高 depth 沿 Z（頂面 +Z），翼板寬 flange 沿 X。
 // NA=形心（不偏移）；CTOP/TOS=頂面貼線（往 -Z 移 D/2）；CBOT/BOS=底面貼線（往 +Z 移 D/2）；
 // LEFT/RIGHT=翼板邊貼線（沿 X ±B/2）。柱直接用此本地偏移；樑旋轉後偏移隨之轉向，方向自動正確。
+// 斷面外框 bounding（本地斷面平面：width 沿 X、height/depth 沿 Z），單位 m。
+// 各 shape 以其外框而非翼板寬決定定位偏移，L/C/hollow 才會貼對邊。
+function secBounds(sec) {
+  switch (sec.shape) {
+    case 'L': return { w: sec.flange / 1000, d: sec.depth / 1000 };
+    case 'C': return { w: sec.flange / 1000, d: sec.depth / 1000 };
+    case 'RHS': return { w: sec.flange / 1000, d: sec.depth / 1000 };
+    case 'SHS': return { w: sec.side / 1000, d: sec.side / 1000 };
+    case 'CHS': return { w: sec.od / 1000, d: sec.od / 1000 };
+    default: return { w: sec.flange / 1000, d: sec.depth / 1000 };  // I/H
+  }
+}
 function justOffset(sec, just = 'NA') {
-  const D = sec.depth / 1000, B = sec.flange / 1000;
+  const { w: B, d: D } = secBounds(sec);
   switch (just) {
     case 'CTOP': case 'TOS': return { dx: 0, dz: -D / 2 };  // 頂面對齊：斷面下移
     case 'CBOT': case 'BOS': return { dx: 0, dz: D / 2 };   // 底面對齊：斷面上移
-    case 'LEFT': return { dx: B / 2, dz: 0 };               // 左翼板邊對齊
-    case 'RIGHT': return { dx: -B / 2, dz: 0 };             // 右翼板邊對齊
+    case 'LEFT': return { dx: B / 2, dz: 0 };               // 左緣對齊
+    case 'RIGHT': return { dx: -B / 2, dz: 0 };             // 右緣對齊
     default: return { dx: 0, dz: 0 };                       // NA：形心
   }
 }
-function hSection(len, sec = STEEL_DEFAULT, just = 'NA') {
-  // 沿 Y 軸的 I/H 型鋼（柱姿態），樑用旋轉擺放；斷面尺寸 mm→m
+// I/H 型：腹板 + 上下兩翼板（本地：長度沿 Y、depth 沿 Z、翼板寬沿 X）
+function buildISolid(len, sec, g) {
   const D = sec.depth / 1000, B = sec.flange / 1000, tw = sec.web / 1000, tf = sec.tf / 1000;
-  const { dx, dz } = justOffset(sec, just);   // 定位線偏移（本地斷面平面）
-  const g = new THREE.Group();
   const web = new THREE.Mesh(new THREE.BoxGeometry(tw, len, D - 2 * tf), steelMat);
   const f1 = new THREE.Mesh(new THREE.BoxGeometry(B, len, tf), steelMat);
   f1.position.z = (D - tf) / 2;
   const f2 = f1.clone();
   f2.position.z = -(D - tf) / 2;
   g.add(web, f1, f2);
+}
+// 角鋼 L：兩片板成 L（水平肢在底 -Z、垂直肢在左 -X）；形心近似置中處理，外框以 bounding 為準
+function buildLSolid(len, sec, g) {
+  const D = sec.depth / 1000, B = sec.flange / 1000, t = sec.t / 1000;
+  // 垂直肢（沿 Z，厚度沿 X）
+  const legV = new THREE.Mesh(new THREE.BoxGeometry(t, len, D), steelMat);
+  legV.position.set(-B / 2 + t / 2, 0, 0);
+  // 水平肢（沿 X，厚度沿 Z）——扣掉與垂直肢重疊段
+  const legH = new THREE.Mesh(new THREE.BoxGeometry(B - t, len, t), steelMat);
+  legH.position.set(t / 2, 0, -D / 2 + t / 2);
+  g.add(legV, legH);
+}
+// 槽鋼 C(PFC)：腹板（在一側 -X）+ 同側上下兩翼板（往 +X 伸出）
+function buildCSolid(len, sec, g) {
+  const D = sec.depth / 1000, B = sec.flange / 1000, tw = sec.web / 1000, tf = sec.tf / 1000;
+  const web = new THREE.Mesh(new THREE.BoxGeometry(tw, len, D), steelMat);
+  web.position.set(-B / 2 + tw / 2, 0, 0);
+  const f1 = new THREE.Mesh(new THREE.BoxGeometry(B - tw, len, tf), steelMat);
+  f1.position.set(tw / 2, 0, (D - tf) / 2);
+  const f2 = f1.clone();
+  f2.position.z = -(D - tf) / 2;
+  g.add(web, f1, f2);
+}
+// 矩形/方形中空 RHS/SHS：四片薄板拼成殼（中空看得出來）
+function buildHollowRect(len, W, D, t, g) {
+  const top = new THREE.Mesh(new THREE.BoxGeometry(W, len, t), steelMat);
+  top.position.z = D / 2 - t / 2;
+  const bot = top.clone(); bot.position.z = -(D / 2 - t / 2);
+  const left = new THREE.Mesh(new THREE.BoxGeometry(t, len, D - 2 * t), steelMat);
+  left.position.x = -(W / 2 - t / 2);
+  const right = left.clone(); right.position.x = W / 2 - t / 2;
+  g.add(top, bot, left, right);
+}
+// 圓形中空 CHS：外/內兩同心圓柱（沿 Y），兩端加環形蓋，示意中空管壁
+function buildCHS(len, sec, g) {
+  const ro = sec.od / 2000, t = sec.t / 1000, ri = Math.max(0.001, ro - t);
+  const RS = 24;
+  const outer = new THREE.Mesh(new THREE.CylinderGeometry(ro, ro, len, RS, 1, true), steelMat);
+  const inner = new THREE.Mesh(new THREE.CylinderGeometry(ri, ri, len, RS, 1, true), steelMat);
+  const ring1 = new THREE.Mesh(new THREE.RingGeometry(ri, ro, RS), steelMat);
+  ring1.rotation.x = -Math.PI / 2; ring1.position.y = len / 2;
+  const ring2 = ring1.clone(); ring2.rotation.x = Math.PI / 2; ring2.position.y = -len / 2;
+  g.add(outer, inner, ring1, ring2);
+}
+// 依 shape 分派建立斷面實體；本地座標：長度沿 Y、depth 沿 Z、寬沿 X。
+// 各子件幾何最後平移 (dx, len/2, dz)：len/2 讓實體自 Y=0 往上長（沿用既有慣例），dx/dz 為定位線偏移。
+function sectionSolid(len, sec = STEEL_DEFAULT, just = 'NA') {
+  const { dx, dz } = justOffset(sec, just);
+  const g = new THREE.Group();
+  switch (sec.shape) {
+    case 'L': buildLSolid(len, sec, g); break;
+    case 'C': buildCSolid(len, sec, g); break;
+    case 'RHS': buildHollowRect(len, sec.flange / 1000, sec.depth / 1000, sec.t / 1000, g); break;
+    case 'SHS': buildHollowRect(len, sec.side / 1000, sec.side / 1000, sec.t / 1000, g); break;
+    case 'CHS': buildCHS(len, sec, g); break;
+    default: buildISolid(len, sec, g); break;   // I/H（含缺 shape 者）
+  }
   g.children.forEach((c) => c.geometry.translate(dx, len / 2, dz));
   return g;
+}
+// I 型相容包裝（保留舊名；一律走 sectionSolid 分派）
+function hSection(len, sec = STEEL_DEFAULT, just = 'NA') {
+  return sectionSolid(len, sec, just);
 }
 
 builders.scolumn = function ({ h }, def) {
   const sec = steelSection(def?.section);
   const just = def?.just ?? 'NA';
   const g = new THREE.Group();
-  const bp = Math.max(0.42, sec.flange / 1000 + 0.12);   // 底板隨翼板寬
+  const bp = Math.max(0.42, secBounds(sec).w + 0.12);   // 底板隨斷面外框寬
   const base = new THREE.Mesh(new THREE.BoxGeometry(bp, 0.03, bp), steelMat);
   base.position.y = 0.015;                    // 底板留在定位線節點，僅斷面依 just 偏移
-  g.add(base, hSection(h, sec, just));
+  g.add(base, sectionSolid(h, sec, just));
   return g;
 };
 
@@ -946,7 +1036,7 @@ builders.sbeam = function ({ len, elev }, def) {
   const sec = steelSection(def?.section);
   const just = def?.just ?? 'NA';
   const g = new THREE.Group();
-  const beam = hSection(len, sec, just);
+  const beam = sectionSolid(len, sec, just);
   // 樑姿態：長度(本地Y)→世界X、斷面高 depth(本地Z)→世界Y(垂直)、翼板寬(本地X)→世界Z(水平)。
   // 用 makeBasis 讓 depth 立起來，justOffset 的 TOS/BOS(本地Z→世界Y) 才是垂直對齊、LEFT/RIGHT 才是水平。
   beam.setRotationFromMatrix(new THREE.Matrix4().makeBasis(

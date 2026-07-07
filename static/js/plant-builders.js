@@ -921,6 +921,19 @@ const STEEL_DEFAULT = STEEL_SECTIONS[6];   // HEB300 為預設（近似原本寫
 export function steelSection(code) {
   return STEEL_SECTIONS.find((s) => s.code === code) ?? STEEL_DEFAULT;
 }
+// 依 shape 產生人類可讀的斷面尺寸描述（mm）。各 shape 只用自己有的欄位，
+// 避免對 I/H-only 的 depth/flange/web/tf 一律內插造成 undefined（QA major）。
+export function sectionDesc(sec) {
+  const s = sec ?? STEEL_DEFAULT;
+  switch (s.shape) {
+    case 'CHS': return `⌀${s.od}×t${s.t}`;
+    case 'SHS': return `${s.side}×${s.side}×t${s.t}`;
+    case 'RHS': return `${s.depth}×${s.flange}×t${s.t}`;
+    case 'L': return `L${s.depth}×${s.flange}×${s.t}`;
+    case 'C': return `C D${s.depth}×B${s.flange}｜tw${s.web}／tf${s.tf}`;
+    default: return `D${s.depth}×B${s.flange}｜tw${s.web}／tf${s.tf}`;  // I/H
+  }
+}
 // 定位線 Justification（對標 E3D P-line）：斷面在其斷面平面內偏移，使指定基準貼定位線。
 // hSection 本地座標：長度沿 Y，斷面高 depth 沿 Z（頂面 +Z），翼板寬 flange 沿 X。
 // NA=形心（不偏移）；CTOP/TOS=頂面貼線（往 -Z 移 D/2）；CBOT/BOS=底面貼線（往 +Z 移 D/2）；

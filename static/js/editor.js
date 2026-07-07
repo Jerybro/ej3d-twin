@@ -651,14 +651,15 @@ function rebuildAllPipes() {
   applyLayers();
 }
 
-// 單條管重建：dispose 舊 group 幾何/材質（防 GPU 洩漏）後重繪，index 對齊不變。
+// 單條管重建：dispose 舊 group 幾何後重繪，index 對齊不變。
+// 注意：管身 cylinder/joint/insul 用的是模組層共用單例材質（pipeMat/insulMat/serviceMats 快取），
+// 絕不可在此 dispose material，否則會釋放掉場上其他管線仍引用的共用材質（比照 rebuildAllPipes 只清幾何/DOM）。
 function rebuildPipe(index) {
   const old = pipeObjects[index];
   if (old) {
     old.group.traverse((o) => {
       if (o.isCSS2DObject) { o.element.remove(); return; }   // 清坡度標籤 DOM
       o.geometry?.dispose();
-      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
     });
     scene.remove(old.group);
     pipeObjects[index] = null;

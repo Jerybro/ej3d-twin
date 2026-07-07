@@ -869,7 +869,7 @@ export function buildPrim(p) {
     mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), std(0x8a97a5));
   }
   mesh.position.set(...(p.pos ?? [0, 0, 0]));
-  mesh.rotation.y = p.rot_y ?? 0;
+  mesh.rotation.set(p.rot_x ?? 0, p.rot_y ?? 0, p.rot_z ?? 0);
   return mesh;
 }
 

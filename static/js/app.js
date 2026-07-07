@@ -413,7 +413,7 @@ for (const unit of plantData.plant.units) {
   for (const eq of unit.equipment) {
     const group = new THREE.Group();
     group.position.set(...eq.pos);
-    group.rotation.y = eq.rot_y ?? 0; // 編輯器可存旋轉
+    group.rotation.set(eq.rot_x ?? 0, eq.rot_y ?? 0, eq.rot_z ?? 0); // 編輯器可存三軸旋轉
     plantGroup.add(group);
 
     const labelEl = document.createElement('div');

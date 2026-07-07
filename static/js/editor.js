@@ -10,6 +10,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight,
          buildPrim, buildPipeComponent, PIPE_COMPONENTS,
          PIPE_SPECS, PIPE_SERVICES, PIPE_BORES, PIPE_SCHEDULES, pipeWall,
+         COMPONENT_FTF, pickComponent,
          STEEL_SECTIONS, steelSection } from './plant-builders.js';
 import { initSprite } from './sprite.js';
 import { runClash, clashKey } from './clash.js';
@@ -465,7 +466,7 @@ function buildPipe(pipe, index) {
   for (const c of pipe.components ?? []) {
     const pose = arcToPose(pipe, c.at);
     if (!pose) continue;
-    const comp = buildPipeComponent(c.kind, radiusAt(c.at - 0.01));
+    const comp = buildPipeComponent(c.kind, radiusAt(c.at - 0.01), c.ftf);   // c.ftf＝spec/bore 選型面距
     comp.position.copy(pose.pos);
     if (slopePM) comp.position.y -= (slopePM / 1000) * horizArcTo(ptsRaw, c.at);   // 坡度：元件跟著渲染層下降
     comp.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), pose.dir);
@@ -650,6 +651,60 @@ function rebuildAllPipes() {
   applyLayers();
 }
 
+// 單條管重建：dispose 舊 group 幾何/材質（防 GPU 洩漏）後重繪，index 對齊不變。
+function rebuildPipe(index) {
+  const old = pipeObjects[index];
+  if (old) {
+    old.group.traverse((o) => {
+      if (o.isCSS2DObject) { o.element.remove(); return; }   // 清坡度標籤 DOM
+      o.geometry?.dispose();
+      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
+    });
+    scene.remove(old.group);
+    pipeObjects[index] = null;
+  }
+  buildPipe(sceneData.pipes[index], index);
+  applyLayers();
+}
+
+// 設備移動/旋轉後，帶 head/tail 參考該設備的管線端點跟動（沿用 nozzle 現在世界座標）。
+// 每軸 roundMM 量化、寫回 canonical 公尺；只重建受影響管，逐條 dispose 舊幾何。
+function updateConnectedPipes(eqTag) {
+  if (!eqTag) return;
+  sceneData.pipes.forEach((pipe, i) => {
+    if (!pipe.pts || pipe.pts.length < 2) return;
+    let touched = false;
+    if (pipe.head?.eq === eqTag) {
+      const w = resolveEnd(pipe.head);
+      if (w) { pipe.pts[0] = [roundMM(w.x), roundMM(w.y), roundMM(w.z)]; touched = true; }
+    }
+    if (pipe.tail?.eq === eqTag) {
+      const w = resolveEnd(pipe.tail);
+      if (w) { pipe.pts[pipe.pts.length - 1] = [roundMM(w.x), roundMM(w.y), roundMM(w.z)]; touched = true; }
+    }
+    if (touched) rebuildPipe(i);
+  });
+  updateBranchPipes();   // 母管端點可能已移動 → branch 端跟隨
+}
+
+// branch 跟隨：凡 head/tail 為 {pipe,at} 母管參考者，端點對齊母管該弧長現在世界座標。
+// 不遞迴（branch 不作為他人母管的追蹤源，避免循環）；每軸 roundMM，只重建受影響管。
+function updateBranchPipes() {
+  sceneData.pipes.forEach((pipe, i) => {
+    if (!pipe.pts || pipe.pts.length < 2) return;
+    let touched = false;
+    if (pipe.head?.pipe !== undefined) {
+      const w = resolveEnd(pipe.head);
+      if (w) { pipe.pts[0] = [roundMM(w.x), roundMM(w.y), roundMM(w.z)]; touched = true; }
+    }
+    if (pipe.tail?.pipe !== undefined) {
+      const w = resolveEnd(pipe.tail);
+      if (w) { pipe.pts[pipe.pts.length - 1] = [roundMM(w.x), roundMM(w.y), roundMM(w.z)]; touched = true; }
+    }
+    if (touched) rebuildPipe(i);
+  });
+}
+
 // ------------------------------------------------------------ 載入場景
 function loadSceneData(data, id) {
   transform.detach();
@@ -694,6 +749,7 @@ let ghost = null;
 let selected = null;      // { kind: 'eq', def } | { kind: 'pipe', index }
 let repaintPanel = null;  // 目前右側面板的重繪閉包（切換單位時即時刷新 value/step/單位標籤）
 let pipeDraft = [];       // Vector3[]
+let pipeDraftRefs = [];   // (ref|null)[] 對齊 pipeDraft：各點吸附到的 nozzle 身分（供 head/tail 連接）
 let pipePreview = null;
 let snapOn = true;
 
@@ -727,6 +783,7 @@ function setMode(m) {
 
 function clearPipeDraft() {
   pipeDraft = [];
+  pipeDraftRefs = [];
   if (pipePreview) { scene.remove(pipePreview); pipePreview = null; }
 }
 
@@ -904,6 +961,7 @@ function renderPropPanel(def) {
       if (k === 'rot') {
         def.rot_y = (+inp.value) * Math.PI / 180;
         eqObjects.get(def.tag).group.rotation.y = def.rot_y;
+        updateConnectedPipes(def.tag);   // 旋轉改 nozzle 世界座標 → 管端跟走
       } else if (k === 'tag') {
         const nt = inp.value.trim();
         if (!nt || (eqObjects.has(nt) && nt !== def.tag)) { inp.value = def.tag; return; }
@@ -920,6 +978,7 @@ function renderPropPanel(def) {
       } else if (k.startsWith('pos.')) {
         def.pos[+k.slice(4)] = fromDisp(inp.value);
         eqObjects.get(def.tag).group.position.set(...def.pos);
+        updateConnectedPipes(def.tag);   // 平移 → 管端跟走
       } else if (k.startsWith('dims.')) {
         const dk = k.slice(5);
         def.dims[dk] = COUNT_DIMS.has(dk) ? Math.max(1, Math.round(+inp.value))
@@ -1654,17 +1713,34 @@ function orthoLock(pt, e) {
   return locked;
 }
 
+// 最近一次 snapToEquipment 命中的 nozzle 身分（供繪管提交時寫入 pipe.head/tail）。
+// 只有吸附到「具體管嘴」時才是 {eq,nz}；吸附到設備中心或空地時為 null。
+let lastSnapRef = null;
 function snapToEquipment(pt) {
+  lastSnapRef = null;
   // 管嘴優先：1.5m 內吸附最近 nozzle 端點（含高度）——配管接嘴
-  let bestNz = null, bestNzD = 1.5;
+  let bestNz = null, bestNzD = 1.5, bestRef = null;
   for (const { def } of eqObjects.values()) {
     for (const nz of def.nozzles ?? []) {
       const w = nozzleWorld(def, nz);
       const d = Math.hypot(w.x - pt.x, w.z - pt.z);
-      if (d < bestNzD) { bestNzD = d; bestNz = w; }
+      if (d < bestNzD) { bestNzD = d; bestNz = w; bestRef = { eq: def.tag, nz: nz.id }; }
     }
   }
-  if (bestNz) return bestNz;
+  if (bestNz) { lastSnapRef = bestRef; return bestNz; }
+  // branch/tee：0.6m 內吸附到既有管線某點（不含正在繪製的草稿），記 {pipe,at} 母管參考
+  if (pipeDraft.length === 0) {   // 只在「起點」允許起 branch（避免中途誤吸）
+    let bestPipe = null, bestPipeD = 0.6, bestPipeAt = 0, bestPos = null;
+    sceneData.pipes.forEach((pipe, i) => {
+      if (!pipe.pts || pipe.pts.length < 2 || pipe.profile === 'duct') return;
+      const near = nearestArcOnPipe(pipe, pt);
+      if (near.pos && near.d < bestPipeD) { bestPipeD = near.d; bestPipe = i; bestPipeAt = near.at; bestPos = near.pos; }
+    });
+    if (bestPipe !== null) {
+      lastSnapRef = { pipe: bestPipe, at: roundMM(bestPipeAt) };
+      return bestPos;
+    }
+  }
   // 2m 內吸附最近設備的接管點（y=0.9）
   let best = null, bestD = 2;
   for (const { def } of eqObjects.values()) {
@@ -1673,6 +1749,88 @@ function snapToEquipment(pt) {
   }
   return best ? new THREE.Vector3(best.pos[0], 0.9, best.pos[2])
               : new THREE.Vector3(snapVal(pt.x), 0.9, snapVal(pt.z));
+}
+
+// 由 typed 參考算該端現在的世界座標（Vector3）；查無則回 null。
+// ref 兩型：{ eq:<設備tag>, nz:<nozzleId> }（管↔設備）；{ pipe:<母管idx>, at:<弧長m> }（branch↔母管）。
+function resolveEnd(ref) {
+  if (!ref) return null;
+  if (ref.pipe !== undefined) {                 // branch：母管弧長點的世界座標
+    const mother = sceneData.pipes[ref.pipe];
+    if (!mother) return null;
+    const pose = arcToPose(mother, ref.at ?? 0);
+    return pose ? pose.pos.clone() : null;
+  }
+  if (!ref.eq) return null;
+  const entry = eqObjects.get(ref.eq);
+  if (!entry) return null;
+  const def = entry.def;
+  const nz = (def.nozzles ?? []).find((n) => n.id === ref.nz);
+  if (!nz) return null;
+  return nozzleWorld(def, nz);
+}
+
+// 由半徑（公尺）反查最近 DN 名目（供 bore 一致性檢查）；PIPE_BORES 已按 r 遞增。
+function dnFromRadius(r) {
+  let best = null, bestD = Infinity;
+  for (const b of PIPE_BORES) { const d = Math.abs(b.r - r); if (d < bestD) { bestD = d; best = b.dn; } }
+  return best;
+}
+
+// 連通性檢查：掃全場管線，回問題陣列 [{pipe, issue, detail, at?}]。
+// 檢查兩類：(1) 自由端＝端點未連 nozzle 也非 branch 且不靠近任何 nozzle；
+//          (2) bore 不一致＝pipe 半徑對應 DN 與所接 nozzle 的 dn 不符。
+function checkConnectivity(data) {
+  const problems = [];
+  const SNAP = 0.4;   // 端點視為「靠近某 nozzle」的容差（公尺）
+  // 預先收集所有 nozzle 世界座標（供未帶 ref 但實體靠嘴的端點判定）
+  const allNz = [];
+  for (const { def } of eqObjects.values()) {
+    for (const nz of def.nozzles ?? []) allNz.push({ def, nz, w: nozzleWorld(def, nz) });
+  }
+  const nearestNz = (p) => {
+    let best = null, bestD = SNAP;
+    const v = new THREE.Vector3(...p);
+    for (const e of allNz) { const d = e.w.distanceTo(v); if (d < bestD) { bestD = d; best = e; } }
+    return best;
+  };
+  const pipeDN = (pipe) => pipe.dn || dnFromRadius(pipe.r);
+  data.pipes.forEach((pipe, i) => {
+    if (!pipe.pts || pipe.pts.length < 2 || pipe.bridge) return;
+    if (pipe.profile === 'duct') return;   // 風管不做管閥連通檢查
+    const ends = [
+      { name: '起點 head', ref: pipe.head, p: pipe.pts[0] },
+      { name: '終點 tail', ref: pipe.tail, p: pipe.pts[pipe.pts.length - 1] },
+    ];
+    for (const end of ends) {
+      // branch（母管參考）視為已連接，跳過自由端判定
+      if (end.ref && end.ref.pipe !== undefined) continue;
+      let connectedNz = null;
+      if (end.ref && end.ref.eq) {
+        connectedNz = resolveEnd(end.ref) ? { def: eqObjects.get(end.ref.eq)?.def,
+          nz: (eqObjects.get(end.ref.eq)?.def.nozzles ?? []).find((n) => n.id === end.ref.nz) } : null;
+        if (!connectedNz || !connectedNz.nz) {
+          problems.push({ pipe: i, issue: '連接失效', detail: `${end.name} 參考的 ${end.ref.eq}/${end.ref.nz} 已不存在` });
+          continue;
+        }
+      } else {
+        const near = nearestNz(end.p);
+        if (!near) {
+          problems.push({ pipe: i, issue: '自由端', detail: `${end.name} 未連接任何管嘴（附近無 nozzle）` });
+          continue;
+        }
+        connectedNz = near;   // 實體靠嘴但未帶 ref：不算自由端，續做 bore 檢查
+      }
+      // bore 一致性：pipe DN vs nozzle DN
+      const pdn = pipeDN(pipe);
+      const ndn = connectedNz.nz?.dn;
+      if (pdn && ndn && pdn !== ndn) {
+        problems.push({ pipe: i, issue: 'bore 不一致',
+          detail: `${end.name} 管徑 ${pdn} ≠ 管嘴 ${connectedNz.def?.tag ?? ''}/${connectedNz.nz.id} 口徑 ${ndn}` });
+      }
+    }
+  });
+  return problems;
 }
 
 function pickObject(e) {
@@ -1716,7 +1874,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
       if (!compGhost) {
         compGhost = pipe.profile === 'duct'
           ? buildDuctFitting(pendingComp.kind, pipe.duct?.w ?? 0.8, pipe.duct?.h ?? 0.5, pipe.duct)
-          : buildPipeComponent(pendingComp.kind, pipe.r);
+          : buildPipeComponent(pendingComp.kind, pipe.r, pickComponent(pipe.spec, pipe.dn, pendingComp.kind).ftf);
         compGhost.traverse((o) => {
           if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.55; }
         });
@@ -1812,7 +1970,13 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   if (mode === 'pipe') {
     const pt = groundPoint(e);
     if (pt) {
-      pipeDraft.push(orthoLock(snapToEquipment(pt), e));
+      const snapped = snapToEquipment(pt);      // 設定 lastSnapRef（吸附到 nozzle 時）
+      const ref = lastSnapRef;                   // 先存起，orthoLock 可能改點位置
+      const locked = orthoLock(snapped, e);
+      // 正交鎖定若把點挪離 nozzle 端點，該端連接失效 → 不記錄 ref
+      const moved = Math.hypot(locked.x - snapped.x, locked.z - snapped.z) > 1e-6;
+      pipeDraft.push(locked);
+      pipeDraftRefs.push(moved ? null : ref);
       updatePipePreview();
       setHint(`管線繪製：已 ${pipeDraft.length} 點（<b>Shift</b>=正交鎖定），<b>Enter</b> 完成、<b>Esc</b> 取消`);
     }
@@ -1838,7 +2002,14 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     pushUndo();
     const pipe = sceneData.pipes[pendingComp.pipeIndex];
     pipe.components ??= [];
-    pipe.components.push({ kind: pendingComp.kind, at: pendingComp.at });
+    // spec/bore 驅動選型：記錄該管當前 dn/spec 與 face-to-face 長度（公尺 canonical）。
+    // 風管無 spec 選型，維持沿用寫死幾何（ftf 省略）。
+    const comp = { kind: pendingComp.kind, at: pendingComp.at };
+    if (pipe.profile !== 'duct') {
+      const sel = pickComponent(pipe.spec, pipe.dn, pendingComp.kind);
+      if (sel.ftf) { comp.ftf = roundMM(sel.ftf); comp.dn = sel.dn; comp.spec = sel.spec; }
+    }
+    pipe.components.push(comp);
     pipe.components.sort((a, b) => a.at - b.at);
     const idx = pendingComp.pipeIndex;
     setMode('idle');
@@ -2016,10 +2187,12 @@ transform.addEventListener('mouseUp', () => {
     g.position.y = 0; // 鎖地面
     if (snapOn) g.position.set(snapVal(g.position.x), 0, snapVal(g.position.z));
     def.pos = [g.position.x, 0, g.position.z];
+    updateConnectedPipes(def.tag);   // 接了管的設備移動 → 管端跟走
     renderPropPanel(def);
   } else if (transform.mode === 'rotate') {
     g.rotation.x = 0; g.rotation.z = 0; // 只允許水平旋轉
     def.rot_y = g.rotation.y;
+    updateConnectedPipes(def.tag);   // 旋轉改 nozzle 世界座標 → 管端跟走
     renderPropPanel(def); // 同步旋轉欄位
   } else if (transform.mode === 'scale') {
     // uniform scale 燒進 dims 後歸一
@@ -2212,6 +2385,7 @@ function commitNodeDrag() {
   const p = handle.position;
   pipe.pts[nodeDrag.index] = [snapVal(p.x), Math.max(0.1, roundMM(p.y)), snapVal(p.z)];
   rebuildAllPipes();
+  updateBranchPipes();   // 母管節點移動 → 掛在其上的 branch 端跟隨
   if (hasSupports(pipe.uid)) { regenSupportsForPipe(pipe); rebuildTree(); }   // 節點編輯完自動重生支撐
   const idx = selected.index;
   nodeDrag = null;
@@ -3763,6 +3937,37 @@ document.getElementById('clash-close').addEventListener('click', () => {
   clearClashMarks();
 });
 
+// ------------------------------------------------------------ 連通性檢查（沿用 clash-dock 面板）
+function runConnectivityDock() {
+  const t0 = performance.now();
+  const problems = checkConnectivity(sceneData);
+  const ms = Math.round(performance.now() - t0);
+  const nFree = problems.filter((p) => p.issue === '自由端').length;
+  const nBore = problems.filter((p) => p.issue === 'bore 不一致').length;
+  const nBroken = problems.filter((p) => p.issue === '連接失效').length;
+  document.getElementById('clash-summary').textContent =
+    `自由端 ${nFree}｜bore 不一致 ${nBore}｜連接失效 ${nBroken}（${ms}ms）`;
+  document.getElementById('clash-count').textContent = `　${problems.length} 筆`;
+  const badge = (bg, txt) => `<span style="display:inline-block;padding:1px 6px;border-radius:4px;background:${bg};color:#fff;font-size:10px;font-weight:600">${txt}</span>`;
+  const CB = { '自由端': '#d9534f', 'bore 不一致': '#e0a800', '連接失效': '#c0284e' };
+  const list = document.getElementById('clash-list');
+  list.innerHTML = problems.length ? problems.map((p, i) =>
+    `<div class="clash-row" data-pi="${i}" style="grid-template-columns:88px 90px 1fr">
+      ${badge(CB[p.issue] ?? '#888', p.issue)}
+      <span style="color:var(--dim);font-family:monospace;font-size:11px">PIPE #${p.pipe + 1}</span>
+      <span>${p.detail}</span>
+    </div>`).join('') : '<div style="padding:14px;color:var(--dim)">無問題——管線連通乾淨</div>';
+  clashDock.classList.add('show');
+  clearClashMarks();
+  list.querySelectorAll('.clash-row').forEach((row) => row.addEventListener('click', () => {
+    list.querySelectorAll('.clash-row').forEach((r) => r.classList.toggle('selected', r === row));
+    const p = problems[+row.dataset.pi];
+    selectPipe(p.pipe);      // 選取該管並定位視角
+    zoomToSelection();
+  }));
+}
+document.getElementById('btn-connect-check').addEventListener('click', runConnectivityDock);
+
 // ------------------------------------------------------------ 視角書籤（E3D Save & Restore Views）
 function captureThumb() {
   renderer.render(scene, camera);  // preserveDrawingBuffer=false → 先渲染同幀取圖
@@ -3948,7 +4153,14 @@ addEventListener('keydown', (e) => {
       const spec = document.getElementById('pipe-spec').value;
       const dn = document.getElementById('pipe-bore').value;
       const r = PIPE_BORES.find((b) => b.dn === dn)?.r ?? 0.12;
-      sceneData.pipes.push({ r, spec, dn, pts: ptsOut });
+      const pipe = { r, spec, dn, pts: ptsOut };
+      // typed 連接參考：起點→head、終點→tail（吸附到 nozzle 或母管 branch 時才有）
+      const toRef = (r) => r ? (r.pipe !== undefined ? { pipe: r.pipe, at: r.at } : { eq: r.eq, nz: r.nz }) : null;
+      const headRef = toRef(pipeDraftRefs[0]);
+      const tailRef = toRef(pipeDraftRefs[pipeDraftRefs.length - 1]);
+      if (headRef) pipe.head = headRef;
+      if (tailRef) pipe.tail = tailRef;
+      sceneData.pipes.push(pipe);
     }
     buildPipe(sceneData.pipes.at(-1), sceneData.pipes.length - 1);
     clearPipeDraft();

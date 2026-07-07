@@ -1739,8 +1739,11 @@ builders.rooffan = function ({ r, h }) {
 
 // -------------------------------------------------- 管線元件（Piping Components）
 // E3D Component Editor：閥/法蘭對/異徑管/止回閥，沿管線弧長定位
-export function buildPipeComponent(kind, r) {
-  const g = new THREE.Group();
+// ftf（公尺，選填）：spec/bore 選型的 face-to-face 長度。給定時把元件沿管向（本地 X）
+// 縮放到該長度取代寫死幾何長，維持徑向（Y/Z）依 r 的比例。
+export function buildPipeComponent(kind, r, ftf) {
+  const inner = new THREE.Group();
+  const g = inner;
   const m = std(0xb8c2cc, { metalness: 0.35, roughness: 0.5 });
   const R = Math.max(r * 2.2, 0.16);
   if (kind === 'valve') {
@@ -1805,7 +1808,16 @@ export function buildPipeComponent(kind, r) {
     disp.position.set(0, R * 0.45, R * 0.6);
     g.add(body, disp);
   }
-  return g;
+  if (ftf && ftf > 1e-4) {
+    // 量目前沿管向（本地 X）幾何範圍，縮放到 ftf；徑向不變。用外層 group 包裹以套 scale.x。
+    const box = new THREE.Box3().setFromObject(inner);
+    const spanX = Math.max(box.max.x - box.min.x, 1e-4);
+    inner.scale.x = ftf / spanX;
+    const outer = new THREE.Group();
+    outer.add(inner);
+    return outer;
+  }
+  return inner;
 }
 
 export const PIPE_COMPONENTS = [
@@ -1902,6 +1914,53 @@ builders.plate = function ({ w, d, t }, def) {
   g.add(mesh);
   return g;
 };
+
+// -------------------------------------------------- 元件選型（spec-driven component sizing）
+// DN 名目 → 公稱直徑（mm，供 FTF 內插/查表）
+const DN_MM = { DN25: 25, DN40: 40, DN50: 50, DN80: 80, DN100: 100, DN150: 150,
+  DN200: 200, DN250: 250, DN300: 300, DN400: 400, DN500: 500 };
+// 元件 face-to-face 長度（公尺 canonical）——近似 ASME B16.10 flanged/lug 端面距。
+// 每 kind 給 { DNxxx: 公尺 }；缺該 DN 時由 ftfFor 依最近 DN 線性內插近似。
+// 值來源：B16.10 Class150 RF flanged 常見值（DN50~DN300），兩端外插為工程近似。
+export const COMPONENT_FTF = {
+  valve:      { DN25: 0.184, DN40: 0.222, DN50: 0.254, DN80: 0.298, DN100: 0.352, DN150: 0.451, DN200: 0.543, DN250: 0.673, DN300: 0.737, DN400: 0.914, DN500: 1.067 },
+  ball:       { DN25: 0.127, DN40: 0.165, DN50: 0.178, DN80: 0.203, DN100: 0.229, DN150: 0.394, DN200: 0.457, DN250: 0.533, DN300: 0.610, DN400: 0.762, DN500: 0.914 },
+  bfly:       { DN50: 0.043, DN80: 0.046, DN100: 0.052, DN150: 0.056, DN200: 0.060, DN250: 0.068, DN300: 0.078, DN400: 0.102, DN500: 0.114 },
+  check:      { DN25: 0.184, DN40: 0.222, DN50: 0.254, DN80: 0.298, DN100: 0.352, DN150: 0.451, DN200: 0.543, DN250: 0.673, DN300: 0.737, DN400: 0.914, DN500: 1.067 },
+  flangepair: { DN25: 0.050, DN40: 0.055, DN50: 0.060, DN80: 0.070, DN100: 0.075, DN150: 0.085, DN200: 0.095, DN250: 0.105, DN300: 0.115, DN400: 0.135, DN500: 0.155 },
+  reducer:    { DN25: 0.089, DN40: 0.089, DN50: 0.102, DN80: 0.114, DN100: 0.127, DN150: 0.140, DN200: 0.152, DN250: 0.178, DN300: 0.203, DN400: 0.254, DN500: 0.305 },
+  psv:        { DN25: 0.20, DN40: 0.24, DN50: 0.28, DN80: 0.34, DN100: 0.40, DN150: 0.52 },
+  fm:         { DN25: 0.20, DN40: 0.24, DN50: 0.30, DN80: 0.36, DN100: 0.42, DN150: 0.52, DN200: 0.62, DN250: 0.72, DN300: 0.82 },
+};
+// 回傳某 kind 在指定 DN 的 face-to-face 長度（公尺）；缺表時依最近兩 DN 線性內插/外插。
+function ftfFor(kind, dn) {
+  const tbl = COMPONENT_FTF[kind];
+  if (!tbl) return null;
+  if (dn && tbl[dn] != null) return tbl[dn];
+  const target = DN_MM[dn];
+  const keys = Object.keys(tbl).filter((k) => DN_MM[k] != null).sort((a, b) => DN_MM[a] - DN_MM[b]);
+  if (!keys.length) return null;
+  if (target == null) return tbl[keys[0]];                                     // 未知 DN → 取最小 DN 值
+  if (target <= DN_MM[keys[0]]) return tbl[keys[0]];
+  if (target >= DN_MM[keys[keys.length - 1]]) return tbl[keys[keys.length - 1]];
+  for (let i = 0; i < keys.length - 1; i++) {                                   // 落在兩已知 DN 間 → 線性內插
+    const lo = DN_MM[keys[i]], hi = DN_MM[keys[i + 1]];
+    if (target >= lo && target <= hi) {
+      const t = (target - lo) / (hi - lo);
+      return tbl[keys[i]] + t * (tbl[keys[i + 1]] - tbl[keys[i]]);
+    }
+  }
+  return tbl[keys[0]];
+}
+// 依 spec+dn 選 kind 元件，回選型結果（ftf 公尺；endType 由 spec 語境近似）。
+export function pickComponent(spec, dn, kind) {
+  const ftf = ftfFor(kind, dn);
+  // 端接型式：低壓/PVC 多對焊或承插，其餘依 spec 等級近似法蘭（僅中繼屬性，不影響 canonical 幾何）
+  const endType = (spec === 'PVC') ? 'socket'
+    : (spec === 'B4B') ? 'flanged-RTJ'
+    : 'flanged-RF';
+  return { kind, dn: dn ?? null, spec: spec ?? null, ftf, endType };
+}
 
 // 素材目錄（編輯器面板用）
 export const ASSET_CATEGORIES = [

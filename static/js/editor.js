@@ -10,7 +10,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight,
          buildPrim, buildPipeComponent, PIPE_COMPONENTS,
          PIPE_SPECS, PIPE_SERVICES, PIPE_BORES, PIPE_SCHEDULES, pipeWall,
-         STEEL_SECTIONS, steelSection } from './plant-builders.js';
+         STEEL_SECTIONS, steelSection, sectionDesc } from './plant-builders.js';
 import { initSprite } from './sprite.js';
 import { runClash, clashKey } from './clash.js';
 import { computeWeights } from './weight.js';
@@ -878,7 +878,7 @@ function renderPropPanel(def) {
       return `<div class="pg-section">斷面 Section</div><div class="pg-grid">
         ${pgRow('型鋼', `<select data-k="section" style="width:100%">${STEEL_SECTIONS.map((x) =>
           `<option value="${x.code}" ${s.code === x.code ? 'selected' : ''}>${x.code}</option>`).join('')}</select>`)}
-        ${pgRow('斷面 (mm)', `<span>D${s.depth}×B${s.flange}｜tw${s.web}／tf${s.tf}</span>`)}
+        ${pgRow('斷面 (mm)', `<span>${sectionDesc(s)}</span>`)}
         ${pgRow('定位線 Justification', `<select data-k="just" style="width:100%">${JUST_OPTIONS.map((o) =>
           `<option value="${o.v}" ${jv === o.v ? 'selected' : ''}>${o.t}</option>`).join('')}</select>`)}</div>`;
     })() : ''}
@@ -3216,7 +3216,7 @@ function eqScheduleCsv() {
       let section = '';
       if (['scolumn', 'sbeam'].includes(eq.type) || eq.section) {
         const s = steelSection(eq.section);
-        section = `${s.code}（D${s.depth}×B${s.flange}｜tw${s.web}/tf${s.tf}）`;
+        section = `${s.code}（${sectionDesc(s)}）`;
       }
       const material = eq.material ?? eq.design?.['材質'] ?? '';
       rows.push([eq.tag, eq.name ?? typeName.get(eq.type) ?? '', eq.type, zone,

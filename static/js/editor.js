@@ -328,7 +328,7 @@ function buildEquipment(def) {
   group.add(body);
   renderNozzles(group, def);
   group.position.set(...def.pos);
-  group.rotation.y = def.rot_y ?? 0;
+  group.rotation.set(def.rot_x ?? 0, def.rot_y ?? 0, def.rot_z ?? 0);
 
   const el = document.createElement('div');
   el.style.cssText = 'padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.92);border:1px solid #c6d0da;color:#046AFB;font-size:11px;font-weight:700;white-space:nowrap;';
@@ -868,7 +868,9 @@ function renderPropPanel(def) {
       ${pgRow(`東 E (${unitLabel()})`, `<input data-k="pos.0" type="number" step="${U().step}" value="${toDisp(def.pos[0])}">`)}
       ${pgRow(`北 N (${unitLabel()})`, `<input data-k="pos.2" type="number" step="${U().step}" value="${toDisp(def.pos[2])}">`)}
       ${pgRow(`上 U (${unitLabel()})`, `<span>${toDisp(def.pos[1] ?? 0)}</span>`)}
-      ${pgRow('旋轉（度）', `<input data-k="rot" type="number" step="5" value="${Math.round((def.rot_y ?? 0) * 180 / Math.PI)}">`)}
+      ${pgRow('旋轉 X（度）', `<input data-k="rotx" type="number" step="5" value="${Math.round((def.rot_x ?? 0) * 180 / Math.PI)}">`)}
+      ${pgRow('旋轉 Y（度）', `<input data-k="rot" type="number" step="5" value="${Math.round((def.rot_y ?? 0) * 180 / Math.PI)}">`)}
+      ${pgRow('旋轉 Z（度）', `<input data-k="rotz" type="number" step="5" value="${Math.round((def.rot_z ?? 0) * 180 / Math.PI)}">`)}
       ${pgRow('WRT', `<span>/WORL</span>`)}
     </div>
     ${dimRows ? `<div class="pg-section">Design Parameters</div><div class="pg-grid">${dimRows}</div>` : ''}
@@ -901,9 +903,12 @@ function renderPropPanel(def) {
     inp.addEventListener('change', () => {
       const k = inp.dataset.k;
       pushUndo();
-      if (k === 'rot') {
-        def.rot_y = (+inp.value) * Math.PI / 180;
-        eqObjects.get(def.tag).group.rotation.y = def.rot_y;
+      if (k === 'rot' || k === 'rotx' || k === 'rotz') {
+        const rad = (+inp.value) * Math.PI / 180;
+        if (k === 'rotx') def.rot_x = rad;
+        else if (k === 'rotz') def.rot_z = rad;
+        else def.rot_y = rad;
+        eqObjects.get(def.tag).group.rotation.set(def.rot_x ?? 0, def.rot_y ?? 0, def.rot_z ?? 0);
       } else if (k === 'tag') {
         const nt = inp.value.trim();
         if (!nt || (eqObjects.has(nt) && nt !== def.tag)) { inp.value = def.tag; return; }
@@ -2018,7 +2023,8 @@ transform.addEventListener('mouseUp', () => {
     def.pos = [g.position.x, 0, g.position.z];
     renderPropPanel(def);
   } else if (transform.mode === 'rotate') {
-    g.rotation.x = 0; g.rotation.z = 0; // 只允許水平旋轉
+    def.rot_x = g.rotation.x;
+    def.rot_z = g.rotation.z;
     def.rot_y = g.rotation.y;
     renderPropPanel(def); // 同步旋轉欄位
   } else if (transform.mode === 'scale') {

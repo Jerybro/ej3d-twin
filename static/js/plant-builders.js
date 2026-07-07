@@ -1756,6 +1756,50 @@ export function pipeWall(dn, sched) {
   return t[dn] != null ? t[dn] / 1000 : null;
 }
 
+// 鋼板 / 樓板 PANE：THREE.Shape 矩形板 + ExtrudeGeometry 擠出厚度 t（免 CSG）；
+// dims 皆公尺：w=X 寬、d=Z 深、t=Y 厚。預設水平（法線朝上，樓板姿態），底面貼 y=0。
+// def.holes（可選）：圓孔 {x,z,r} 或方孔 {x,z,w,d}，座標相對板中心（公尺），以 THREE.Path 挖孔。
+builders.plate = function ({ w, d, t }, def) {
+  const g = new THREE.Group();
+  const W = w ?? 2, D = d ?? 1.5, T = t ?? 0.012;
+  // Shape 於 XZ 平面繪製（本地用 X-Y），擠出後繞 X 轉平放：擠出方向(+Z)→Y。
+  const shape = new THREE.Shape();
+  shape.moveTo(-W / 2, -D / 2);
+  shape.lineTo(W / 2, -D / 2);
+  shape.lineTo(W / 2, D / 2);
+  shape.lineTo(-W / 2, D / 2);
+  shape.closePath();
+  const holes = def?.holes;
+  if (Array.isArray(holes)) {
+    for (const hole of holes) {
+      if (!hole) continue;
+      const cx = hole.x ?? 0, cz = hole.z ?? 0;
+      const path = new THREE.Path();
+      if (hole.r != null) { // 圓孔
+        path.absarc(cx, cz, hole.r, 0, Math.PI * 2, true);
+      } else if (hole.w != null && hole.d != null) { // 方孔
+        const hw = hole.w / 2, hd = hole.d / 2;
+        path.moveTo(cx - hw, cz - hd);
+        path.lineTo(cx - hw, cz + hd);
+        path.lineTo(cx + hw, cz + hd);
+        path.lineTo(cx + hw, cz - hd);
+        path.closePath();
+      } else {
+        continue;
+      }
+      shape.holes.push(path);
+    }
+  }
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: T, bevelEnabled: false, steps: 1 });
+  // 擠出沿本地 +Z（0→T）；繞 X 轉 -90° 使厚度沿世界 Y，且深 D 落在世界 Z。
+  geo.rotateX(-Math.PI / 2);
+  // 旋轉後板佔 y∈[-T,0]（原 z∈[0,T]→y∈[-T,0]），上移 T 使底面貼 y=0。
+  geo.translate(0, T, 0);
+  const mesh = new THREE.Mesh(geo, std(0x9aa4ad, { metalness: 0.5, roughness: 0.55 }));
+  g.add(mesh);
+  return g;
+};
+
 // 素材目錄（編輯器面板用）
 export const ASSET_CATEGORIES = [
   { name: '反應設備', items: [
@@ -1826,6 +1870,7 @@ export const ASSET_CATEGORIES = [
     { type: 'cageladder', name: '籠式直爬梯', dims: { h: 6 }, prefix: 'LD' },
     { type: 'psupport', name: '管線支撐', dims: { h: 1.2, r: 0.12 }, prefix: 'PS' },
     { type: 'splat', name: '平台', dims: { w: 3, d: 2.4, elev: 3 }, prefix: 'PF' },
+    { type: 'plate', name: '鋼板/樓板 PANE', dims: { w: 2, d: 1.5, t: 0.012 }, prefix: 'PL' },
   ]},
   { name: '儀電橋架', discipline: 'elec', items: [
     { type: 'cabletray', name: '電纜橋架（直線）', dims: { w: 0.45, len: 6, elev: 3 }, prefix: 'CT' },

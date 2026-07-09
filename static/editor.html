@@ -443,6 +443,18 @@
             </div>
             <div class="rgroup-label">內容</div>
           </div>
+          <!-- 點雲 as-built（brownfield）：載入雷射掃描 .ply 疊合現況 -->
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn warn" id="btn-pc-load" title="載入雷射掃描點雲 .ply（本機檔，不上傳）疊合既有廠現況"><span class="ric" data-ic="scan"></span>點雲</button>
+              <button class="rbtn" id="btn-pc-toggle" title="點雲顯示/隱藏切換" disabled><span class="ric" data-ic="eye"></span>顯示</button>
+              <button class="rbtn" id="btn-pc-size" title="循環切換點大小（3/10/20mm）" disabled><span class="ric" data-ic="grid"></span>點徑</button>
+              <button class="rbtn" id="btn-pc-opacity" title="循環切換不透明度（100/60/30%）" disabled><span class="ric" data-ic="cap"></span>透明</button>
+              <button class="rbtn" id="btn-pc-clear" title="移除點雲（釋放 GPU 資源）" disabled><span class="ric" data-ic="clear"></span>移除</button>
+              <input type="file" id="pc-file" accept=".ply" style="display:none">
+            </div>
+            <div class="rgroup-label">點雲 as-built</div>
+          </div>
           <div class="rgroup">
             <div class="rgroup-tools">
               <button class="rbtn active" id="btn-lay-eq" title="設備圖層顯示切換"><span class="ric" data-ic="laycube"></span>設備</button>

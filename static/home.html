@@ -252,6 +252,26 @@
       </a>
     </div>
 
+    <div class="group-title" data-i18n="grp.dtwin">數據孿生</div>
+    <div class="cards">
+      <a class="card" href="/static/incinerator_flowsheet.html">
+        <div class="head">
+          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="6" height="6" rx="1"/><rect x="15" y="4" width="6" height="6" rx="1"/><rect x="9" y="14" width="6" height="6" rx="1"/><path d="M6 10v2a2 2 0 0 0 2 2h1"/><path d="M18 10v2a2 2 0 0 1-2 2h-1"/></svg>
+          <h2 data-i18n="c.flow.h">流程耦合模擬</h2>
+        </div>
+        <p data-i18n="c.flow.p">多 block 串接的即時流程模擬：每個單元綁定已發布模型 API，拉桿即時調參、上下游耦合傳遞、一鍵配方最佳化。以焚化爐 8-block 全套為示範。</p>
+        <span class="go" data-i18n="c.flow.go">開啟流程模擬</span>
+      </a>
+      <a class="card" href="/static/block_health.html">
+        <div class="head">
+          <svg viewBox="0 0 24 24"><path d="M3 12h4l2-6 4 12 2-6 2 3h4"/></svg>
+          <h2 data-i18n="c.health.h">設備健康度 PHM</h2>
+        </div>
+        <p data-i18n="c.health.p">把異常偵測／預測模型綁進設備 block：即時風險值、健康門檻與預警。以壓縮機 K-101 為示範，模型直接由 model API 供給。</p>
+        <span class="go" data-i18n="c.health.go">開啟健康度示範</span>
+      </a>
+    </div>
+
     <div class="group-title" data-i18n="grp.twin">視覺孿生</div>
     <div class="cards">
       <a class="card" href="/twin">
@@ -280,6 +300,18 @@
       </a>
     </div>
 
+    <div class="group-title" data-i18n="grp.mapi">模型服務 · API</div>
+    <div class="cards">
+      <a class="card" href="/static/model_api.html">
+        <div class="head">
+          <svg viewBox="0 0 24 24"><path d="M8 3L4 7l4 4"/><path d="M16 3l4 4-4 4"/><path d="M13 15l-2 6"/></svg>
+          <h2 data-i18n="c.mapi.h">模型 API 控制台</h2>
+        </div>
+        <p data-i18n="c.mapi.p">發布制模型註冊表（publish-registry）：訓練好的模型發布成穩定 model_key，統一 predict／評估／最佳化端點對外服務，附使用量與稽核。數據孿生的每個 block 即由此取用（L3）。</p>
+        <span class="go" data-i18n="c.mapi.go">進入 API 控制台</span>
+      </a>
+    </div>
+
     <footer class="site">
       <span data-i18n="footer.l">J.S Process Intelligence</span>
       <span data-i18n="footer.r">OpenUSD 相容・OPC UA 就緒</span>
@@ -305,6 +337,10 @@
       's6.h': { en: '3D scene refinement' }, 's6.p': { en: 'Adjust the draft in the 3D workspace: move/retype equipment, route pipes, fill the scene from the asset library — editing a draft always beats building from scratch.' }, 's6.go': { en: 'Open editor' },
       's7.h': { en: 'Twin view — data on 3D' }, 's7.p': { en: 'Live data heatmaps over the plant, anomaly-injection AI matching, construction-clash and EHS simulation — your data comes alive in the plant.' }, 's7.go': { en: 'Open twin view' },
       'grp.data': { en: 'DATA INTELLIGENCE' }, 'grp.twin': { en: 'VISUAL TWIN' },
+      'grp.dtwin': { en: 'DATA TWIN' }, 'grp.mapi': { en: 'MODEL SERVICE · API' },
+      'c.flow.h': { en: 'Process Co-simulation' }, 'c.flow.p': { en: 'Live multi-block process simulation: each unit binds a published model API, with live slider tuning, upstream/downstream coupling and one-click recipe optimization. Demonstrated on the full 8-block incinerator.' }, 'c.flow.go': { en: 'Open flowsheet' },
+      'c.health.h': { en: 'Equipment Health (PHM)' }, 'c.health.p': { en: 'Bind anomaly-detection / prediction models into an equipment block: live risk value, health thresholds and early warning. Demonstrated on compressor K-101, fed directly by the model API.' }, 'c.health.go': { en: 'Open health demo' },
+      'c.mapi.h': { en: 'Model API Console' }, 'c.mapi.p': { en: 'Publish-registry model registry: publish a trained model into a stable model_key, serving unified predict / evaluate / optimize endpoints with usage metering and audit. Every data-twin block consumes it (L3).' }, 'c.mapi.go': { en: 'Open API console' },
       'c.workbench.h': { en: 'Data Workbench' }, 'c.workbench.p': { en: 'Upload process data; explore with the column card wall, box-select to exclude/extract, replay the edit history, run data-health and property modules (CoolProp extrapolation guardrails).' }, 'c.workbench.go': { en: 'Open data prep' },
       'c.quality.h': { en: 'Quality Prediction' }, 'c.quality.p': { en: 'Regression / classification modeling: auto-compare many algorithms or hand-tune hyperparameters, cross-validation ranking, feature importance, on-demand evaluation.' }, 'c.quality.go': { en: 'Open model workspace' },
       'c.ts.h': { en: 'Time-series Forecast' }, 'c.ts.p': { en: 'Forecast future trends from the target’s own lags plus exogenous variables; walk-forward validation (no shuffling), actual-vs-predicted over time.' }, 'c.ts.go': { en: 'Build time-series model' },

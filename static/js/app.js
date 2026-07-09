@@ -34,6 +34,13 @@ if (SCENE_ID !== 'demo') {
   editBtn.style.display = '';
 }
 
+// P&ID 自動生成場景：不掛「工安情境」底欄——安全情境屬於獨立 block，
+// 應由使用者另建 block 連接，而非在偵測生圖上全域顯示。
+const IS_PID_SCENE = SCENE_ID.startsWith('pid-');
+if (IS_PID_SCENE) {
+  document.getElementById('scenario-bar')?.style.setProperty('display', 'none');
+}
+
 // ---------------------------------------------------------------- 基礎場景
 const viewport = document.getElementById('viewport');
 const scene = new THREE.Scene();

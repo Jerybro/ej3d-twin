@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>模型服務 · Model API｜J.S Process Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --blue: #046AFB; --bg: #F6F7FA; --white: #ffffff;
+      --bdr: #DBDDE0; --text: #061027; --text2: #555555;
+      --green: #059669; --green-deep: #052E22; --amber: #B45309; --red: #C0392B;
+      --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { min-height: 100%; background: var(--bg); color: var(--text);
+      font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", sans-serif; font-size: 15px; }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 32px 56px; }
+    header.site { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+    .brand { display: inline-flex; align-items: center; justify-content: center;
+      height: 32px; padding: 0 10px; border-radius: 8px; background: var(--green-deep);
+      color: #fff; font-size: 13px; font-weight: 600; letter-spacing: 0.5px; }
+    .logo { font-size: 20px; font-weight: 600; }
+    .site-sub { color: var(--text2); font-size: 13px; }
+    .back { margin-left: auto; font-size: 13.5px; color: var(--blue); text-decoration: none;
+      border: 1px solid var(--bdr); border-radius: 7px; padding: 7px 12px; background: var(--white); }
+    .back:hover { border-color: var(--blue); }
+    h1 { font-size: 22px; font-weight: 600; margin: 14px 0 4px; }
+    .tagline { color: var(--text2); font-size: 13.5px; margin-bottom: 22px; line-height: 1.7; }
+    .group-title { font-size: 13px; color: var(--text2); letter-spacing: 1px; margin: 26px 0 12px;
+      display: flex; align-items: center; gap: 10px; }
+    .group-title .cnt { font-size: 12px; color: var(--text2); background: var(--white);
+      border: 1px solid var(--bdr); border-radius: 20px; padding: 1px 9px; font-weight: 500; }
+
+    /* 三層架構 */
+    .layers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    @media (max-width: 760px) { .layers { grid-template-columns: 1fr; } }
+    .layer { background: var(--white); border: 1px solid var(--bdr); border-radius: 8px; padding: 15px 17px; }
+    .layer .tag { font-size: 11.5px; font-weight: 600; color: var(--blue);
+      background: rgba(4,106,251,0.08); border-radius: 5px; padding: 2px 8px; display: inline-block; }
+    .layer h3 { font-size: 14.5px; font-weight: 600; margin: 9px 0 5px; }
+    .layer p { font-size: 12.5px; color: var(--text2); line-height: 1.65; }
+
+    /* 模型表 */
+    .panel { background: var(--white); border: 1px solid var(--bdr); border-radius: 10px; overflow: hidden; }
+    .tbl-scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 720px; }
+    th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--bdr); vertical-align: middle; }
+    th { font-size: 11.5px; letter-spacing: 0.4px; color: var(--text2); font-weight: 600;
+      background: #FafBfC; position: sticky; top: 0; }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: #FafBfC; }
+    .mk { font-family: var(--mono); font-size: 12px; color: var(--text); }
+    .mk-copy { cursor: pointer; color: var(--text2); border: none; background: none; font-size: 11px;
+      margin-left: 6px; text-decoration: underline; font-family: inherit; }
+    .dn { font-weight: 500; }
+    .chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 5px;
+      background: rgba(5,150,105,0.10); color: var(--green-deep); margin: 1px 3px 1px 0; }
+    .chip.pt { background: rgba(4,106,251,0.10); color: var(--blue); }
+    .badge-on { color: var(--green); font-weight: 600; }
+    .badge-off { color: var(--text2); }
+    .try-btn { font-size: 12px; color: var(--blue); border: 1px solid var(--bdr); border-radius: 6px;
+      padding: 5px 10px; background: var(--white); cursor: pointer; font-family: inherit; white-space: nowrap; }
+    .try-btn:hover { border-color: var(--blue); }
+    .empty { padding: 34px; text-align: center; color: var(--text2); font-size: 13.5px; line-height: 1.8; }
+
+    /* 試呼叫 */
+    .tester { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    @media (max-width: 820px) { .tester { grid-template-columns: 1fr; } }
+    .tcol { background: var(--white); border: 1px solid var(--bdr); border-radius: 10px; padding: 17px 18px; }
+    .tcol h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .tcol .sub { font-size: 12px; color: var(--text2); margin-bottom: 12px; }
+    select, input.fv { width: 100%; padding: 8px 10px; border: 1px solid var(--bdr); border-radius: 7px;
+      font-size: 13px; font-family: inherit; color: var(--text); background: var(--white); }
+    select { margin-bottom: 12px; }
+    .feat-row { display: grid; grid-template-columns: 1fr 120px; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .feat-row label { font-size: 12.5px; color: var(--text); font-family: var(--mono); }
+    .go-btn { margin-top: 10px; width: 100%; padding: 10px; border: none; border-radius: 8px;
+      background: var(--blue); color: #fff; font-size: 13.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .go-btn:hover { background: #0357d6; }
+    .go-btn:disabled { background: #9db4d8; cursor: default; }
+    pre.out { background: #0e141b; color: #d6e2ea; border-radius: 8px; padding: 13px 14px; font-family: var(--mono);
+      font-size: 12px; line-height: 1.55; overflow-x: auto; white-space: pre-wrap; word-break: break-word; margin-top: 4px; min-height: 60px; }
+    .headline { font-size: 13.5px; margin-bottom: 8px; padding: 9px 12px; border-radius: 8px;
+      background: rgba(5,150,105,0.08); color: var(--green-deep); font-weight: 500; }
+    .headline.err { background: rgba(192,57,43,0.08); color: var(--red); }
+    .headline.warn { background: rgba(180,83,9,0.10); color: var(--amber); }
+    .hint { font-size: 12px; color: var(--text2); margin-top: 10px; line-height: 1.7; }
+
+    /* 端點表 */
+    .ep { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--bdr); font-size: 13px; }
+    .ep:last-child { border-bottom: none; }
+    .ep .m { font-family: var(--mono); font-size: 11px; font-weight: 600; border-radius: 5px; padding: 2px 8px; min-width: 54px; text-align: center; }
+    .ep .m.get { background: rgba(5,150,105,0.12); color: var(--green-deep); }
+    .ep .m.post { background: rgba(4,106,251,0.12); color: var(--blue); }
+    .ep .m.patch { background: rgba(180,83,9,0.12); color: var(--amber); }
+    .ep .m.del { background: rgba(192,57,43,0.10); color: var(--red); }
+    .ep .path { font-family: var(--mono); font-size: 12px; color: var(--text); }
+    .ep .desc { color: var(--text2); font-size: 12px; margin-left: auto; text-align: right; }
+    .example { position: relative; }
+    .example pre { background: #0e141b; color: #d6e2ea; border-radius: 8px; padding: 14px; font-family: var(--mono);
+      font-size: 12px; line-height: 1.6; overflow-x: auto; }
+    .example .cp { position: absolute; top: 10px; right: 10px; font-size: 11.5px; color: #d6e2ea;
+      background: rgba(255,255,255,0.10); border: none; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-family: inherit; }
+    .example .cp:hover { background: rgba(255,255,255,0.20); }
+    footer.site { margin-top: 40px; color: var(--text2); font-size: 12.5px;
+      border-top: 1px solid var(--bdr); padding-top: 16px; display: flex; justify-content: space-between; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="site">
+      <span class="brand">J.S</span>
+      <span class="logo">Process Intelligence</span>
+      <span class="site-sub">模型服務 · Model API</span>
+      <a class="back" href="/">← 回首頁</a>
+    </header>
+    <h1>模型 API 控制台</h1>
+    <p class="tagline">
+      發布制模型註冊表（publish-registry）：把訓練好的模型發布成穩定 <code>model_key</code>，
+      以統一契約對外提供 predict／評估／最佳化端點；數位孿生的每個 block 即由此取用模型，並附使用量與稽核。
+    </p>
+
+    <div class="group-title">三層架構</div>
+    <div class="layers">
+      <div class="layer">
+        <span class="tag">L1 · 資料</span>
+        <h3>資料 API</h3>
+        <p>資料集與欄位的統一存取層（<code>/agatha/data</code>）。模型的輸入特徵源頭，對標 Tukey 資料facade。</p>
+      </div>
+      <div class="layer">
+        <span class="tag">L2 · 發布註冊</span>
+        <h3>模型註冊 API</h3>
+        <p>本頁。把 (dataset_id, model_id) 發布成穩定 <code>model_key</code>，脫鉤後仍可統一 predict／治理開關。</p>
+      </div>
+      <div class="layer">
+        <span class="tag">L3 · 孿生綁定</span>
+        <h3>Block 取用</h3>
+        <p>孿生流程的每個 block 以 <code>model_key</code> 呼叫 predict，把模型接進即時模擬與健康度預警。</p>
+      </div>
+    </div>
+
+    <div class="group-title">已發布模型 <span class="cnt" id="model-count">載入中…</span></div>
+    <div class="panel">
+      <div class="tbl-scroll">
+        <table id="model-table">
+          <thead>
+            <tr>
+              <th>模型</th><th>型別 / 任務</th><th>能力</th><th>目標</th>
+              <th>特徵</th><th>使用次數</th><th>狀態</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="model-rows">
+            <tr><td colspan="8" class="empty">載入中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="group-title">線上試呼叫 · predict</div>
+    <div class="tester">
+      <div class="tcol">
+        <h3>輸入</h3>
+        <div class="sub">選一個模型，填入特徵值後送出（統一 predict 契約）。</div>
+        <select id="model-select"><option value="">— 選擇模型 —</option></select>
+        <div id="feature-inputs"></div>
+        <button class="go-btn" id="predict-btn" disabled>送出 predict</button>
+        <div class="hint" id="tester-hint">L3 block 綁定時，只需 <code>model_key</code> ＋ inputs 即可呼叫，無需知道底層 (sid, mid)。</div>
+      </div>
+      <div class="tcol">
+        <h3>回應</h3>
+        <div class="sub">回傳依模型 task 而定（品質→預測值、異常→風險值/門檻）。</div>
+        <div id="result-headline"></div>
+        <pre class="out" id="result-out">尚未呼叫。</pre>
+      </div>
+    </div>
+
+    <div class="group-title">API 端點（namespace <code>/agatha</code>）</div>
+    <div class="panel" style="margin-bottom:18px">
+      <div class="ep"><span class="m post">POST</span><span class="path">/agatha/model/publish/</span><span class="desc">發布 (dataset_id, model_id) → model_key</span></div>
+      <div class="ep"><span class="m get">GET</span><span class="path">/agatha/find_model_list/</span><span class="desc">模型清單（?include_usage=yes 附使用量）</span></div>
+      <div class="ep"><span class="m get">GET</span><span class="path">/agatha/model/{model_key}/capability/</span><span class="desc">能力與 input/output schema（綁定前查）</span></div>
+      <div class="ep"><span class="m post">POST</span><span class="path">/agatha/model/{model_key}/predict/</span><span class="desc">統一推論（L3 核心）</span></div>
+      <div class="ep"><span class="m post">POST</span><span class="path">/agatha/model/{model_key}/evaluate/</span><span class="desc">評估指標</span></div>
+      <div class="ep"><span class="m post">POST</span><span class="path">/agatha/model/{model_key}/optimize/</span><span class="desc">配方最佳化（reg/hybrid）</span></div>
+      <div class="ep"><span class="m post">POST</span><span class="path">/agatha/model/{model_key}/threshold/</span><span class="desc">異常門檻試算（anomaly）</span></div>
+      <div class="ep"><span class="m patch">PATCH</span><span class="path">/agatha/model/{model_key}/enabled/</span><span class="desc">啟用/停用（治理開關）</span></div>
+      <div class="ep"><span class="m get">GET</span><span class="path">/agatha/model/{model_key}/usage/</span><span class="desc">單模型使用量與稽核</span></div>
+      <div class="ep"><span class="m del">DEL</span><span class="path">/agatha/model/{model_key}/</span><span class="desc">移出註冊表（不刪底層）</span></div>
+    </div>
+
+    <div class="group-title">呼叫範例</div>
+    <div class="example">
+      <button class="cp" id="copy-example">複製</button>
+      <pre id="example-code">// L3 block 綁定 — 只需 model_key + inputs
+const r = await fetch('/agatha/model/&lt;MODEL_KEY&gt;/predict/', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ inputs: { feature_a: 1.23, feature_b: 4.56 } })
+});
+const out = await r.json();   // → 預測值 / 風險值（依 task）</pre>
+    </div>
+
+    <footer class="site">
+      <span>J.S Process Intelligence · Model API（publish-registry）</span>
+      <span>對標 Tukey /agatha 命名空間</span>
+    </footer>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const API = '/agatha';
+    let MODELS = [];
+
+    function chip(text, cls) { return `<span class="chip ${cls || ''}">${text}</span>`; }
+    function esc(s) { return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+    function fmtTime(t) { if (!t) return '—'; try { return new Date(t).toLocaleString('zh-TW', { hour12: false }); } catch { return t; } }
+
+    async function loadModels() {
+      try {
+        const r = await fetch(`${API}/find_model_list/?include_usage=yes&only_enabled=no`);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        MODELS = await r.json();
+      } catch (e) {
+        $('model-count').textContent = '讀取失敗';
+        $('model-rows').innerHTML = `<tr><td colspan="8" class="empty">無法讀取模型清單：${esc(e.message)}<br>請確認 server 已啟動、model API 已掛載。</td></tr>`;
+        return;
+      }
+      $('model-count').textContent = `${MODELS.length} 個`;
+      renderTable();
+      renderSelect();
+    }
+
+    function renderTable() {
+      const tb = $('model-rows');
+      if (!MODELS.length) {
+        tb.innerHTML = `<tr><td colspan="8" class="empty">
+          尚無已發布模型。<br>請到「模型工作區」訓練模型後，以 <code>POST /agatha/model/publish/</code> 發布，
+          發布後即會出現在此並可供孿生 block 綁定。</td></tr>`;
+        return;
+      }
+      tb.innerHTML = MODELS.map((m) => {
+        const caps = (m.capabilities || []).map((c) => chip(c)).join('') || '<span style="color:#999">—</span>';
+        const feats = (m.features || []).length;
+        const on = m.enabled;
+        return `<tr>
+          <td>
+            <div class="dn">${esc(m.display_name || m.model_key)}</div>
+            <span class="mk">${esc(m.model_key)}</span>
+            <button class="mk-copy" data-copy="${esc(m.model_key)}">複製</button>
+          </td>
+          <td>${chip(esc(m.product_type || '—'), 'pt')}<div style="color:#888;font-size:11px;margin-top:2px">${esc(m.task || '')}</div></td>
+          <td>${caps}</td>
+          <td>${esc(m.target ?? '—')}</td>
+          <td>${feats}</td>
+          <td>${m.total_calls ?? 0}<div style="color:#888;font-size:11px;margin-top:2px">${fmtTime(m.last_used_at)}</div></td>
+          <td>${on ? '<span class="badge-on">啟用</span>' : '<span class="badge-off">停用</span>'}</td>
+          <td><button class="try-btn" data-try="${esc(m.model_key)}">試呼叫 →</button></td>
+        </tr>`;
+      }).join('');
+      tb.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => copy(b.dataset.copy, b)));
+      tb.querySelectorAll('[data-try]').forEach((b) => b.addEventListener('click', () => {
+        $('model-select').value = b.dataset.try;
+        onSelectModel();
+        $('model-select').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }));
+    }
+
+    function renderSelect() {
+      const sel = $('model-select');
+      sel.innerHTML = '<option value="">— 選擇模型 —</option>' +
+        MODELS.map((m) => `<option value="${esc(m.model_key)}">${esc(m.display_name || m.model_key)}（${esc(m.product_type || m.task || '')}）</option>`).join('');
+    }
+
+    async function onSelectModel() {
+      const key = $('model-select').value;
+      const box = $('feature-inputs');
+      $('predict-btn').disabled = true;
+      if (!key) { box.innerHTML = ''; return; }
+      box.innerHTML = '<div class="hint">載入特徵…</div>';
+      let cap;
+      try {
+        const r = await fetch(`${API}/model/${encodeURIComponent(key)}/capability/`);
+        cap = await r.json();
+      } catch (e) { box.innerHTML = `<div class="hint">無法讀取能力：${esc(e.message)}</div>`; return; }
+      const feats = (cap.input_schema?.features || []).map((f) => f.name);
+      if (!feats.length) { box.innerHTML = '<div class="hint">此模型無宣告特徵。</div>'; }
+      else {
+        box.innerHTML = feats.map((f) =>
+          `<div class="feat-row"><label>${esc(f)}</label><input class="fv" data-feat="${esc(f)}" type="number" step="any" placeholder="0" /></div>`
+        ).join('');
+      }
+      const canPredict = (cap.capabilities || []).includes('predict');
+      $('predict-btn').disabled = false;
+      $('tester-hint').innerHTML = canPredict
+        ? `能力：${(cap.capabilities || []).map((c) => chip(c)).join('')}`
+        : `此模型能力為 ${(cap.capabilities || []).map((c) => chip(c)).join('')}，predict 可能回 409；仍可送出觀察回應。`;
+    }
+
+    async function doPredict() {
+      const key = $('model-select').value;
+      if (!key) return;
+      const inputs = {};
+      document.querySelectorAll('#feature-inputs .fv').forEach((el) => {
+        if (el.value !== '') inputs[el.dataset.feat] = Number(el.value);
+      });
+      $('predict-btn').disabled = true;
+      $('result-headline').innerHTML = '';
+      $('result-out').textContent = '呼叫中…';
+      try {
+        const r = await fetch(`${API}/model/${encodeURIComponent(key)}/predict/`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ inputs, source: 'console' }),
+        });
+        const data = await r.json();
+        $('result-out').textContent = JSON.stringify(data, null, 2);
+        if (!r.ok) {
+          $('result-headline').innerHTML = `<div class="headline err">${r.status}　${esc(data.detail || '呼叫失敗')}</div>`;
+        } else {
+          const p = Array.isArray(data.predictions) && data.predictions.length ? data.predictions[0] : data;
+          const warn = p && (p.over_threshold === true || p.anomaly === true);
+          $('result-headline').innerHTML = `<div class="headline ${warn ? 'warn' : ''}">${esc(headlineOf(data))}</div>`;
+        }
+      } catch (e) {
+        $('result-out').textContent = String(e);
+        $('result-headline').innerHTML = `<div class="headline err">${esc(e.message)}</div>`;
+      } finally {
+        $('predict-btn').disabled = false;
+      }
+    }
+
+    function headlineOf(d) {
+      // 回應可能是 {predictions:[{...}]}（統一 predict）或扁平 dict；兩者都處理。
+      if (d == null) return '（無回應）';
+      const p = Array.isArray(d.predictions) && d.predictions.length ? d.predictions[0] : d;
+      const num = (v) => (typeof v === 'number' ? v : Number(v));
+      const parts = [];
+      if ('risk' in p) parts.push(`風險值 ${num(p.risk).toFixed(3)}`);
+      if ('health' in p) parts.push(`健康度 ${num(p.health).toFixed(1)}`);
+      if ('over_threshold' in p) parts.push(p.over_threshold ? '⚠ 超過門檻' : '正常範圍');
+      if (!parts.length) {
+        for (const k of ['prediction', 'value', 'y', 'pred', 'yhat', 'score', 'label']) {
+          if (k in p) { parts.push(`${k} = ${typeof p[k] === 'number' ? num(p[k]).toFixed(4) : p[k]}`); break; }
+        }
+      }
+      if (Array.isArray(d.predictions) && d.predictions.length > 1) parts.push(`（共 ${d.predictions.length} 筆）`);
+      return parts.length ? parts.join(' · ') : '已回應，見下方 JSON。';
+    }
+
+    async function copy(text, btn) {
+      try { await navigator.clipboard.writeText(text); const t = btn.textContent; btn.textContent = '已複製'; setTimeout(() => btn.textContent = t, 1200); }
+      catch { /* no-op */ }
+    }
+
+    $('model-select').addEventListener('change', onSelectModel);
+    $('predict-btn').addEventListener('click', doPredict);
+    $('copy-example').addEventListener('click', () => copy($('example-code').textContent, $('copy-example')));
+    loadModels();
+  </script>
+</body>
+</html>

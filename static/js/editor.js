@@ -710,6 +710,7 @@ function updateBranchPipes() {
 function loadSceneData(data, id) {
   transform.detach();
   clearNodeHandles();
+  resetReviewRender();   // 換場景前清掉 X-ray/線框 override 記錄，避免持有舊 mesh 參照
   // 移除群組前先清 CSS2D 標籤 DOM（設備/管嘴/坡度 ‰ 標籤掛在 overlay，scene.remove 不回收 → undo/redo 會殘留孤兒）
   for (const { group } of eqObjects.values()) { group.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); }); scene.remove(group); }
   eqObjects.clear();
@@ -768,6 +769,7 @@ function setMode(m) {
   ductDraw = false;
   document.getElementById('btn-measure').classList.remove('active');
   document.getElementById('btn-measure-angle').classList.remove('active');
+  document.getElementById('btn-measure-clear').classList.remove('active');
   document.getElementById('btn-dim3d').classList.remove('active');
   dimPts = [];
   document.getElementById('pipe-node-btn').classList.remove('active');
@@ -1990,6 +1992,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   }
 
   if (mode === 'measure') {
+    if (measureMode === 'clearance') { addClearancePick(e); return; }
     const hit = pickObject(e);
     const pt = hit ? hit.point : groundPoint(e);
     if (pt) addMeasurePoint(pt.clone());
@@ -2408,23 +2411,28 @@ document.getElementById('pipe-node-btn').addEventListener('click', () => {
 // ------------------------------------------------------------ 量測工具（E3D Measure：距離＋角度、持久標註）
 let measurePts = [];
 let measureGroup = null;      // 標註持久群（球/線/弧/CSS2D 標籤）
-let measureMode = 'dist';     // 'dist' | 'angle'
+let measureMode = 'dist';     // 'dist' | 'angle' | 'clearance'
 let lastMeasureMode = 'dist'; // 空白鍵重複上次量測用
+let clearancePick = [];       // 淨空模式：暫存已點的兩個物件 { box, label }
 const measureLineMat = new THREE.LineBasicMaterial({ color: 0xffaa3c });
+const MEASURE_BTN = { dist: 'btn-measure', angle: 'btn-measure-angle', clearance: 'btn-measure-clear' };
 
 function startMeasure(kind) {
   if (mode === 'measure' && measureMode === kind) { setMode('idle'); return; }
   setMode('measure');
   measureMode = kind;
   lastMeasureMode = kind;
-  const btn = document.getElementById(kind === 'dist' ? 'btn-measure' : 'btn-measure-angle');
-  btn.classList.add('active');
+  clearancePick = [];
+  document.getElementById(MEASURE_BTN[kind]).classList.add('active');
   setHint(kind === 'dist'
     ? '量距離：點擊<b>兩點</b>（設備表面或地面）；可連續量，Esc 結束'
-    : '量角度：點<b>三點</b>，<b>第一點＝頂點</b>；可連續量，Esc 結束');
+    : kind === 'angle'
+    ? '量角度：點<b>三點</b>，<b>第一點＝頂點</b>；可連續量，Esc 結束'
+    : '淨空量測：點<b>兩個物件</b>（設備／管／結構），顯示包圍盒最短間距；Esc 結束');
 }
 document.getElementById('btn-measure').addEventListener('click', () => startMeasure('dist'));
 document.getElementById('btn-measure-angle').addEventListener('click', () => startMeasure('angle'));
+document.getElementById('btn-measure-clear').addEventListener('click', () => startMeasure('clearance'));
 
 function measureNote(text, at) {
   const el = document.createElement('div');
@@ -2472,9 +2480,79 @@ function addMeasurePoint(pt) {
   }
 }
 
+// 淨空量測（nearest-surface clearance）：resolve 命中物件 → 頂層 group＋標籤，取世界 AABB
+function resolveClearanceTarget(e) {
+  const hit = pickObject(e);
+  if (!hit) return null;
+  const o = hit.obj;
+  let group = null, label = null;
+  if (o.userData.eqTag !== undefined && eqObjects.has(o.userData.eqTag)) {
+    group = eqObjects.get(o.userData.eqTag).group;
+    label = o.userData.eqTag;
+  } else if (o.userData.pipeIndex !== undefined && pipeObjects[o.userData.pipeIndex]) {
+    group = pipeObjects[o.userData.pipeIndex].group;
+    label = `PIPE #${o.userData.pipeIndex + 1}`;
+  } else {
+    return null;
+  }
+  const box = new THREE.Box3().setFromObject(group);
+  if (box.isEmpty()) return null;
+  return { box, label };
+}
+
+// 兩 AABB 最短間距：逐軸求最近點對；分離軸取相鄰端點、重疊軸取重疊區中點。間距 0 表示重疊/接觸
+function clearanceGap(boxA, boxB) {
+  const a = new THREE.Vector3(), b = new THREE.Vector3();
+  for (const ax of ['x', 'y', 'z']) {
+    if (boxA.max[ax] < boxB.min[ax]) { a[ax] = boxA.max[ax]; b[ax] = boxB.min[ax]; }
+    else if (boxB.max[ax] < boxA.min[ax]) { a[ax] = boxA.min[ax]; b[ax] = boxB.max[ax]; }
+    else {
+      const lo = Math.max(boxA.min[ax], boxB.min[ax]);
+      const hi = Math.min(boxA.max[ax], boxB.max[ax]);
+      a[ax] = b[ax] = (lo + hi) / 2;
+    }
+  }
+  return { a, b, gap: a.distanceTo(b) };
+}
+
+function addClearancePick(e) {
+  const t = resolveClearanceTarget(e);
+  if (!t) { setHint('淨空量測：請點擊<b>設備／管線</b>實體（非地面）；Esc 結束'); return; }
+  if (!measureGroup) { measureGroup = new THREE.Group(); scene.add(measureGroup); }
+  clearancePick.push(t);
+  // 標記已點物件的包圍盒中心
+  const c = t.box.getCenter(new THREE.Vector3());
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), nodeMat);
+  dot.position.copy(c);
+  measureGroup.add(dot);
+
+  if (clearancePick.length === 2) {
+    const [t1, t2] = clearancePick;
+    const { a, b, gap } = clearanceGap(t1.box, t2.box);
+    measureGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), measureLineMat));
+    const mid = a.clone().lerp(b, 0.5).add(new THREE.Vector3(0, 0.4, 0));
+    measureNote(`淨空 ${fmtLen(gap)}｜${t1.label} ↔ ${t2.label}`, mid);
+    clearancePick = [];
+    setHint(`淨空 <b>${fmtLen(gap)}</b>（${t1.label} ↔ ${t2.label}）。繼續點兩物件，Esc 結束`);
+  } else {
+    setHint(`已選 <b>${t.label}</b>，再點<b>第二個物件</b>量淨空；Esc 結束`);
+  }
+}
+
 function clearMeasure() {
   measurePts = [];
-  if (measureGroup) { scene.remove(measureGroup); measureGroup = null; }
+  clearancePick = [];
+  if (measureGroup) {
+    measureGroup.traverse((o) => {
+      if (o.isCSS2DObject) { o.element.remove(); return; }   // 清 CSS2D DOM，防孤兒標籤
+      o.geometry?.dispose();
+      if (o.material && o.material !== measureLineMat && o.material !== nodeMat) {
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
+      }
+    });
+    scene.remove(measureGroup);
+    measureGroup = null;
+  }
 }
 
 // ------------------------------------------------------------ 3D 持久尺寸標註（E3D Draw Linear Dimension：sceneData.dims 持久化）
@@ -3978,6 +4056,92 @@ function runConnectivityDock() {
   }));
 }
 document.getElementById('btn-connect-check').addEventListener('click', runConnectivityDock);
+
+// ------------------------------------------------------------ 審查工具：X-ray/線框＋截圖（e3d/feat-review）
+// 只作用於設備/管線實體 mesh；跳過已透明材質（保溫 insul、包絡、量測球/線等）與坡度箭頭標記。
+// 用 override 群集記錄每個被改 mesh 的原 { transparent, opacity, wireframe }，恢復時逐一還原、清空。
+let xrayOn = false;
+let wireframeOn = false;
+const renderOverride = new Map();   // mesh → { transparent, opacity, wireframe }
+
+function reviewMeshes() {
+  const out = [];
+  const collect = (root) => root.traverse((o) => {
+    if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
+    if (o.userData.insul || o.userData.slopeMarker || o.userData.transCone) return;  // 勿污染已透明/標記材質
+    out.push(o);
+  });
+  for (const { group } of eqObjects.values()) collect(group);
+  for (const p of pipeObjects) if (p) collect(p.group);
+  return out;
+}
+
+function rememberOverride(m) {
+  if (!renderOverride.has(m)) {
+    renderOverride.set(m, { transparent: m.material.transparent, opacity: m.material.opacity, wireframe: m.material.wireframe });
+  }
+}
+
+function applyRenderOverride() {
+  // 依 xray/wireframe 目前狀態，對現有實體 mesh 套用 override（先記錄原值）
+  for (const m of reviewMeshes()) {
+    rememberOverride(m);
+    m.material.transparent = xrayOn ? true : renderOverride.get(m).transparent;
+    m.material.opacity = xrayOn ? 0.25 : renderOverride.get(m).opacity;
+    m.material.wireframe = wireframeOn;
+    m.material.needsUpdate = true;
+  }
+}
+
+function restoreRenderOverride() {
+  // 全部關閉時：逐一還原原始材質狀態並清空記錄，避免污染
+  for (const [m, orig] of renderOverride) {
+    m.material.transparent = orig.transparent;
+    m.material.opacity = orig.opacity;
+    m.material.wireframe = orig.wireframe;
+    m.material.needsUpdate = true;
+  }
+  renderOverride.clear();
+}
+
+function syncReviewButtons() {
+  document.getElementById('btn-xray').classList.toggle('active', xrayOn);
+  document.getElementById('btn-wireframe').classList.toggle('active', wireframeOn);
+}
+
+// 換場景/重建前呼叫：清空 override 記錄與旗標（舊 mesh 即將被移除，不需逐一還原）
+function resetReviewRender() {
+  xrayOn = false;
+  wireframeOn = false;
+  renderOverride.clear();
+  syncReviewButtons();
+}
+
+document.getElementById('btn-xray').addEventListener('click', () => {
+  xrayOn = !xrayOn;
+  if (xrayOn || wireframeOn) applyRenderOverride(); else restoreRenderOverride();
+  syncReviewButtons();
+  setHint(xrayOn ? '透視 X-ray：<b>開</b>（再按恢復）' : '透視 X-ray：關');
+});
+
+document.getElementById('btn-wireframe').addEventListener('click', () => {
+  wireframeOn = !wireframeOn;
+  if (xrayOn || wireframeOn) applyRenderOverride(); else restoreRenderOverride();
+  syncReviewButtons();
+  setHint(wireframeOn ? '線框顯示：<b>開</b>（再按恢復）' : '線框顯示：關');
+});
+
+document.getElementById('btn-shot').addEventListener('click', () => {
+  renderer.render(scene, camera);  // preserveDrawingBuffer=false → 先渲染同幀再讀 buffer
+  const url = renderer.domElement.toDataURL('image/png');
+  const safe = String(sceneData?.plant?.name ?? 'scene').replace(/[^\w一-龥-]+/g, '_');
+  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${safe}_${ts}.png`;
+  a.click();
+  setHint('已輸出截圖 PNG');
+});
 
 // ------------------------------------------------------------ 視角書籤（E3D Save & Restore Views）
 function captureThumb() {

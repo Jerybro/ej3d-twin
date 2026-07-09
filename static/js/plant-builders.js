@@ -865,6 +865,41 @@ export function buildPrim(p) {
   } else if (p.kind === 'ctor') {
     // CTOR 圓環／彎頭：環中心半徑 r、管半徑 rt、弧角 ang（度）
     mesh = new THREE.Mesh(new THREE.TorusGeometry(d.r ?? 0.9, d.rt ?? 0.2, 16, 28, (d.ang ?? 90) * Math.PI / 180), std(0x9aa7b4));
+  } else if (p.kind === 'extr') {
+    // EXTR 擠出：沿 Y 擠出多邊形截面。dims.poly=[[x,z],...] 用之，否則以正 sides 邊形（半徑 r）
+    const shape = new THREE.Shape();
+    let poly = d.poly;
+    if (!Array.isArray(poly) || poly.length < 3) {
+      const sides = Math.max(3, Math.round(d.sides ?? 6));
+      const r = d.r ?? 0.8;
+      poly = [];
+      for (let i = 0; i < sides; i++) {
+        const a = Math.PI / 2 + (i * 2 * Math.PI) / sides;   // 頂點朝上起點
+        poly.push([Math.cos(a) * r, Math.sin(a) * r]);
+      }
+    }
+    shape.moveTo(poly[0][0], poly[0][1]);
+    for (let i = 1; i < poly.length; i++) shape.lineTo(poly[i][0], poly[i][1]);
+    shape.closePath();
+    const h = d.h ?? 2;
+    const g = new THREE.ExtrudeGeometry(shape, { depth: h, bevelEnabled: false });
+    // ExtrudeGeometry 在 XY 平面擠向 +Z；轉成沿 +Y 由 y=0 往上長
+    g.rotateX(-Math.PI / 2);
+    mesh = new THREE.Mesh(g, std(0x9aa7b4));
+  } else if (p.kind === 'revo') {
+    // REVO 迴轉：側輪廓繞 Y 迴轉。dims.prof=[[x,y],...] 用之；否則生 (r,0)→(0,h) 之 1/4 橢圓（碟形封頭）
+    let prof = d.prof;
+    if (!Array.isArray(prof) || prof.length < 2) {
+      const r = d.r ?? 1, h = d.h ?? 1, n = 12;
+      prof = [];
+      for (let i = 0; i <= n; i++) {
+        const t = (i / n) * (Math.PI / 2);
+        prof.push([Math.cos(t) * r, Math.sin(t) * h]);   // x=半徑, y=高
+      }
+    }
+    const pts = prof.map(([x, y]) => new THREE.Vector2(x, y));
+    const g = new THREE.LatheGeometry(pts, Math.max(3, Math.round(d.seg ?? 24)));
+    mesh = new THREE.Mesh(g, std(0x9aa7b4));
   } else {
     mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), std(0x8a97a5));
   }
@@ -2053,6 +2088,10 @@ export const ASSET_CATEGORIES = [
   { name: '基元（自建設備）', items: [
     { type: 'assembly', name: '自建設備', dims: {},
       prims: [{ kind: 'cyli', dims: { r: 1.0, h: 2.5 }, pos: [0, 0, 0] }], prefix: 'EQ' },
+    { type: 'assembly', name: '六角柱體 EXTR', dims: {},
+      prims: [{ kind: 'extr', dims: { sides: 6, r: 0.8, h: 2 }, pos: [0, 0, 0] }], prefix: 'EQ' },
+    { type: 'assembly', name: '碟形封頭 REVO', dims: {},
+      prims: [{ kind: 'revo', dims: { r: 1, h: 1, seg: 24 }, pos: [0, 0, 0] }], prefix: 'EQ' },
   ]},
 ];
 export const ASSET_CATALOG = ASSET_CATEGORIES.flatMap((c) => c.items);

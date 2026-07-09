@@ -2057,4 +2057,37 @@ export const ASSET_CATEGORIES = [
 ];
 export const ASSET_CATALOG = ASSET_CATEGORIES.flatMap((c) => c.items);
 
-export { std, markShadow, builders, dm, dPad, dFlange, dNozzle, dLadder, dHandrailRing, detailedBuilders, mergeByMaterial, labelHeight };
+// ---------------------------------------------------------------- 維修/抽出包絡（access envelope）
+// 對標 E3D「保留空間淨空」：依設備本體 local AABB 各方向外擴 pad（公尺），
+// 建半透明淡色盒＋線框，標 userData.envelope=true 供上層排除點選/圖層/dispose。
+// pad = { x, y, z }（單邊外擴公尺；x→E-W、z→N-S、y→上下）。回傳 null 表示無可量幾何。
+const ENVELOPE_COLOR = 0x2fa8ff;
+function buildEnvelope(body, pad = {}) {
+  const box = new THREE.Box3().setFromObject(body);
+  if (box.isEmpty()) return null;
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const px = Math.max(0, +pad.x || 0), py = Math.max(0, +pad.y || 0), pz = Math.max(0, +pad.z || 0);
+  const w = Math.max(0.001, size.x + px * 2);
+  const h = Math.max(0.001, size.y + py * 2);
+  const d = Math.max(0.001, size.z + pz * 2);
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const mat = new THREE.MeshBasicMaterial({
+    color: ENVELOPE_COLOR, transparent: true, opacity: 0.10,
+    depthWrite: false, side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(center);
+  mesh.renderOrder = 2;
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(geo),
+    new THREE.LineBasicMaterial({ color: ENVELOPE_COLOR, transparent: true, opacity: 0.55 }));
+  mesh.add(edges);
+  // 標記整棵子樹：不可點選（無 eqTag）、可被上層辨識為包絡（非實體幾何）
+  mesh.userData.envelope = true;
+  edges.userData.envelope = true;
+  mesh.castShadow = false; mesh.receiveShadow = false;
+  return mesh;
+}
+
+export { std, markShadow, builders, dm, dPad, dFlange, dNozzle, dLadder, dHandrailRing, detailedBuilders, mergeByMaterial, labelHeight, buildEnvelope };

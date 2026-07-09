@@ -11,7 +11,7 @@ import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight,
          buildPrim, buildPipeComponent, PIPE_COMPONENTS,
          PIPE_SPECS, PIPE_SERVICES, PIPE_BORES, PIPE_SCHEDULES, pipeWall,
          COMPONENT_FTF, pickComponent,
-         STEEL_SECTIONS, steelSection, sectionDesc } from './plant-builders.js';
+         STEEL_SECTIONS, steelSection, sectionDesc, buildEnvelope } from './plant-builders.js';
 import { initSprite } from './sprite.js';
 import { runClash, clashKey } from './clash.js';
 import { computeWeights } from './weight.js';
@@ -281,6 +281,8 @@ const hiddenTags = new Set(); // 模型樹「隱藏」的設備（UI 狀態，�
 
 // ---------------------------------------------------------------- 圖層顯示（設備/管線/結構）
 const LAYERS = { equip: true, pipe: true, struct: true, elec: true, hvac: true };
+// 維修/抽出包絡總開關（UI 檢視狀態，不入存檔；per-設備 on 存於 def.envelope.on）
+let envelopeVisible = true;
 const STRUCT_TYPES = new Set(['scolumn', 'sbeam', 'stairs', 'srail', 'splat', 'cageladder', 'psupport']);
 const ELEC_TYPES = new Set(['cabletray', 'traybend', 'trayriser', 'jbox', 'lightpole']);
 const HVAC_TYPES = new Set(['duct', 'ductbend', 'ductriser', 'ahu', 'rooffan']);
@@ -293,6 +295,7 @@ function eqLayerOn(def) {
 function applyLayers() {
   for (const entry of eqObjects.values()) {
     entry.group.visible = !hiddenTags.has(entry.def.tag) && eqLayerOn(entry.def);
+    if (entry.group.userData.envelopeMesh) entry.group.userData.envelopeMesh.visible = envelopeVisible;
   }
   pipeObjects.forEach((p, i) => {
     if (!p) return;
@@ -321,12 +324,33 @@ function nextTag(prefix) {
 }
 
 // ------------------------------------------------------------ 設備渲染
+// 維修/抽出包絡（access envelope）：依 def.envelope 建半透明保留空間盒；掛在群組供 clash 用。
+// 標 userData.envelope=true 使其不可點選（無 eqTag）、切圖層/隱藏合理、dispose 妥當。
+function disposeEnvelope(group) {
+  const old = group.userData.envelopeMesh;
+  if (!old) return;
+  old.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+  group.remove(old);
+  group.userData.envelopeMesh = null;
+}
+function applyEnvelope(group, def, body) {
+  disposeEnvelope(group);
+  const env = def.envelope;
+  if (!env?.on) return;
+  const mesh = buildEnvelope(body, env.pad ?? {});
+  if (!mesh) return;
+  mesh.visible = envelopeVisible;   // 圖層/檢視開關
+  group.add(mesh);
+  group.userData.envelopeMesh = mesh;
+}
+
 function buildEquipment(def) {
   const group = new THREE.Group();
   const body = builders[def.type](def.dims, def);   // assembly 讀 def.prims
   markShadow(body);
   body.traverse((o) => { if (o.isMesh) { o.userData.eqTag = def.tag; } });
   group.add(body);
+  applyEnvelope(group, def, body);
   renderNozzles(group, def);
   group.position.set(...def.pos);
   group.rotation.set(def.rot_x ?? 0, def.rot_y ?? 0, def.rot_z ?? 0);
@@ -348,6 +372,7 @@ function rebuildEquipment(def) {
   const entry = eqObjects.get(def.tag);
   if (!entry) return;
   // 移除 body＋管嘴群組全重繪（只換 body 會留下嘴殘影）
+  disposeEnvelope(entry.group);   // 包絡另行 dispose（含線框子物件）
   for (const c of entry.group.children.filter((x) => !x.isCSS2DObject)) {
     c.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); });   // 清巢狀管嘴標籤 DOM，防孤兒鬼標籤
     entry.group.remove(c);
@@ -356,6 +381,7 @@ function rebuildEquipment(def) {
   markShadow(body);
   body.traverse((o) => { if (o.isMesh) o.userData.eqTag = def.tag; });
   entry.group.add(body);
+  applyEnvelope(entry.group, def, body);   // 依 def.envelope 重建保留空間盒
   renderNozzles(entry.group, def);
   entry.group.children.find((c) => c.isCSS2DObject)?.position.set(0, labelHeight(def), 0);
 }
@@ -932,6 +958,17 @@ function renderPropPanel(def) {
       ${pgRow('WRT', `<span>/WORL</span>`)}
     </div>
     ${dimRows ? `<div class="pg-section">Design Parameters</div><div class="pg-grid">${dimRows}</div>` : ''}
+    ${(() => {
+      const env = def.envelope ?? { on: false, pad: { x: 0.8, y: 0, z: 0.8 } };
+      const pad = env.pad ?? { x: 0.8, y: 0, z: 0.8 };
+      const dis = env.on ? '' : ' disabled';
+      return `<div class="pg-section">維修包絡 Access Envelope</div><div class="pg-grid">
+        ${pgRow('保留空間', `<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" data-env="on"${env.on ? ' checked' : ''}>啟用（軟碰撞）</label>`)}
+        ${pgRow('外擴 X 東西 (mm)', `<input data-env="x" type="number" step="10" min="0" value="${toDisp(pad.x ?? 0)}"${dis}>`)}
+        ${pgRow('外擴 Z 南北 (mm)', `<input data-env="z" type="number" step="10" min="0" value="${toDisp(pad.z ?? 0)}"${dis}>`)}
+        ${pgRow('外擴 Y 上下 (mm)', `<input data-env="y" type="number" step="10" min="0" value="${toDisp(pad.y ?? 0)}"${dis}>`)}
+      </div>`;
+    })()}
     ${['scolumn', 'sbeam'].includes(def.type) ? (() => {
       const s = steelSection(def.section);
       const jv = def.just ?? 'NA';
@@ -958,6 +995,7 @@ function renderPropPanel(def) {
   });
 
   propBody.querySelectorAll('input').forEach((inp) => {
+    if (inp.dataset.env !== undefined) return;   // 維修包絡欄位另有專屬處理
     inp.addEventListener('change', () => {
       const k = inp.dataset.k;
       pushUndo();
@@ -1007,6 +1045,25 @@ function renderPropPanel(def) {
     def.just = e.target.value;
     rebuildEquipment(def);
     renderPropPanel(def);
+  });
+  // 維修/抽出包絡：開關＋X/Z/Y 外擴（mm 顯示 ↔ 公尺 canonical）
+  const ensureEnv = () => {
+    if (!def.envelope) def.envelope = { on: false, pad: { x: 0.8, y: 0, z: 0.8 } };
+    if (!def.envelope.pad) def.envelope.pad = { x: 0.8, y: 0, z: 0.8 };
+    return def.envelope;
+  };
+  propBody.querySelector('[data-env="on"]')?.addEventListener('change', (e) => {
+    pushUndo();
+    ensureEnv().on = e.target.checked;
+    rebuildEquipment(def);
+    renderPropPanel(def);
+  });
+  ['x', 'y', 'z'].forEach((ax) => {
+    propBody.querySelector(`[data-env="${ax}"]`)?.addEventListener('change', (e) => {
+      pushUndo();
+      ensureEnv().pad[ax] = Math.max(0, fromDisp(e.target.value));   // 存公尺 canonical
+      rebuildEquipment(def);
+    });
   });
   propBody.querySelectorAll('[data-nzdn]').forEach((sel) => sel.addEventListener('change', () => {
     pushUndo();
@@ -4239,6 +4296,7 @@ function deleteSelected() {
     const tag = selected.def.tag;
     const entry = eqObjects.get(tag);
     transform.detach();
+    disposeEnvelope(entry.group);   // 包絡幾何/材質 dispose，防 GPU 洩漏
     scene.remove(entry.group);
     eqObjects.delete(tag);
     hiddenTags.delete(tag);

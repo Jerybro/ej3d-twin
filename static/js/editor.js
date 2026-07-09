@@ -16,6 +16,7 @@ import { initSprite } from './sprite.js';
 import { runClash, clashKey } from './clash.js';
 import { computeWeights } from './weight.js';
 import { buildDimensions } from './dimensions.js';
+import { loadPointCloud } from './pointcloud.js';
 
 // 結構鋼構定位線 Justification 選項（對標 E3D P-line）：柱常用 NA，梁常用 CTOP/TOS
 const JUST_OPTIONS = [
@@ -79,6 +80,7 @@ const ICONS = {
   layelec: '<path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/>',
   elev: '<path d="M3 19h18M3 13h12M3 7h12"/><path d="M19 16V6M16 9l3-3 3 3"/>',
   layhvac: '<rect x="3" y="9" width="12" height="7" rx="1"/><path d="M15 10.5h6M15 14.5h6M7 9V5h8"/>',
+  scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="8" cy="9" r=".9"/><circle cx="13" cy="12" r=".9"/><circle cx="16" cy="8" r=".9"/><circle cx="10" cy="15" r=".9"/><circle cx="15" cy="16" r=".9"/>',
 };
 document.querySelectorAll('.ric[data-ic]').forEach((el) => {
   const d = ICONS[el.dataset.ic];
@@ -716,8 +718,11 @@ function loadSceneData(data, id) {
   for (const p of pipeObjects) if (p) { p.group.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); }); scene.remove(p.group); }
   pipeObjects.length = 0;
 
+  // 載入新場景前先卸下現有點雲（實體不隨場景持久化；保留 data.scan_models metadata）
+  clearPointCloud(true);
   sceneData = data;
   sceneId = id;
+  pcButtons();   // 依新場景重置點雲按鈕禁用狀態
   for (const eq of allEquipment()) buildEquipment(eq);
   sceneData.pipes.forEach((pipe, i) => buildPipe(pipe, i));
   rebuildUnderlays(sceneData.underlays);
@@ -1689,6 +1694,8 @@ document.getElementById('duct-btn').addEventListener('click', () => {
 
 // ------------------------------------------------------------ 滑鼠互動
 const raycaster = new THREE.Raycaster();
+// 點雲命中閾值（公尺）：讓量測/標註能點到掃描點上（測既有現場淨空/間距）
+raycaster.params.Points.threshold = 0.05;
 const pointer = new THREE.Vector2();
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
@@ -1953,6 +1960,99 @@ function pickDim(e) {
   return null;
 }
 
+// ------------------------------------------------------------ 點雲 as-built（brownfield 現況疊合）
+// 雷射掃描 .ply → THREE.Points 加到 pcGroup；載入/顯示切換/點徑/透明/移除＋量測命中。
+// 實體點雲不進存檔——只把來源檔名記進 sceneData.scan_models（metadata），存讀不重建點雲。
+const pcGroup = new THREE.Group();
+pcGroup.name = 'pcGroup';
+scene.add(pcGroup);
+let pcEntry = null;          // { points, dispose } | null
+const PC_SIZES = [0.003, 0.01, 0.02];   // 點大小級距（公尺）：3/10/20mm
+const PC_OPACS = [1, 0.6, 0.3];
+let pcSizeIdx = 1;
+let pcOpacIdx = 0;
+
+function pcButtons() {
+  const has = !!pcEntry;
+  const on = has && pcEntry.points.visible;
+  document.getElementById('btn-pc-toggle').disabled = !has;
+  document.getElementById('btn-pc-size').disabled = !has;
+  document.getElementById('btn-pc-opacity').disabled = !has;
+  document.getElementById('btn-pc-clear').disabled = !has;
+  document.getElementById('btn-pc-toggle').classList.toggle('active', on);
+}
+
+// 移除目前點雲並釋放 GPU 資源（geometry+material）；同時清 metadata
+function clearPointCloud(keepMeta = false) {
+  if (pcEntry) {
+    pcGroup.remove(pcEntry.points);
+    pcEntry.dispose();
+    pcEntry = null;
+  }
+  if (!keepMeta && sceneData.scan_models) sceneData.scan_models.length = 0;
+  pcButtons();
+}
+
+async function handlePointCloudFile(file) {
+  if (!file) return;
+  const url = URL.createObjectURL(file);   // 本機檔，不上傳
+  try {
+    clearPointCloud();   // 一次只掛一朵；先釋放舊的
+    const size = PC_SIZES[pcSizeIdx];
+    pcEntry = await loadPointCloud(url, THREE, { size });
+    pcEntry.points.material.opacity = PC_OPACS[pcOpacIdx];
+    pcGroup.add(pcEntry.points);
+    // 只存來源檔名（metadata）；實體點雲不進存檔
+    sceneData.scan_models = [{ src: file.name, kind: 'pointcloud' }];
+    const n = pcEntry.points.geometry.getAttribute('position')?.count ?? 0;
+    setHint(`已載入點雲 <b>${file.name}</b>（${n.toLocaleString()} 點）。可切顯示/點徑/透明，量測可點到掃描點`);
+    pcButtons();
+  } catch (err) {
+    console.error('點雲載入失敗', err);
+    setHint(`點雲載入失敗：${err?.message ?? err}`);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+document.getElementById('btn-pc-load').addEventListener('click', () => {
+  document.getElementById('pc-file').click();
+});
+document.getElementById('pc-file').addEventListener('change', (e) => {
+  handlePointCloudFile(e.target.files?.[0]);
+  e.target.value = '';   // 允許重選同檔
+});
+document.getElementById('btn-pc-toggle').addEventListener('click', () => {
+  if (!pcEntry) return;
+  pcEntry.points.visible = !pcEntry.points.visible;
+  pcButtons();
+});
+document.getElementById('btn-pc-size').addEventListener('click', () => {
+  if (!pcEntry) return;
+  pcSizeIdx = (pcSizeIdx + 1) % PC_SIZES.length;
+  pcEntry.points.material.size = PC_SIZES[pcSizeIdx];
+  setHint(`點雲點徑：<b>${Math.round(PC_SIZES[pcSizeIdx] * 1000)} mm</b>`);
+});
+document.getElementById('btn-pc-opacity').addEventListener('click', () => {
+  if (!pcEntry) return;
+  pcOpacIdx = (pcOpacIdx + 1) % PC_OPACS.length;
+  pcEntry.points.material.opacity = PC_OPACS[pcOpacIdx];
+  setHint(`點雲不透明度：<b>${Math.round(PC_OPACS[pcOpacIdx] * 100)}%</b>`);
+});
+document.getElementById('btn-pc-clear').addEventListener('click', () => {
+  clearPointCloud();
+  setHint('已移除點雲');
+});
+
+// 對點雲做 raycast，回傳最近命中點座標（公尺）；供量測/標註測現場淨空/間距
+function pickPointCloud(e) {
+  if (!pcEntry || !pcEntry.points.visible) return null;
+  setPointer(e);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObject(pcEntry.points, false);
+  return hits.length ? hits[0].point : null;
+}
+
 renderer.domElement.addEventListener('pointermove', (e) => {
   const pt = groundPoint(e);
   if (pt) document.getElementById('st-coords').textContent =
@@ -2078,15 +2178,16 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   }
 
   if (mode === 'measure') {
+    // 命中優先：模型表面 → 點雲掃描點（測既有淨空/間距）→ 地面
     const hit = pickObject(e);
-    const pt = hit ? hit.point : groundPoint(e);
+    const pt = hit ? hit.point : (pickPointCloud(e) ?? groundPoint(e));
     if (pt) addMeasurePoint(pt.clone());
     return;
   }
 
   if (mode === 'dim3d') {
     const hit = pickObject(e);
-    const pt = hit ? hit.point : groundPoint(e);
+    const pt = hit ? hit.point : (pickPointCloud(e) ?? groundPoint(e));
     if (pt) addDimPoint(pt);
     return;
   }

@@ -157,14 +157,58 @@ function pointInOBB(p, obb, margin = 0) {
   return true;
 }
 
+// 維修/抽出包絡 OBB：由設備群組上的 envelopeMesh（body AABB+pad 的半透明盒）導出。
+// envelopeMesh 相對 group 有本地位移(center)但無旋轉，其世界 OBB = mesh 自身的世界變換。
+function makeEnvelopeOBB(mesh) {
+  mesh.updateWorldMatrix(true, false);
+  const worldQuat = new THREE.Quaternion();
+  const worldPos = new THREE.Vector3();
+  const worldScale = new THREE.Vector3();
+  mesh.matrixWorld.decompose(worldPos, worldQuat, worldScale);
+  const params = mesh.geometry.parameters ?? {};
+  const half = new THREE.Vector3(
+    (params.width ?? 1) / 2, (params.height ?? 1) / 2, (params.depth ?? 1) / 2).multiply(worldScale);
+  const rot = new THREE.Matrix4().makeRotationFromQuaternion(worldQuat);
+  const e = rot.elements;
+  return {
+    center: worldPos,
+    halfSize: [half.x, half.y, half.z],
+    axes: [
+      new THREE.Vector3(e[0], e[1], e[2]),
+      new THREE.Vector3(e[4], e[5], e[6]),
+      new THREE.Vector3(e[8], e[9], e[10]),
+    ],
+  };
+}
+// OBB → 世界 AABB（廣相位用）：中心 ± Σ|axis_i|·halfSize_i
+function obbToAABB(obb) {
+  const ext = new THREE.Vector3();
+  for (let i = 0; i < 3; i++) {
+    ext.x += Math.abs(obb.axes[i].x) * obb.halfSize[i];
+    ext.y += Math.abs(obb.axes[i].y) * obb.halfSize[i];
+    ext.z += Math.abs(obb.axes[i].z) * obb.halfSize[i];
+  }
+  return new THREE.Box3(obb.center.clone().sub(ext), obb.center.clone().add(ext));
+}
+
 export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL) {
   const status = sceneData.clashStatus ?? {};
   const out = [];
   const entries = [];
+  const envelopes = [];   // 維修/抽出包絡（軟障礙）
   for (const [tag, entry] of eqObjects) {
     if (hiddenTags?.has(tag)) continue;
-    const box = new THREE.Box3().setFromObject(entry.group);   // 廣相位 AABB
-    const obb = makeOBB(entry.group);                          // 窄相位 OBB
+    const envMesh = entry.group.userData?.envelopeMesh;
+    // 先在群組內算好包絡世界 OBB（需父變換），再暫時移出以免污染本體 AABB/OBB（物理碰撞）。
+    if (entry.def.envelope?.on && envMesh) {
+      entry.group.updateWorldMatrix(true, true);
+      const eobb = makeEnvelopeOBB(envMesh);
+      envelopes.push({ tag, obb: eobb, box: obbToAABB(eobb) });
+    }
+    if (envMesh && envMesh.parent === entry.group) entry.group.remove(envMesh);
+    const box = new THREE.Box3().setFromObject(entry.group);   // 廣相位 AABB（純本體）
+    const obb = makeOBB(entry.group);                          // 窄相位 OBB（純本體）
+    if (envMesh && !envMesh.parent) entry.group.add(envMesh);  // 還原
     entries.push({ tag, box, obb, def: entry.def });
   }
   const push = (o) => {
@@ -223,6 +267,55 @@ export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL) {
       }
     }
   });
+
+  // ---- 維修/抽出包絡（soft）：他方實體侵入某設備保留空間 → 回報 clearance/touch 類（碼首 S）----
+  // 排除：envelope×自身母設備、envelope×envelope（不比包絡對包絡）。
+  if (envelopes.length && out.length < MAX_RESULTS) {
+    // 包絡 × 設備本體
+    for (const EN of envelopes) {
+      for (const E of entries) {
+        if (E.tag === EN.tag) continue;   // 不與母設備自撞
+        const aabbGap = boxGap(EN.box, E.box);
+        if (aabbGap > 0) {
+          const thresh = Math.max(tol.gap, tol.clearance);
+          if (aabbGap > thresh) continue;
+        }
+        const { pen, gap } = obbSAT(EN.obb, E.obb);
+        // 侵入保留空間（pen>0）→ touch（軟）；接近（gap 在門檻內）→ clearance（軟）
+        const soft = pen > 0 ? 'touch' : (gap <= Math.max(tol.gap, tol.clearance) ? 'clearance' : null);
+        if (soft) {
+          push({ type: soft, a: EN.tag, b: E.tag,
+                 code: 'S' + obstCode(E.def),
+                 point: EN.obb.center.clone().lerp(E.obb.center, 0.5), soft: true });
+          if (out.length >= MAX_RESULTS) return finish(out, true);
+        }
+      }
+    }
+    // 包絡 × 管線（取樣點落入包絡 OBB → 侵入保留空間）
+    const vv = new THREE.Vector3();
+    for (let pi = 0; pi < sceneData.pipes.length; pi++) {
+      const pipe = sceneData.pipes[pi];
+      if (pipe.bridge) continue;
+      const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
+      for (const EN of envelopes) {
+        const boxGrown = EN.box.clone().expandByScalar((pipe.r ?? 0) + 0.05);
+        let hit = null;
+        for (let s = 0; s < pts.length - 1 && !hit; s++) {
+          for (let k = 0; k <= 8; k++) {
+            vv.lerpVectors(pts[s], pts[s + 1], k / 8);
+            if (!boxGrown.containsPoint(vv)) continue;
+            if (pointInOBB(vv, EN.obb, (pipe.r ?? 0) + 0.05)) { hit = vv.clone(); break; }
+          }
+        }
+        if (hit) {
+          push({ type: 'touch', a: EN.tag, b: `PIPE #${pi + 1}`,
+                 code: 'SH', point: hit, pipeIndex: pi, soft: true });
+          if (out.length >= MAX_RESULTS) return finish(out, true);
+        }
+      }
+    }
+  }
+
   return finish(out, out.length >= MAX_RESULTS);
 }
 

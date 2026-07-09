@@ -386,6 +386,7 @@ function rebuildEquipment(def) {
   entry.group.add(body);
   renderNozzles(entry.group, def);
   entry.group.children.find((c) => c.isCSS2DObject)?.position.set(0, labelHeight(def), 0);
+  if (xrayOn || wireframeOn) applyRenderOverride();   // 重建後若審查模式開啟，讓新 mesh 也套 X-ray/線框（避免只有編輯過的設備變不透明）
 }
 
 // ------------------------------------------------------------ 管線渲染
@@ -971,9 +972,9 @@ function renderPropPanel(def) {
       const dis = env.on ? '' : ' disabled';
       return `<div class="pg-section">維修包絡 Access Envelope</div><div class="pg-grid">
         ${pgRow('保留空間', `<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" data-env="on"${env.on ? ' checked' : ''}>啟用（軟碰撞）</label>`)}
-        ${pgRow('外擴 X 東西 (mm)', `<input data-env="x" type="number" step="10" min="0" value="${toDisp(pad.x ?? 0)}"${dis}>`)}
-        ${pgRow('外擴 Z 南北 (mm)', `<input data-env="z" type="number" step="10" min="0" value="${toDisp(pad.z ?? 0)}"${dis}>`)}
-        ${pgRow('外擴 Y 上下 (mm)', `<input data-env="y" type="number" step="10" min="0" value="${toDisp(pad.y ?? 0)}"${dis}>`)}
+        ${pgRow(`外擴 X 東西 (${unitLabel()})`, `<input data-env="x" type="number" step="${U().step}" min="0" value="${toDisp(pad.x ?? 0)}"${dis}>`)}
+        ${pgRow(`外擴 Z 南北 (${unitLabel()})`, `<input data-env="z" type="number" step="${U().step}" min="0" value="${toDisp(pad.z ?? 0)}"${dis}>`)}
+        ${pgRow(`外擴 Y 上下 (${unitLabel()})`, `<input data-env="y" type="number" step="${U().step}" min="0" value="${toDisp(pad.y ?? 0)}"${dis}>`)}
       </div>`;
     })()}
     ${['scolumn', 'sbeam'].includes(def.type) ? (() => {
@@ -2741,7 +2742,7 @@ function resolveClearanceTarget(e) {
   } else {
     return null;
   }
-  const box = new THREE.Box3().setFromObject(group);
+  const box = boxOfBody(group);   // 剝除維修包絡盒，量本體淨空（與 clash/剖切一致）
   if (box.isEmpty()) return null;
   return { box, label };
 }
@@ -4251,7 +4252,7 @@ function runClashDock() {
     const c = clashes[i];
     pushUndo();
     sceneData.clashStatus = sceneData.clashStatus ?? {};
-    const key = clashKey(c.a, c.b);
+    const key = c.soft ? 'S|' + clashKey(c.a, c.b) : clashKey(c.a, c.b);   // 軟碰撞(維修包絡)與硬碰撞分開命名，避免核准間隙連帶隱藏真實硬撞
     if (sceneData.clashStatus[key] === st) delete sceneData.clashStatus[key];   // 再按一次＝取消
     else sceneData.clashStatus[key] = st;
     runClashDock();
@@ -4362,7 +4363,7 @@ function reviewMeshes() {
   const out = [];
   const collect = (root) => root.traverse((o) => {
     if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
-    if (o.userData.insul || o.userData.slopeMarker || o.userData.transCone) return;  // 勿污染已透明/標記材質
+    if (o.userData.insul || o.userData.slopeMarker || o.userData.transCone || o.userData.envelope) return;  // 勿污染已透明/標記材質（含維修包絡）
     out.push(o);
   });
   for (const { group } of eqObjects.values()) collect(group);

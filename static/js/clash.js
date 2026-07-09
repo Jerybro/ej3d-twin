@@ -213,7 +213,7 @@ export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL) {
   }
   const push = (o) => {
     o.code = o.code ?? 'HH';
-    o.status = status[clashKey(o.a, o.b)] ?? 'new';
+    o.status = status[o.soft ? 'S|' + clashKey(o.a, o.b) : clashKey(o.a, o.b)] ?? 'new';   // 軟碰撞(包絡)與硬碰撞分開命名空間
     out.push(o);
   };
 

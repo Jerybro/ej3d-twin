@@ -380,8 +380,8 @@ function rebuildEquipment(def) {
   const body = builders[def.type](def.dims, def);
   markShadow(body);
   body.traverse((o) => { if (o.isMesh) o.userData.eqTag = def.tag; });
+  applyEnvelope(entry.group, def, body);   // 依 def.envelope 重建保留空間盒（須在 body 仍 detached 時算，避免雙重套用群組變換）
   entry.group.add(body);
-  applyEnvelope(entry.group, def, body);   // 依 def.envelope 重建保留空間盒
   renderNozzles(entry.group, def);
   entry.group.children.find((c) => c.isCSS2DObject)?.position.set(0, labelHeight(def), 0);
 }
@@ -2195,7 +2195,7 @@ renderer.domElement.addEventListener('contextmenu', (e) => {
       } },
       { label: '量距離', run: () => startMeasure('dist') },
       { label: '剖切至此', run: () => {
-        const box = new THREE.Box3().expandByObject(eqObjects.get(tag).group).expandByScalar(1);
+        const box = boxOfBody(eqObjects.get(tag).group).expandByScalar(1);
         clipStart('box', box);
       } },
       { label: '刪除', danger: true, run: deleteSelected },
@@ -2742,7 +2742,7 @@ document.getElementById('btn-clipbox').addEventListener('click', () =>
 document.getElementById('btn-clipbox-sel').addEventListener('click', () => {
   let box;
   if (selected?.kind === 'eq') {
-    box = new THREE.Box3().expandByObject(eqObjects.get(selected.def.tag).group).expandByScalar(1);
+    box = boxOfBody(eqObjects.get(selected.def.tag).group).expandByScalar(1);
   } else if (selected?.kind === 'pipe') {
     box = new THREE.Box3();
     for (const p of sceneData.pipes[selected.index].pts) box.expandByPoint(new THREE.Vector3(...p));
@@ -2755,12 +2755,23 @@ document.getElementById('btn-clipsix').addEventListener('click', () =>
 document.getElementById('btn-clipclear').addEventListener('click', clipClear);
 
 // ------------------------------------------------------------ 視角/縮放（View）
+// 對設備群組取「純本體」AABB：包絡盒（envelopeMesh）會被 expandByObject 遞迴計入且不理 .visible，
+// 故先暫移包絡再算、算完還原（同 clash.js runClash 的做法），避免框選/剖切被保留空間撐大。
+function expandByBody(box, group) {
+  const env = group.userData?.envelopeMesh;
+  const detach = env && env.parent === group;
+  if (detach) group.remove(env);
+  box.expandByObject(group);
+  if (detach) group.add(env);
+  return box;
+}
+function boxOfBody(group) { return expandByBody(new THREE.Box3(), group); }
 function sceneBounds() {
   const box = new THREE.Box3();
   let any = false;
   for (const { group, def } of eqObjects.values()) {
     if (hiddenTags.has(def.tag)) continue;
-    box.expandByObject(group);
+    expandByBody(box, group);
     any = true;
   }
   for (const m of underlayMeshes) { box.expandByObject(m); any = true; }
@@ -2784,7 +2795,7 @@ function fitAll() { frameBox(sceneBounds(), camera.position.clone().sub(controls
 function zoomToSelection() {
   if (selected?.kind === 'eq') {
     const entry = eqObjects.get(selected.def.tag);
-    frameBox(new THREE.Box3().expandByObject(entry.group),
+    frameBox(boxOfBody(entry.group),
       camera.position.clone().sub(controls.target).normalize());
   } else if (selected?.kind === 'pipe') {
     const box = new THREE.Box3();

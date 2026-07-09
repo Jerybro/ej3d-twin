@@ -1841,6 +1841,92 @@ function checkConnectivity(data) {
   return problems;
 }
 
+// ============================================================ 模型完整性健檢（對標 E3D Data Integrity Checker）
+// 更廣的 model lint：孤兒參考 / 重複 tag / 未設必要欄位 / 斷開自由端（複用 checkConnectivity）。
+// 回傳結構化清單 [{severity, category, target, detail, locate}]，locate 供 UI 點選定位。
+// severity: 'error' | 'warn'；locate: {kind:'eq',tag} | {kind:'pipe',index} | null。
+function checkModelIntegrity(data) {
+  const issues = [];
+  const add = (severity, category, target, detail, locate = null) =>
+    issues.push({ severity, category, target, detail, locate });
+
+  // 全場設備平坦化（含所屬 unit），並建 tag→def 索引與 pipe.uid 集合。
+  const allEq = [];
+  for (const u of (data.plant?.units ?? [])) {
+    for (const eq of (u.equipment ?? [])) allEq.push(eq);
+  }
+  const eqByTag = new Map();          // tag → 首個 def（供 nozzle 查找）
+  const tagCount = new Map();         // tag → 出現次數（重複偵測）
+  for (const eq of allEq) {
+    const t = eq.tag;
+    if (t) {
+      tagCount.set(t, (tagCount.get(t) ?? 0) + 1);
+      if (!eqByTag.has(t)) eqByTag.set(t, eq);
+    }
+  }
+  const pipeUids = new Set((data.pipes ?? []).map((p) => p.uid).filter(Boolean));
+
+  // (1) 重複 tag：設備 tag 撞名。
+  for (const [t, n] of tagCount) {
+    if (n > 1) add('error', '重複 tag', t, `設備位號「${t}」出現 ${n} 次（tag 須全域唯一）`,
+      { kind: 'eq', tag: t });
+  }
+
+  // (2) 設備必要欄位：缺 tag / 缺 type。
+  allEq.forEach((eq) => {
+    if (!eq.tag) add('error', '未設欄位', '(無 tag 設備)',
+      `${eq.type ?? '設備'} 缺少 tag（無法索引/參考）`, null);
+    if (!eq.type) add('warn', '未設欄位', eq.tag ?? '(無 tag)',
+      `設備缺少 type`, eq.tag ? { kind: 'eq', tag: eq.tag } : null);
+  });
+
+  // (3) 孤兒參考：psupport.sup_of 指向不存在的管線（sup_of ＝ pipe.uid）。
+  allEq.forEach((eq) => {
+    if (eq.sup_of !== undefined && eq.sup_of !== null && !pipeUids.has(eq.sup_of)) {
+      add('error', '孤兒參考', eq.tag ?? '(無 tag)',
+        `支撐 sup_of=「${eq.sup_of}」指向不存在的管線 uid`,
+        eq.tag ? { kind: 'eq', tag: eq.tag } : null);
+    }
+  });
+
+  // (4) 管線必要欄位＋管端參考斷鏈（head/tail）。
+  (data.pipes ?? []).forEach((pipe, i) => {
+    if (!pipe.pts || pipe.pts.length < 2) {
+      add('error', '未設欄位', `PIPE #${i + 1}`,
+        `管線無 pts 或點數不足（<2）`, { kind: 'pipe', index: i });
+      return;   // 無有效幾何，後續端點檢查略過
+    }
+    for (const [name, ref] of [['起點 head', pipe.head], ['終點 tail', pipe.tail]]) {
+      if (!ref) continue;
+      if (ref.pipe !== undefined) {   // branch：母管參考
+        if (!data.pipes[ref.pipe]) add('error', '孤兒參考', `PIPE #${i + 1}`,
+          `${name} branch 母管 #${ref.pipe + 1} 不存在`, { kind: 'pipe', index: i });
+        continue;
+      }
+      if (ref.eq !== undefined) {     // 設備管嘴參考
+        const def = eqByTag.get(ref.eq);
+        if (!def) {
+          add('error', '孤兒參考', `PIPE #${i + 1}`,
+            `${name} 參考設備「${ref.eq}」不存在`, { kind: 'pipe', index: i });
+        } else if (ref.nz !== undefined && !(def.nozzles ?? []).some((n) => n.id === ref.nz)) {
+          add('error', '孤兒參考', `PIPE #${i + 1}`,
+            `${name} 設備「${ref.eq}」無管嘴 id「${ref.nz}」`, { kind: 'pipe', index: i });
+        }
+      }
+    }
+  });
+
+  // (5) 斷開的自由端：複用 checkConnectivity（端點不接 nozzle 也非 branch）。
+  //     連通性另含 bore 不一致，一併納入 lint。
+  for (const p of checkConnectivity(data)) {
+    const sev = p.issue === 'bore 不一致' ? 'warn' : 'error';
+    const cat = p.issue === '自由端' ? '斷開自由端' : p.issue;
+    add(sev, cat, `PIPE #${p.pipe + 1}`, p.detail, { kind: 'pipe', index: p.pipe });
+  }
+
+  return issues;
+}
+
 function pickObject(e) {
   setPointer(e);
   raycaster.setFromCamera(pointer, camera);
@@ -3980,6 +4066,43 @@ function runConnectivityDock() {
   }));
 }
 document.getElementById('btn-connect-check').addEventListener('click', runConnectivityDock);
+
+// ------------------------------------------------------------ 模型完整性健檢（沿用 clash-dock 面板）
+function locateIntegrity(locate) {
+  if (!locate) return;
+  if (locate.kind === 'eq') { selectEquipment(locate.tag); zoomToSelection(); }
+  else if (locate.kind === 'pipe') { selectPipe(locate.index); zoomToSelection(); }
+}
+function runIntegrityDock() {
+  const t0 = performance.now();
+  const issues = checkModelIntegrity(sceneData);
+  const ms = Math.round(performance.now() - t0);
+  const nErr = issues.filter((x) => x.severity === 'error').length;
+  const nWarn = issues.filter((x) => x.severity === 'warn').length;
+  const cats = {};
+  for (const x of issues) cats[x.category] = (cats[x.category] ?? 0) + 1;
+  const catSummary = Object.entries(cats).map(([k, v]) => `${k} ${v}`).join('｜') || '無問題';
+  document.getElementById('clash-summary').textContent =
+    issues.length ? `錯誤 ${nErr}｜警告 ${nWarn}（${catSummary}，${ms}ms）`
+                  : `✓ 模型健檢通過（${ms}ms）`;
+  document.getElementById('clash-count').textContent = `　${issues.length} 筆`;
+  const badge = (bg, txt) => `<span style="display:inline-block;padding:1px 6px;border-radius:4px;background:${bg};color:#fff;font-size:10px;font-weight:600">${txt}</span>`;
+  const list = document.getElementById('clash-list');
+  list.innerHTML = issues.length ? issues.map((x, i) =>
+    `<div class="clash-row" data-ii="${i}" style="grid-template-columns:52px 96px 96px 1fr">
+      ${badge(x.severity === 'error' ? '#d9534f' : '#e0a800', x.severity === 'error' ? '錯誤' : '警告')}
+      <span style="font-size:11px;font-weight:600">${x.category}</span>
+      <span style="color:var(--dim);font-family:monospace;font-size:11px">${x.target}</span>
+      <span>${x.detail}</span>
+    </div>`).join('') : '<div style="padding:14px;color:var(--dim)">✓ 模型健檢通過——無孤兒參考/重複位號/缺欄位/斷點</div>';
+  clashDock.classList.add('show');
+  clearClashMarks();
+  list.querySelectorAll('.clash-row').forEach((row) => row.addEventListener('click', () => {
+    list.querySelectorAll('.clash-row').forEach((r) => r.classList.toggle('selected', r === row));
+    locateIntegrity(issues[+row.dataset.ii].locate);
+  }));
+}
+document.getElementById('btn-model-lint').addEventListener('click', runIntegrityDock);
 
 // ------------------------------------------------------------ 視角書籤（E3D Save & Restore Views）
 function captureThumb() {

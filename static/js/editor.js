@@ -1055,9 +1055,11 @@ const PRIM_KINDS = {
   snou: { name: 'SNOU 偏心漸縮', dims: { r1: 0.9, r2: 0.45, h: 1.0, off: 0.3 } },
   pyra: { name: 'PYRA 角錐/漏斗', dims: { bx: 1.4, bz: 1.4, tx: 0.5, tz: 0.5, h: 1.2 } },
   ctor: { name: 'CTOR 圓環/彎頭', dims: { r: 0.9, rt: 0.2, ang: 90 } },
+  extr: { name: 'EXTR 擠出柱', dims: { sides: 6, r: 0.8, h: 2 } },
+  revo: { name: 'REVO 迴轉封頭', dims: { r: 1, h: 1, seg: 24 } },
 };
-// 基元中非長度型的參數（角度等），不做 mm 轉換
-const PRIM_NONLEN = new Set(['ang']);
+// 基元中非長度型的參數（角度、計數/段數），不做 mm 轉換
+const PRIM_NONLEN = new Set(['ang', 'sides', 'seg']);
 const primHeight = (p) => p.kind === 'dish' ? p.dims.r : (p.dims.h ?? 1);
 
 function primsSection(def) {

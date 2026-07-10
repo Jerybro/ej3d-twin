@@ -3549,6 +3549,238 @@ function exportISO() {
 }
 document.getElementById('btn-iso').addEventListener('click', exportISO);
 
+// ------------------------------------------------------------ 立面正交視圖（Elevation，對標 E3D 多視向出圖）
+// 四向（N/S/E/W）正交投影：把設備 AABB／管線折線／結構投到對應垂直面，深度軸壓平。
+// 慣例：X=東、Z=南（+Z）、Y=上。垂直軸恆為 Y（標高 U）。水平軸依視向取 X 或 Z、含鏡射保持左右合理。
+// 幾何用 AABB／輪廓近似（非 HLR）：實線外框＋淡色標高格線＋座標；長度顯示 mm（沿用出圖層 ×1000）。
+const ELEV_DIRS = {
+  // hAxis：水平取哪個世界軸（0=X 東、2=Z 南）；hSign：水平方向鏡射；hName：水平座標軸標記字母
+  n: { hAxis: 0, hSign: 1, hName: 'E', label: '北 N（看向北）', depth: 2 },   // 看向北：水平=東(X)，深度=Z
+  s: { hAxis: 0, hSign: -1, hName: 'E', label: '南 S（看向南）', depth: 2 },  // 看向南：東西鏡射
+  e: { hAxis: 2, hSign: -1, hName: 'N', label: '東 E（看向東）', depth: 0 },  // 看向東：水平=南北(Z)，深度=X
+  w: { hAxis: 2, hSign: 1, hName: 'N', label: '西 W（看向西）', depth: 0 },   // 看向西：南北鏡射
+};
+
+// 收集每個可見設備的世界 AABB（沿用 boxOfBody 純本體盒，與剖切/clash 一致）＋位號
+function elevBodies() {
+  const out = [];
+  for (const { group, def } of eqObjects.values()) {
+    if (hiddenTags.has(def.tag)) continue;
+    out.push({ tag: def.tag, box: boxOfBody(group) });
+  }
+  return out;
+}
+
+function elevSvg(dir, meta = {}) {
+  const cfg = ELEV_DIRS[dir] ?? ELEV_DIRS.n;
+  const b = sceneBounds();
+  const bodies = elevBodies();
+  // 水平座標 h（依視向鏡射後）與垂直座標 v=Y(上)；先蒐集所有點求範圍
+  const H_OF = (wx, wz) => cfg.hSign * (cfg.hAxis === 0 ? wx : wz);   // 世界 →（未鏡射前的）水平量
+  const hs = [], vs = [];
+  const pushHV = (h, v) => { hs.push(h); vs.push(v); };
+  for (const bd of bodies) {
+    for (const hx of [bd.box.min.x, bd.box.max.x]) for (const hz of [bd.box.min.z, bd.box.max.z]) hs.push(H_OF(hx, hz));
+    vs.push(bd.box.min.y, bd.box.max.y);
+  }
+  for (const pipe of sceneData.pipes) for (const p of pipe.pts) pushHV(H_OF(p[0], p[2]), p[1]);
+  if (!hs.length) { hs.push(H_OF(b.min.x, b.min.z), H_OF(b.max.x, b.max.z)); vs.push(b.min.y, b.max.y); }
+  const pad = 4;
+  const hLo = Math.min(...hs) - pad, hHi = Math.max(...hs) + pad;
+  const vLo = Math.min(0, Math.min(...vs)) - pad, vHi = Math.max(...vs) + pad;   // 標高含 0（地面）基準
+  const Wm = hHi - hLo, Hm = vHi - vLo;
+  const S = 12;   // px per m（沿用 GA）
+  const sx = (h) => ((h - hLo) * S).toFixed(1);
+  const sy = (v) => ((vHi - v) * S).toFixed(1);   // Y 向上：SVG y 反轉
+  const parts = [];
+  // 標高格線（每 5m，淡色）＋左緣 EL 標高標記（mm）
+  const drawTop = 0, drawBottom = Hm * S, drawLeft = 0, drawRight = Wm * S;
+  for (let g = Math.ceil(vLo / 5) * 5; g <= vHi + 1e-6; g += 5) {
+    const y = +sy(g);
+    parts.push(`<line x1="${drawLeft}" y1="${y}" x2="${drawRight}" y2="${y}" stroke="#d8dde3" stroke-width="0.6"/>`);
+    parts.push(`<text x="2" y="${(y - 2).toFixed(1)}" font-size="9" fill="#9aa4ad">EL.${(g * 1000).toFixed(0)}</text>`);
+  }
+  // 地面線（EL.0）加深
+  const y0 = +sy(0);
+  parts.push(`<line x1="${drawLeft}" y1="${y0}" x2="${drawRight}" y2="${y0}" stroke="#274b66" stroke-width="1.2"/>`);
+  // 水平座標格線（每 10m）＋底緣座標標記。hLo/hHi 已在鏡射後空間；g 走鏡射空間畫線，
+  // 標記還原世界座標（×hSign）供讀圖（如看向南時左右鏡射，標記仍是真實 E 座標）。
+  for (let g = Math.ceil(hLo / 10) * 10; g <= hHi + 1e-6; g += 10) {
+    const x = +sx(g);
+    const world = cfg.hSign * g;   // 還原世界水平座標（hSign=±1）
+    parts.push(`<line x1="${x}" y1="${drawTop}" x2="${x}" y2="${drawBottom}" stroke="#eceef1" stroke-width="0.6"/>`);
+    parts.push(`<text x="${x}" y="${(drawBottom + 12).toFixed(1)}" font-size="9" fill="#9aa4ad" text-anchor="middle">${cfg.hName}${world.toFixed(0)}</text>`);
+  }
+  // 管線投影（折線；橋接虛線，沿用 GA 樣式）
+  for (const pipe of sceneData.pipes) {
+    if ((pipe.pts?.length ?? 0) < 1) continue;
+    const d = pipe.pts.map((p, i) => `${i ? 'L' : 'M'}${sx(H_OF(p[0], p[2]))} ${sy(p[1])}`).join(' ');
+    parts.push(`<path d="${d}" fill="none" stroke="#5b6b7a" stroke-width="${Math.max(pipe.r * S * 0.8, 1)}"${pipe.bridge ? ' stroke-dasharray="6 4" stroke="#2e8ba8"' : ''} opacity="0.75"/>`);
+  }
+  // 設備投影：AABB 矩形輪廓（實線）＋位號
+  for (const bd of bodies) {
+    const h0 = H_OF(bd.box.min.x, bd.box.min.z), h1 = H_OF(bd.box.max.x, bd.box.max.z);
+    const xL = Math.min(+sx(h0), +sx(h1)), xR = Math.max(+sx(h0), +sx(h1));
+    const yT = +sy(bd.box.max.y), yB = +sy(bd.box.min.y);
+    parts.push(`<rect x="${xL.toFixed(1)}" y="${yT.toFixed(1)}" width="${(xR - xL).toFixed(1)}" height="${(yB - yT).toFixed(1)}" fill="rgba(70,140,200,0.12)" stroke="#274b66" stroke-width="1.2"/>`);
+    parts.push(`<text x="${((xL + xR) / 2).toFixed(1)}" y="${(yT - 4).toFixed(1)}" font-size="10" font-weight="600" fill="#12283a" text-anchor="middle">${bd.tag}</text>`);
+  }
+  // 圖框（雙線）＋標題欄＋比例尺（全沿用 GA）
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const MARGIN = 40;
+  const PW = Wm * S + MARGIN * 2, PH = Hm * S + MARGIN * 2 + 78;
+  const tb = dwgTitleBlock(PW - 7, PH - 7, {
+    project: `設備 ${bodies.length}・管線 ${sceneData.pipes.length}${meta.by ? ' · ' + meta.by : ''}`,
+    title: meta.title ?? `${sceneData.plant.name}｜ELEVATION 立面圖（${cfg.label}）`,
+    dwgno: meta.dwgno ?? `${(sceneId ?? 'SCN').toUpperCase()}-EL${dir.toUpperCase()}-001`,
+    rev: meta.rev ?? 'A', date: dateStr, scaleTxt: `1m=${S}px`,
+  });
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PW} ${PH}" font-family="Inter,'Noto Sans TC',sans-serif" style="background:#fff">
+  <rect x="1" y="1" width="${PW - 2}" height="${PH - 2}" fill="#fdfefe" stroke="#12283a" stroke-width="1.8"/>
+  <rect x="7" y="7" width="${PW - 14}" height="${PH - 14}" fill="none" stroke="#12283a" stroke-width="0.7"/>
+  <g transform="translate(${MARGIN} ${MARGIN})">
+  ${parts.join('\n  ')}
+  </g>
+  <g transform="translate(16 ${PH - 24})">
+    <line x1="0" y1="0" x2="${10 * S}" y2="0" stroke="#12283a" stroke-width="3"/>
+    <text x="${5 * S}" y="-5" font-size="9" fill="#12283a" text-anchor="middle">10 m</text>
+  </g>
+  ${tb}
+</svg>`;
+}
+function elevDefaults(dir) {
+  const cfg = ELEV_DIRS[dir] ?? ELEV_DIRS.n;
+  return { title: `${sceneData.plant.name}｜ELEVATION 立面圖（${cfg.label}）`,
+           dwgno: `${(sceneId ?? 'SCN').toUpperCase()}-EL${dir.toUpperCase()}-001`, rev: 'A', by: dwgLastBy };
+}
+function exportElev(dir) {
+  openDwgDialog(`立面 ${dir.toUpperCase()}`, elevDefaults(dir), (m) => {
+    saveBlob(`${sceneId ?? 'scene'}-ELEV-${dir.toUpperCase()}.svg`, elevSvg(dir, m), 'image/svg+xml', true);
+    setHint(`立面圖（${ELEV_DIRS[dir].label}）已輸出（新分頁預覽＋下載 SVG）`);
+  });
+}
+document.querySelectorAll('[data-elev]').forEach((btn) =>
+  btn.addEventListener('click', () => exportElev(btn.dataset.elev)));
+
+// ------------------------------------------------------------ 剖面圖（Section，對標 E3D Section from Clip）
+// 需先啟用剖切盒(clip box)：沿最近啟用的「垂直剖切面」取一刀，把跨越該平面的設備/管線投影成斷面。
+// 平面法向沿 X 或 Z（±X/±Z 四面之一），投影到該法向的正交垂直面（水平=另一水平軸、垂直=Y）。
+function sectionSvg(meta = {}) {
+  // 選剖切平面：優先啟用中的垂直面（±X 或 ±Z）；以 box 對應面座標為剖位
+  const VERT = [0, 1, 4, 5];   // CLIP_AXES 索引：±X(0,1)、±Z(4,5)（跳過 ±Y 水平面）
+  let pick = null;
+  for (const i of VERT) if (clip.enabled[i]) { pick = i; break; }
+  if (pick == null) return null;
+  const { side, axis } = CLIP_AXES[pick];
+  const cutPos = clip.box[side][axis];          // 剖切平面在該軸座標（公尺）
+  const normAxis = axis;                          // 'x' 或 'z'
+  // 剖面畫布：水平=另一水平軸、垂直=Y。X 法向 → 水平取 Z(南北)；Z 法向 → 水平取 X(東西)
+  const hAxis = normAxis === 'x' ? 2 : 0;         // 0=X,2=Z
+  const hName = normAxis === 'x' ? 'N' : 'E';
+  const H_OF = (p) => p[hAxis];
+  const V_OF = (p) => p[1];
+  const bodies = elevBodies();
+  const EPS = 1e-6;
+  // 跨越剖面的設備：AABB 在 normAxis 上包含 cutPos
+  const cutBodies = bodies.filter((bd) => bd.box.min[normAxis] - EPS <= cutPos && cutPos <= bd.box.max[normAxis] + EPS);
+  // 跨越剖面的管段：相鄰兩節點在 normAxis 兩側（含端點觸面），取交點斷面標記
+  const ni = normAxis === 'x' ? 0 : 2;
+  const cutMarks = [];   // {h, v, r}
+  for (const pipe of sceneData.pipes) {
+    const pts = pipe.pts ?? [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], c = pts[i + 1];
+      const da = a[ni] - cutPos, dc = c[ni] - cutPos;
+      if (da === 0 && dc === 0) continue;              // 管段平行貼面，略過（避免除零）
+      if (da <= 0 && dc >= 0 || da >= 0 && dc <= 0) {
+        const t = Math.abs(da) < EPS && Math.abs(dc) < EPS ? 0 : da / (da - dc);
+        const q = [a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t, a[2] + (c[2] - a[2]) * t];
+        cutMarks.push({ h: H_OF(q), v: V_OF(q), r: pipe.r });
+      }
+    }
+  }
+  if (!cutBodies.length && !cutMarks.length) return '';   // 有剖切但沒東西跨越
+  // 範圍：剖面盒在水平/垂直方向以 clip.box 為界（只畫盒內斷面，符合 E3D Section 慣例）
+  const hLo0 = clip.box.min[hAxis === 0 ? 'x' : 'z'], hHi0 = clip.box.max[hAxis === 0 ? 'x' : 'z'];
+  const vLo0 = Math.min(0, clip.box.min.y), vHi0 = clip.box.max.y;
+  const pad = 3;
+  const hLo = hLo0 - pad, hHi = hHi0 + pad, vLo = vLo0 - pad, vHi = vHi0 + pad;
+  const Wm = hHi - hLo, Hm = vHi - vLo, S = 12;
+  const sx = (h) => ((h - hLo) * S).toFixed(1);
+  const sy = (v) => ((vHi - v) * S).toFixed(1);
+  const parts = [];
+  const drawBottom = Hm * S, drawRight = Wm * S;
+  // 標高格線（每 5m）＋座標
+  for (let g = Math.ceil(vLo / 5) * 5; g <= vHi + 1e-6; g += 5) {
+    const y = +sy(g);
+    parts.push(`<line x1="0" y1="${y}" x2="${drawRight}" y2="${y}" stroke="#d8dde3" stroke-width="0.6"/>`);
+    parts.push(`<text x="2" y="${(y - 2).toFixed(1)}" font-size="9" fill="#9aa4ad">EL.${(g * 1000).toFixed(0)}</text>`);
+  }
+  const y0 = +sy(0);
+  parts.push(`<line x1="0" y1="${y0}" x2="${drawRight}" y2="${y0}" stroke="#274b66" stroke-width="1.2"/>`);
+  for (let g = Math.ceil(hLo / 10) * 10; g <= hHi + 1e-6; g += 10) {
+    const x = +sx(g);
+    parts.push(`<line x1="${x}" y1="0" x2="${x}" y2="${drawBottom}" stroke="#eceef1" stroke-width="0.6"/>`);
+    parts.push(`<text x="${x}" y="${(drawBottom + 12).toFixed(1)}" font-size="9" fill="#9aa4ad" text-anchor="middle">${hName}${g.toFixed(0)}</text>`);
+  }
+  // 設備斷面輪廓：AABB 在水平×垂直的矩形（實線；斷面加對角剖面線示意）
+  const clampH = (h) => Math.max(hLo, Math.min(hHi, h));
+  for (const bd of cutBodies) {
+    const aName = hAxis === 0 ? 'x' : 'z';
+    const xL = +sx(clampH(bd.box.min[aName])), xR = +sx(clampH(bd.box.max[aName]));
+    const yT = +sy(Math.min(vHi, bd.box.max.y)), yB = +sy(Math.max(vLo, bd.box.min.y));
+    parts.push(`<rect x="${Math.min(xL, xR).toFixed(1)}" y="${yT.toFixed(1)}" width="${Math.abs(xR - xL).toFixed(1)}" height="${(yB - yT).toFixed(1)}" fill="rgba(46,139,168,0.14)" stroke="#12283a" stroke-width="1.4"/>`);
+    parts.push(`<text x="${((xL + xR) / 2).toFixed(1)}" y="${(yT - 4).toFixed(1)}" font-size="10" font-weight="600" fill="#12283a" text-anchor="middle">${bd.tag}</text>`);
+  }
+  // 管線斷面：跨面點畫實心圓（直徑=管徑投影），示意被剖到的管
+  for (const m of cutMarks) {
+    if (m.h < hLo || m.h > hHi || m.v < vLo || m.v > vHi) continue;
+    parts.push(`<circle cx="${sx(m.h)}" cy="${sy(m.v)}" r="${Math.max(m.r * S, 2).toFixed(1)}" fill="rgba(70,140,200,0.35)" stroke="#274b66" stroke-width="1.2"/>`);
+  }
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const MARGIN = 40;
+  const PW = Wm * S + MARGIN * 2, PH = Hm * S + MARGIN * 2 + 78;
+  const posMm = (cutPos * 1000).toFixed(0);
+  const tb = dwgTitleBlock(PW - 7, PH - 7, {
+    project: `剖面 ${normAxis.toUpperCase()}=${posMm}mm・斷面 ${cutBodies.length} 設備／${cutMarks.length} 管${meta.by ? ' · ' + meta.by : ''}`,
+    title: meta.title ?? `${sceneData.plant.name}｜SECTION 剖面圖（法向 ${normAxis.toUpperCase()}）`,
+    dwgno: meta.dwgno ?? `${(sceneId ?? 'SCN').toUpperCase()}-SEC-001`,
+    rev: meta.rev ?? 'A', date: dateStr, scaleTxt: `1m=${S}px`,
+  });
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PW} ${PH}" font-family="Inter,'Noto Sans TC',sans-serif" style="background:#fff">
+  <rect x="1" y="1" width="${PW - 2}" height="${PH - 2}" fill="#fdfefe" stroke="#12283a" stroke-width="1.8"/>
+  <rect x="7" y="7" width="${PW - 14}" height="${PH - 14}" fill="none" stroke="#12283a" stroke-width="0.7"/>
+  <g transform="translate(${MARGIN} ${MARGIN})">
+  ${parts.join('\n  ')}
+  </g>
+  <g transform="translate(16 ${PH - 24})">
+    <line x1="0" y1="0" x2="${10 * S}" y2="0" stroke="#12283a" stroke-width="3"/>
+    <text x="${5 * S}" y="-5" font-size="9" fill="#12283a" text-anchor="middle">10 m</text>
+  </g>
+  ${tb}
+</svg>`;
+}
+function exportSection() {
+  if (!clip.mode) { setHint('請先在 <b>檢視 > 剖切</b> 開剖切盒／六平面，再出剖面圖'); return; }
+  const probe = sectionSvg({});
+  if (probe == null) { setHint('剖面圖需要一個<b>垂直剖切面</b>（±X／±Z）；請啟用其中一面'); return; }
+  if (probe === '') { setHint('目前剖切面沒有跨越任何設備／管線，無斷面可畫'); return; }
+  openDwgDialog('剖面 Section', {
+    title: `${sceneData.plant.name}｜SECTION 剖面圖`,
+    dwgno: `${(sceneId ?? 'SCN').toUpperCase()}-SEC-001`, rev: 'A', by: dwgLastBy,
+  }, (m) => {
+    const svg = sectionSvg(m);
+    if (!svg) { setHint('剖面產生失敗（剖切狀態已變更），請重試'); return; }
+    saveBlob(`${sceneId ?? 'scene'}-SECTION.svg`, svg, 'image/svg+xml', true);
+    setHint('剖面圖已輸出（新分頁預覽＋下載 SVG）');
+  });
+}
+document.getElementById('btn-section').addEventListener('click', exportSection);
+
 // ------------------------------------------------------------ 管線清單（Pipe List，對標 E3D Pipe List 報表）
 function renderPipeListPanel() {
   repaintPanel = renderPipeListPanel;

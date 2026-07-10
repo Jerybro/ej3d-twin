@@ -506,6 +506,17 @@
             </div>
             <div class="rgroup-label">剖切</div>
           </div>
+          <!-- 出圖：正交立面（N/S/E/W）＋剖面（沿剖切面），沿用 GA 出圖樣式（e3d/feat-draw2） -->
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" data-elev="n" title="立面圖：看向北（水平=東西，垂直=標高U，深度Z壓平），輸出 SVG"><span class="ric" data-ic="elev"></span>立面北</button>
+              <button class="rbtn" data-elev="s" title="立面圖：看向南，輸出 SVG"><span class="ric" data-ic="elev"></span>立面南</button>
+              <button class="rbtn" data-elev="e" title="立面圖：看向東（水平=南北，深度X壓平），輸出 SVG"><span class="ric" data-ic="elev"></span>立面東</button>
+              <button class="rbtn" data-elev="w" title="立面圖：看向西，輸出 SVG"><span class="ric" data-ic="elev"></span>立面西</button>
+              <button class="rbtn" id="btn-section" title="剖面圖：沿目前剖切盒的垂直面（±X／±Z）取斷面，投影跨面設備/管線；須先開剖切"><span class="ric" data-ic="clipsix"></span>剖面</button>
+            </div>
+            <div class="rgroup-label">出圖 立面/剖面</div>
+          </div>
           <!-- 審查工具：X-ray/線框＋截圖＋淨空量測（e3d/feat-review） -->
           <div class="rgroup">
             <div class="rgroup-tools">

@@ -1778,6 +1778,81 @@ builders.rooffan = function ({ r, h }) {
 // E3D Component Editor：閥/法蘭對/異徑管/止回閥，沿管線弧長定位
 // ftf（公尺，選填）：spec/bore 選型的 face-to-face 長度。給定時把元件沿管向（本地 X）
 // 縮放到該長度取代寫死幾何長，維持徑向（Y/Z）依 r 的比例。
+// ------------------------------------------------------------ 電纜橋架自由佈線斷面渲染（profile:'tray'）
+// 沿路徑各段建 U 型槽（實底/沖孔）或梯型托盤（ladder，側牆＋橫檔），轉角以短接續盒填角。
+// 幾何一律公尺 canonical；材質走「儀電」灰藍，type 差異：ladder=橫檔、solid=實底板、perforated=實底近似＋淺色。
+// 本地座標：段沿 +Z（與矩形風管一致），quaternion 對齊流向；托盤「側牆向上」＝本地 +Y。
+const TRAY_MATS = {
+  solid: std(0x6f7b88, { metalness: 0.45, roughness: 0.5 }),
+  perforated: std(0x8794a2, { metalness: 0.4, roughness: 0.6 }),   // 沖孔近似＝實底＋淺色
+  ladder: std(0x6f7b88, { metalness: 0.45, roughness: 0.5 }),
+};
+export function trayMat(type) { return TRAY_MATS[type] ?? TRAY_MATS.solid; }
+// 側牆高與板厚：隨寬度略縮放，維持工程比例（150mm 寬→約 50mm 牆；600mm→約 75mm）。
+function trayDims(w) {
+  const sideH = Math.min(0.075, Math.max(0.045, w * 0.12));   // 側牆高（公尺）
+  const th = 0.006;                                            // 板/牆厚（公尺）
+  return { sideH, th };
+}
+// 建一段托盤（本地：長度沿 Z、寬沿 X、側牆向上 +Y）。回傳 Group。
+function buildTraySeg(w, len, type, mat) {
+  const g = new THREE.Group();
+  const { sideH, th } = trayDims(w);
+  // 兩側牆（沿 Z 的長條）
+  for (const sx of [-1, 1]) {
+    const side = new THREE.Mesh(new THREE.BoxGeometry(th, sideH, len), mat);
+    side.position.set(sx * (w / 2 - th / 2), sideH / 2, 0);
+    g.add(side);
+  }
+  if (type === 'ladder') {
+    // 梯型：無底板，等距橫檔（沿 X 的短棒）連接兩側牆
+    const n = Math.max(2, Math.round(len / 0.3));
+    for (let i = 0; i <= n; i++) {
+      const rung = new THREE.Mesh(new THREE.BoxGeometry(w - th, th * 1.4, 0.03), mat);
+      rung.position.set(0, th * 0.7, -len / 2 + (len * i) / n);
+      g.add(rung);
+    }
+  } else {
+    // solid / perforated：實底板（沖孔以淺色材質近似，不逐孔建幾何以控面數）
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(w, th, len), mat);
+    floor.position.set(0, th / 2, 0);
+    g.add(floor);
+  }
+  return g;
+}
+// 建整條托盤佈線 body：沿 pts 逐段建托盤＋內角接續盒。掛進傳入的 group（由 editor 端持有 dispose）。
+export function buildTrayBody(pipe, index, group, pts) {
+  const w = pipe.tray?.w ?? 0.3;
+  const type = pipe.tray?.type ?? 'solid';
+  const mat = trayMat(type);
+  const { sideH, th } = trayDims(w);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const dir = b.clone().sub(a), len = dir.length();
+    if (len < 1e-4) continue;
+    const seg = buildTraySeg(w, len, type, mat);
+    seg.position.copy(a).addScaledVector(dir, 0.5);
+    seg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().normalize());
+    seg.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.userData.pipeIndex = index; } });
+    group.add(seg);
+    if (i < pts.length - 2) {   // 內角：自動水平彎接續盒（U 型槽轉角，含側牆與底）
+      const el = new THREE.Group();
+      const box = new THREE.Mesh(new THREE.BoxGeometry(w, th, w), mat);   // 轉角底板
+      box.position.y = th / 2;
+      el.add(box);
+      for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {         // 四邊短側牆填角
+        const wall = new THREE.Mesh(
+          dx ? new THREE.BoxGeometry(th, sideH, w) : new THREE.BoxGeometry(w, sideH, th), mat);
+        wall.position.set(dx * (w / 2 - th / 2), sideH / 2, dz * (w / 2 - th / 2));
+        el.add(wall);
+      }
+      el.position.copy(pts[i + 1]);
+      el.traverse((o) => { if (o.isMesh) o.userData.pipeIndex = index; });
+      group.add(el);
+    }
+  }
+}
+
 export function buildPipeComponent(kind, r, ftf) {
   const inner = new THREE.Group();
   const g = inner;
@@ -2130,3 +2205,4 @@ function buildEnvelope(body, pad = {}) {
 }
 
 export { std, markShadow, builders, dm, dPad, dFlange, dNozzle, dLadder, dHandrailRing, detailedBuilders, mergeByMaterial, labelHeight, buildEnvelope };
+// buildTrayBody / trayMat 已於定義處 export（電纜橋架自由佈線）

@@ -10,7 +10,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight,
          buildPrim, buildPipeComponent, PIPE_COMPONENTS,
          PIPE_SPECS, PIPE_SERVICES, PIPE_BORES, PIPE_SCHEDULES, pipeWall,
-         COMPONENT_FTF, pickComponent,
+         COMPONENT_FTF, pickComponent, buildTrayBody, trayMat,
          STEEL_SECTIONS, steelSection, sectionDesc, buildEnvelope } from './plant-builders.js';
 import { initSprite } from './sprite.js';
 import { runClash, clashKey } from './clash.js';
@@ -70,6 +70,7 @@ const ICONS = {
   mto: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M3 14h18M9 4v16"/>',
   batch: '<rect x="3" y="3" width="9" height="9" rx="1"/><path d="M8 14v6h12V8h-6"/><path d="M6 6h3M6 8.5h3"/>',
   duct: '<rect x="3" y="8" width="18" height="8" rx="1"/><path d="M7 8V5M17 8V5"/>',
+  tray: '<path d="M3 8v8M21 8v8"/><path d="M3 8h18M3 16h18"/><path d="M7 8v8M11 8v8M15 8v8"/>',
   laycube: '<path d="M12 3l7 4v10l-7 4-7-4V7l7-4z"/><path d="M12 11l7-4M12 11L5 7M12 11v10"/>',
   laypipe: '<path d="M4 6h7a7 7 0 0 1 7 7v5"/><path d="M4 11h7a2 2 0 0 1 2 2v5"/>',
   laybeam: '<path d="M6 4h12M6 20h12M12 4v16"/>',
@@ -302,7 +303,9 @@ function applyLayers() {
   pipeObjects.forEach((p, i) => {
     if (!p) return;
     const pipe = sceneData.pipes[i];
-    const layerOn = pipe?.profile === 'duct' ? LAYERS.hvac : LAYERS.pipe;
+    const layerOn = pipe?.profile === 'duct' ? LAYERS.hvac
+      : pipe?.profile === 'tray' ? LAYERS.elec   // 電纜橋架走儀電圖層
+      : LAYERS.pipe;
     const svcKey = pipeServiceKey(pipe);   // 風管→null（不受服務篩選）；管線→service code 或 '__none__'
     p.group.visible = layerOn && !(svcKey && hiddenServices.has(svcKey));   // 服務圖例篩選：隱藏該服務別
   });
@@ -406,17 +409,18 @@ function serviceMat(code) {
 // 管段「基底材質」（非選取狀態的還原目標）：風管用 ductMat；管線有 service 用服務色，否則 pipeMat。
 function pipeBaseMat(pipe) {
   if (pipe?.profile === 'duct') return ductMat;
+  if (pipe?.profile === 'tray') return trayMat(pipe.tray?.type ?? 'solid');   // 儀電托盤色（依 type）
   return pipe?.service ? serviceMat(pipe.service) : pipeMat;
 }
 // UI 狀態：被圖例隱藏的服務別（不入存檔）。'__none__' 代表「無服務別」的管線群。
 const hiddenServices = new Set();
-const pipeServiceKey = (pipe) => (pipe?.profile === 'duct' ? null
+const pipeServiceKey = (pipe) => ((pipe?.profile === 'duct' || pipe?.profile === 'tray') ? null   // 風管/電纜橋架不受服務別篩選
   : ((pipe?.service && SERVICE_BY_CODE[pipe.service]) ? pipe.service : '__none__'));   // 未知/舊 code 也歸 __none__（與計數/著色一致）
 
 // 坡度：slope 存「‰（每公尺水平落差 mm）」canonical，預設 0（水平）。
 // 落差只在渲染層套用——pts 仍為水平公尺 canonical，twin/USD 讀 pts 不受污染。
 // dpts[i].y = pts[i].y − (slope/1000)×(至第 i 節點的水平弧長)。
-const pipeSlopePermille = (pipe) => (pipe.profile === 'duct' ? 0 : (+pipe.slope || 0));
+const pipeSlopePermille = (pipe) => ((pipe.profile === 'duct' || pipe.profile === 'tray') ? 0 : (+pipe.slope || 0));
 // 產生「已套坡度」的顯示節點陣列（不改 pipe.pts）；坡度 0 時回傳原始節點。
 function slopedDisplayPts(pipe, pts) {
   const s = pipeSlopePermille(pipe);
@@ -435,6 +439,7 @@ function buildPipe(pipe, index) {
   group.userData.pipeIndex = index;
   const ptsRaw = pipe.pts.map((p) => new THREE.Vector3(...p));   // canonical 水平節點（勿改）
   if (pipe.profile === 'duct') { buildDuctBody(pipe, index, group, ptsRaw); scene.add(group); pipeObjects[index] = { group }; return; }
+  if (pipe.profile === 'tray') { buildTrayBody(pipe, index, group, ptsRaw); scene.add(group); pipeObjects[index] = { group }; return; }
   // 坡度：僅渲染層下降 Y（pts 不變）。pts 供 arcToPose/報表使用仍是水平 canonical。
   const pts = slopedDisplayPts(pipe, ptsRaw);
   const slopePM = pipeSlopePermille(pipe);
@@ -779,6 +784,9 @@ let mode = 'idle'; // idle | placing | pipe | measure | pipenode | nozzle
 let placingAsset = null;  // ASSET_CATALOG 項
 let ductDraw = false;     // 繪製模式：true=下一條管線為風管
 let ductSize = [0.8, 0.5];
+let trayDraw = false;     // 繪製模式：true=下一條為電纜橋架（profile:'tray'，比照 duct 復用管線折線子系統）
+let trayWidth = 0.3;      // 托盤寬（公尺 canonical）
+let trayType = 'solid';   // ladder | solid | perforated
 let ghost = null;
 let selected = null;      // { kind: 'eq', def } | { kind: 'pipe', index }
 let repaintPanel = null;  // 目前右側面板的重繪閉包（切換單位時即時刷新 value/step/單位標籤）
@@ -798,7 +806,9 @@ function setMode(m) {
   document.querySelectorAll('.asset-btn').forEach((b) => b.classList.remove('active'));
   document.getElementById('pipe-btn').classList.remove('active');
   document.getElementById('duct-btn').classList.remove('active');
+  document.getElementById('tray-btn').classList.remove('active');
   ductDraw = false;
+  trayDraw = false;
   document.getElementById('btn-measure').classList.remove('active');
   document.getElementById('btn-measure-angle').classList.remove('active');
   document.getElementById('btn-measure-clear').classList.remove('active');
@@ -1182,11 +1192,14 @@ function wirePrims(def) {
 function renderPipeProps(index) {
   repaintPanel = () => renderPipeProps(index);
   const pipe = sceneData.pipes[index];
-  document.getElementById('prop-title').textContent = `管線 #${index + 1}`;
   const isDuct = pipe.profile === 'duct';
+  const isTray = pipe.profile === 'tray';
+  document.getElementById('prop-title').textContent = `${isTray ? '電纜橋架' : isDuct ? '風管' : '管線'} #${index + 1}`;
+  const TRAY_WIDTHS = [0.15, 0.3, 0.45, 0.6];   // 標準托盤寬（公尺）：150/300/450/600mm
+  const TRAY_TYPES = [{ v: 'ladder', name: '梯級（ladder）' }, { v: 'solid', name: '實底（solid）' }, { v: 'perforated', name: '沖孔（perforated）' }];
   const DUCT_FITTINGS = [{ kind: 'tee', name: '風管三通' }, { kind: 'damper', name: '風門' }, { kind: 'transition', name: '漸縮' }];
   const DUCT_SHAPES = [{ v: 'rect', name: '矩形' }, { v: 'circ', name: '圓形' }, { v: 'oval', name: '橢圓' }];
-  const compKinds = isDuct ? DUCT_FITTINGS : PIPE_COMPONENTS;
+  const compKinds = isTray ? [] : isDuct ? DUCT_FITTINGS : PIPE_COMPONENTS;   // 托盤暫不提供管中元件
   const compName = Object.fromEntries([...PIPE_COMPONENTS, ...DUCT_FITTINGS].map((c) => [c.kind, c.name]));
   const compRows = (pipe.components ?? []).map((c, i) =>
     `<label>${compName[c.kind] ?? c.kind}</label>
@@ -1218,27 +1231,37 @@ function renderPipeProps(index) {
         }
         return rows;
       })() : ''}
-      ${isDuct ? '' : pgRow('Spec', `<select data-k="spec" style="width:100%">${PIPE_SPECS.map((sp) =>
+      ${isTray ? (() => {
+        const tw = pipe.tray?.w ?? 0.3, tt = pipe.tray?.type ?? 'solid';
+        // 寬度：若非標準值也塞一個當前值選項，避免下拉選不到自訂寬
+        const widths = TRAY_WIDTHS.includes(tw) ? TRAY_WIDTHS : [...TRAY_WIDTHS, tw].sort((a, b) => a - b);
+        let rows = pgRow('托盤寬 W', `<select data-tray="w" style="width:100%">${widths.map((v) =>
+          `<option value="${v}" ${Math.abs(v - tw) < 1e-6 ? 'selected' : ''}>${(v * 1000) | 0} mm</option>`).join('')}</select>`);
+        rows += pgRow('托盤型式', `<select data-tray="type" style="width:100%">${TRAY_TYPES.map((t) =>
+          `<option value="${t.v}" ${tt === t.v ? 'selected' : ''}>${t.name}</option>`).join('')}</select>`);
+        return rows;
+      })() : ''}
+      ${(isDuct || isTray) ? '' : pgRow('Spec', `<select data-k="spec" style="width:100%">${PIPE_SPECS.map((sp) =>
         `<option value="${sp.code}" ${pipe.spec === sp.code ? 'selected' : ''}>${sp.code}｜${sp.name}</option>`).join('')}</select>`)}
-      ${isDuct ? '' : pgRow('服務別 Service', `<select data-k="service" style="width:100%"><option value="" ${!pipe.service ? 'selected' : ''}>（無）＝用 Spec 色</option>${PIPE_SERVICES.map((sv) =>
+      ${(isDuct || isTray) ? '' : pgRow('服務別 Service', `<select data-k="service" style="width:100%"><option value="" ${!pipe.service ? 'selected' : ''}>（無）＝用 Spec 色</option>${PIPE_SERVICES.map((sv) =>
         `<option value="${sv.code}" ${pipe.service === sv.code ? 'selected' : ''}>${sv.name}</option>`).join('')}</select>`)}
-      ${isDuct ? '' : pgRow('Bore', `<select data-k="dn" style="width:100%">${
+      ${(isDuct || isTray) ? '' : pgRow('Bore', `<select data-k="dn" style="width:100%">${
         (!pipe.dn && !PIPE_BORES.some((b) => Math.abs(b.r - pipe.r) < 0.01))
           ? '<option value="" selected disabled>（自訂 bore）</option>' : ''}${PIPE_BORES.map((b) =>
         `<option value="${b.dn}" ${pipe.dn === b.dn || (!pipe.dn && Math.abs(b.r - pipe.r) < 0.01) ? 'selected' : ''}>${b.dn}（⌀${Math.round(b.r * 2000)}mm）</option>`).join('')}</select>`)}
-      ${isDuct ? '' : pgRow(`外徑 ⌀ (${unitLabel()})`, `<input data-k="od" type="number" step="${U().step}" value="${toDisp(pipe.r * 2)}">`)}
-      ${isDuct ? '' : pgRow('Schedule', `<select data-k="sched" style="width:100%">${PIPE_SCHEDULES.map((s) =>
+      ${(isDuct || isTray) ? '' : pgRow(`外徑 ⌀ (${unitLabel()})`, `<input data-k="od" type="number" step="${U().step}" value="${toDisp(pipe.r * 2)}">`)}
+      ${(isDuct || isTray) ? '' : pgRow('Schedule', `<select data-k="sched" style="width:100%">${PIPE_SCHEDULES.map((s) =>
         `<option value="${s}" ${(pipe.sched ?? 'STD') === s ? 'selected' : ''}>Sch ${s}</option>`).join('')}</select>`)}
       ${(() => {
-        const wall = isDuct ? null : pipeWall(pipe.dn, pipe.sched ?? 'STD');
+        const wall = (isDuct || isTray) ? null : pipeWall(pipe.dn, pipe.sched ?? 'STD');
         return wall == null ? ''
           : pgRow(`壁厚 (${unitLabel()})`, `<span>${fmtLen(wall, false)}</span>`)
           + pgRow(`內徑 bore (${unitLabel()})`, `<span>${fmtLen(pipe.r * 2 - 2 * wall, false)}</span>`);
       })()}
-      ${pgRow(`保溫厚 (${unitLabel()})`, `<input data-k="insul" type="number" step="${U().step}" value="${toDisp(pipe.insul ?? 0)}">`)}
-      ${(pipe.insul ?? 0) > 0 ? pgRow(`含保溫外徑 (${unitLabel()})`, `<span>${fmtLen(pipe.r * 2 + 2 * pipe.insul, false)}</span>`) : ''}
-      ${isDuct ? '' : pgRow('坡度 Slope (‰)', `<input data-k="slope" type="number" step="1" value="${+pipe.slope || 0}" title="每公尺水平落差 mm（‰）；下坡為正。0＝水平">`)}
-      ${isDuct ? '' : (() => {
+      ${isTray ? '' : pgRow(`保溫厚 (${unitLabel()})`, `<input data-k="insul" type="number" step="${U().step}" value="${toDisp(pipe.insul ?? 0)}">`)}
+      ${(!isTray && (pipe.insul ?? 0) > 0) ? pgRow(`含保溫外徑 (${unitLabel()})`, `<span>${fmtLen(pipe.r * 2 + 2 * pipe.insul, false)}</span>`) : ''}
+      ${(isDuct || isTray) ? '' : pgRow('坡度 Slope (‰)', `<input data-k="slope" type="number" step="1" value="${+pipe.slope || 0}" title="每公尺水平落差 mm（‰）；下坡為正。0＝水平">`)}
+      ${(isDuct || isTray) ? '' : (() => {
         const s = +pipe.slope || 0;
         if (!s) return '';   // 水平不顯 Fall 列，維持面板精簡
         const hLen = pipeHorizLength(pipe);          // 水平長度（公尺 canonical）
@@ -1249,12 +1272,12 @@ function renderPipeProps(index) {
       ${pgRow('節點數', `<span>${pipe.pts.length}</span>`)}
       ${pgRow('總長', `<span>${fmtLen(pipeLength(pipe))}</span>`)}
     </div>
-    <div class="pg-section">Components（管中元件）</div>
+    ${isTray ? '' : `<div class="pg-section">Components（管中元件）</div>
     ${compRows ? `<div class="pg-grid">${compRows}</div>` : ''}
     <div style="display:flex;gap:6px;margin-top:6px">
       <select class="rsel" id="comp-kind" style="flex:1">${compOpts}</select>
       <button class="pbtn" id="comp-place" style="width:auto;margin:0;padding:6px 12px">沿管放置</button>
-    </div>
+    </div>`}
     <button class="pbtn" id="prop-nodes">節點編輯</button>
     <button class="pbtn danger" id="prop-delete">刪除（Delete）</button>`;
   propBody.querySelector('[data-k="od"]')?.addEventListener('change', (e) => {   // 風管不渲染此欄→null-safe
@@ -1321,6 +1344,22 @@ function renderPipeProps(index) {
       rebuildAllPipes();
       selectPipe(index);
     }));
+  // 電纜橋架寬度/型式：改後同步等效半徑 r（=寬/2）並重建幾何
+  propBody.querySelector('[data-tray="w"]')?.addEventListener('change', (e) => {
+    pushUndo();
+    pipe.tray = pipe.tray ?? {};
+    pipe.tray.w = Math.max(0.05, parseFloat(e.target.value) || 0.3);   // 值已是公尺（選項 value 為公尺）
+    pipe.r = pipe.tray.w / 2;
+    rebuildAllPipes();
+    selectPipe(index);
+  });
+  propBody.querySelector('[data-tray="type"]')?.addEventListener('change', (e) => {
+    pushUndo();
+    pipe.tray = pipe.tray ?? {};
+    pipe.tray.type = e.target.value;
+    rebuildAllPipes();   // 重建以套用型式幾何（ladder/solid/perforated）與著色
+    selectPipe(index);
+  });
   propBody.querySelectorAll('[data-cat]').forEach((inp) => inp.addEventListener('change', () => {
     pushUndo();
     pipe.components[+inp.dataset.cat].at =
@@ -1334,7 +1373,7 @@ function renderPipeProps(index) {
     rebuildAllPipes();
     selectPipe(index);
   }));
-  document.getElementById('comp-place').addEventListener('click', () => {
+  document.getElementById('comp-place')?.addEventListener('click', () => {   // 托盤無元件區→null-safe
     pendingComp = { kind: document.getElementById('comp-kind').value, pipeIndex: index };
     mode = 'placecomp';
     setHint(`沿<b>管線 #${index + 1}</b>移動游標，點擊放置<b>${compName[pendingComp.kind]}</b>（Esc 取消）`);
@@ -1751,6 +1790,17 @@ document.getElementById('duct-btn').addEventListener('click', () => {
   selectNone();
   setHint('風管繪製：依序點擊路徑點，<b>Enter</b> 完成；轉角自動放方形彎頭，之後可沿風管放三通/風門。Esc 取消');
 });
+// 電纜橋架自由佈線：比照風管復用管線折線子系統（profile:'tray'），差別在渲染成 U 型托盤斷面
+document.getElementById('tray-btn').addEventListener('click', () => {
+  if (mode === 'pipe' && trayDraw) { setMode('idle'); return; }
+  setMode('pipe');
+  trayDraw = true;
+  trayWidth = parseFloat(document.getElementById('tray-width').value) || 0.3;
+  trayType = document.getElementById('tray-type').value || 'solid';
+  document.getElementById('tray-btn').classList.add('active');
+  selectNone();
+  setHint('電纜橋架繪製：依序點擊路徑點，<b>Shift</b>=正交鎖定，<b>Enter</b> 完成；轉角自動生水平彎。Esc 取消');
+});
 
 // ------------------------------------------------------------ 滑鼠互動
 const raycaster = new THREE.Raycaster();
@@ -1807,7 +1857,7 @@ function snapToEquipment(pt) {
   if (pipeDraft.length === 0) {   // 只在「起點」允許起 branch（避免中途誤吸）
     let bestPipe = null, bestPipeD = 0.6, bestPipeAt = 0, bestPos = null;
     sceneData.pipes.forEach((pipe, i) => {
-      if (!pipe.pts || pipe.pts.length < 2 || pipe.profile === 'duct') return;
+      if (!pipe.pts || pipe.pts.length < 2 || pipe.profile === 'duct' || pipe.profile === 'tray') return;
       const near = nearestArcOnPipe(pipe, pt);
       if (near.pos && near.d < bestPipeD) { bestPipeD = near.d; bestPipe = i; bestPipeAt = near.at; bestPos = near.pos; }
     });
@@ -1872,7 +1922,7 @@ function checkConnectivity(data) {
   const pipeDN = (pipe) => pipe.dn || dnFromRadius(pipe.r);
   data.pipes.forEach((pipe, i) => {
     if (!pipe.pts || pipe.pts.length < 2 || pipe.bridge) return;
-    if (pipe.profile === 'duct') return;   // 風管不做管閥連通檢查
+    if (pipe.profile === 'duct' || pipe.profile === 'tray') return;   // 風管/電纜橋架不做管閥連通檢查
     const ends = [
       { name: '起點 head', ref: pipe.head, p: pipe.pts[0] },
       { name: '終點 tail', ref: pipe.tail, p: pipe.pts[pipe.pts.length - 1] },
@@ -3509,7 +3559,7 @@ function renderServiceLegend() {
   const counts = {};
   let noneCount = 0;
   for (const p of sceneData.pipes) {
-    if (p.profile === 'duct') continue;
+    if (p.profile === 'duct' || p.profile === 'tray') continue;
     if (p.service && SERVICE_BY_CODE[p.service]) counts[p.service] = (counts[p.service] ?? 0) + 1;
     else noneCount++;
   }
@@ -4616,7 +4666,11 @@ addEventListener('keydown', (e) => {
   } else if (e.key === 'Enter' && mode === 'pipe' && pipeDraft.length >= 2) {
     pushUndo();
     const ptsOut = pipeDraft.map((p) => [roundMM(p.x), roundMM(p.y), roundMM(p.z)]);
-    if (ductDraw) {
+    if (trayDraw) {
+      const w = trayWidth;
+      // 等效半徑 r＝寬/2（clash/支撐/報表沿用管線機制）；tray 屬性存於 pipe.tray（比照 duct）
+      sceneData.pipes.push({ r: w / 2, profile: 'tray', tray: { w, type: trayType }, spec: 'ELEC', dn: `CT${(w * 1000) | 0}`, pts: ptsOut });
+    } else if (ductDraw) {
       const [w, h] = ductSize;
       sceneData.pipes.push({ r: Math.max(w, h) / 2, profile: 'duct', duct: { w, h }, spec: 'HVAC', dn: `${(w * 1000) | 0}×${(h * 1000) | 0}`, pts: ptsOut });
     } else {

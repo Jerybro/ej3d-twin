@@ -1,0 +1,77 @@
+{
+ "flowsheet_id": "steam-demo",
+ "name": "客戶自組:汽電示範",
+ "desc": "鍋爐→汽輪發電;風機獨立監測",
+ "trains": [
+  [
+   "WB-1",
+   "TG-1"
+  ],
+  [
+   "FAN-1"
+  ]
+ ],
+ "blocks": [
+  {
+   "id": "WB-1",
+   "name": "廢熱鍋爐",
+   "model_key": "22dbd537_10015",
+   "kind": "regression",
+   "output_label": "steam_flow_t_h",
+   "unit": "t/h",
+   "better": "high",
+   "warn": 55,
+   "crit": 45,
+   "ico": "boiler",
+   "defaults": {
+    "heat_release_MW": 52.675,
+    "feedwater_t_h": 61.865,
+    "drum_pressure_bar": 39.98,
+    "boiler_inlet_gas_C": 887.0
+   }
+  },
+  {
+   "id": "TG-1",
+   "name": "汽輪發電機",
+   "model_key": "facdf2a4_10020",
+   "kind": "regression",
+   "output_label": "power_MW",
+   "unit": "MW",
+   "better": "high",
+   "warn": 14,
+   "crit": 11,
+   "ico": "turbine",
+   "defaults": {
+    "inlet_steam_temp_C": 395.4,
+    "condenser_vac_kPa": -91.97
+   }
+  },
+  {
+   "id": "FAN-1",
+   "name": "引風機監測",
+   "model_key": "ff6e5db6_10019",
+   "kind": "anomaly",
+   "output_label": "健康分數",
+   "unit": "/100",
+   "better": "high",
+   "warn": null,
+   "crit": null,
+   "ico": "fan",
+   "defaults": {
+    "fan_motor_current_A": 113.9,
+    "fan_vibration_mm_s": 2.995,
+    "fan_bearing_temp_C": 66.4,
+    "flue_gas_flow_kNm3_h": 164.9
+   }
+  }
+ ],
+ "connections": [
+  {
+   "from": "WB-1",
+   "source_output": "steam_flow_t_h",
+   "to": "TG-1",
+   "target_input": "inlet_steam_t_h",
+   "unit": "t/h"
+  }
+ ]
+}

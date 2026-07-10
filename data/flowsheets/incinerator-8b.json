@@ -1,0 +1,177 @@
+{
+ "flowsheet_id": "incinerator-8b",
+ "name": "焚化爐全廠數據孿生(8 blocks)",
+ "desc": "煙氣一條龍:燃燒→SNCR→餘熱鍋爐→洗煙→活性碳→袋濾→引風;蒸汽支線→汽輪發電。",
+ "trains": [
+  [
+   "B-101",
+   "B-201",
+   "B-301",
+   "B-401",
+   "B-501",
+   "B-601",
+   "B-701"
+  ],
+  [
+   "B-301",
+   "B-801"
+  ]
+ ],
+ "blocks": [
+  {
+   "id": "B-101",
+   "name": "爐排燃燒爐",
+   "model_key": "1058a8d8_10013",
+   "kind": "regression",
+   "output_label": "生成 NOx",
+   "unit": "mg/Nm³",
+   "better": "low",
+   "warn": 340,
+   "crit": 385,
+   "ico": "🔥",
+   "defaults": {
+    "waste_feed_t_h": 20.03,
+    "waste_LHV_kJ_kg": 9456.5,
+    "primary_air_kNm3_h": 88.1,
+    "secondary_air_kNm3_h": 54.8,
+    "grate_speed_m_h": 12.04,
+    "primary_air_temp_C": 179.4
+   }
+  },
+  {
+   "id": "B-201",
+   "name": "SNCR 脫硝",
+   "model_key": "d99cf30d_10014",
+   "kind": "regression",
+   "output_label": "出口 NOx",
+   "unit": "mg/Nm³",
+   "better": "low",
+   "warn": 230,
+   "crit": 300,
+   "ico": "💨",
+   "defaults": {
+    "urea_inject_L_h": 121.4,
+    "furnace_temp_C": 928.65,
+    "flue_gas_flow_kNm3_h": 164.9
+   }
+  },
+  {
+   "id": "B-301",
+   "name": "餘熱鍋爐",
+   "model_key": "22dbd537_10015",
+   "kind": "regression",
+   "output_label": "蒸汽流量",
+   "unit": "t/h",
+   "better": "high",
+   "warn": 52,
+   "crit": 46,
+   "ico": "♨️",
+   "defaults": {
+    "heat_release_MW": 52.675,
+    "feedwater_t_h": 61.865,
+    "drum_pressure_bar": 39.98,
+    "boiler_inlet_gas_C": 887.0
+   }
+  },
+  {
+   "id": "B-401",
+   "name": "半乾式洗煙塔",
+   "model_key": "f56b7b69_10016",
+   "kind": "regression",
+   "output_label": "出口 HCl",
+   "unit": "mg/Nm³",
+   "better": "low",
+   "warn": 340,
+   "crit": 420,
+   "ico": "🌫️",
+   "defaults": {
+    "lime_slurry_kg_h": 180.65,
+    "water_inject_m3_h": 4.02,
+    "inlet_HCl_mg_Nm3": 863.8,
+    "scrubber_exit_temp_C": 138.0,
+    "flue_gas_flow_kNm3_h": 164.9
+   }
+  },
+  {
+   "id": "B-501",
+   "name": "活性碳吸附",
+   "model_key": "6f2e592c_10017",
+   "kind": "regression",
+   "output_label": "出口 Hg",
+   "unit": "µg/Nm³",
+   "better": "low",
+   "warn": 15,
+   "crit": 25,
+   "ico": "⚫",
+   "defaults": {
+    "carbon_inject_kg_h": 12.08,
+    "inlet_Hg_ug_Nm3": 40.5,
+    "flue_gas_flow_kNm3_h": 164.9
+   }
+  },
+  {
+   "id": "B-601",
+   "name": "袋式集塵器",
+   "model_key": "f6f501dc_10018",
+   "kind": "anomaly",
+   "output_label": "健康分數",
+   "unit": "/100",
+   "better": "high",
+   "ico": "🧹",
+   "defaults": {
+    "bag_dP_mbar": 17.82,
+    "collection_eff_pct": 99.909,
+    "outlet_dust_mg_Nm3": 3.79,
+    "inlet_dust_g_Nm3": 4.1705
+   }
+  },
+  {
+   "id": "B-701",
+   "name": "引風機",
+   "model_key": "ff6e5db6_10019",
+   "kind": "anomaly",
+   "output_label": "健康分數",
+   "unit": "/100",
+   "better": "high",
+   "ico": "🌀",
+   "defaults": {
+    "fan_motor_current_A": 113.9,
+    "fan_vibration_mm_s": 2.995,
+    "fan_bearing_temp_C": 66.4,
+    "flue_gas_flow_kNm3_h": 164.9
+   }
+  },
+  {
+   "id": "B-801",
+   "name": "汽輪發電機",
+   "model_key": "facdf2a4_10020",
+   "kind": "regression",
+   "output_label": "發電量",
+   "unit": "MW",
+   "better": "high",
+   "warn": 14,
+   "crit": 11,
+   "ico": "⚡",
+   "defaults": {
+    "inlet_steam_temp_C": 395.4,
+    "condenser_vac_kPa": -91.97
+   }
+  }
+ ],
+ "connections": [
+  {
+   "from": "B-101",
+   "source_output": "raw_NOx_mg_Nm3",
+   "to": "B-201",
+   "target_input": "inlet_NOx_mg_Nm3",
+   "unit": "mg/Nm³"
+  },
+  {
+   "from": "B-301",
+   "source_output": "steam_flow_t_h",
+   "to": "B-801",
+   "target_input": "inlet_steam_t_h",
+   "unit": "t/h"
+  }
+ ]
+}

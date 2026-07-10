@@ -3,63 +3,153 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>焚化爐全廠 flowsheet — 每個 block 綁模型 API</title>
+<title>Flowsheet 工程檢視｜J.S Process Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
-  :root{--bg:#0e131c;--card:#182231;--line:#28374d;--tx:#e7eef7;--mut:#8ba0bd;
-        --ok:#2fbf71;--warn:#e8a33d;--crit:#e5484d;--opt:#8b5cf6;--pred:#0aa2c0;--acc:#046afb;}
-  *{box-sizing:border-box;}
-  body{margin:0;background:var(--bg);color:var(--tx);font-family:"Segoe UI",system-ui,"Microsoft JhengHei",sans-serif;}
-  .wrap{max-width:1240px;margin:0 auto;padding:20px 18px 60px;}
-  h1{font-size:20px;margin:0 0 2px;}
-  .sub{color:var(--mut);font-size:13px;margin-bottom:16px;}
-  .sub code{background:#0c1420;border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:#bcd;}
-  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;}
-  .bar .lbl{color:var(--mut);font-size:12px;margin-right:4px;}
-  button{background:#0c1420;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:7px 13px;font-size:13px;cursor:pointer;}
-  button.active{border-color:var(--acc);background:#12325e;}
-  button:hover{border-color:var(--acc);}
-  /* flowsheet */
-  .flow{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding:6px 2px 14px;}
-  .blk{flex:0 0 148px;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:11px 11px 12px;position:relative;transition:border-color .4s;}
-  .blk .ico{font-size:22px;}
-  .blk .tag{font-size:11px;color:var(--mut);font-weight:700;letter-spacing:.03em;}
-  .blk .nm{font-size:12.5px;font-weight:600;margin:1px 0 7px;line-height:1.25;height:32px;}
-  .badge{display:inline-block;font-size:10px;padding:1px 7px;border-radius:999px;font-weight:700;}
-  .b-optimize{background:#2b2350;color:#c4b5fd;}.b-predict{background:#0b3a44;color:#7fe0f0;}
-  .b-health{background:#12324a;color:#8fd6ff;}
-  .val{font-size:22px;font-weight:800;margin-top:8px;font-variant-numeric:tabular-nums;line-height:1;}
-  .unit{font-size:11px;color:var(--mut);}
-  .st{display:inline-block;margin-top:8px;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;}
-  .key{position:absolute;top:10px;right:10px;width:9px;height:9px;border-radius:50%;background:#334;}
-  .mk{font-size:9.5px;color:#5b6f8c;margin-top:8px;word-break:break-all;}
-  .arrow{flex:0 0 26px;display:flex;align-items:center;justify-content:center;color:#40536e;font-size:18px;}
-  .branch{margin:2px 0 0 0;padding-left:150px;}
-  .branch .blk{flex-basis:170px;}
-  .steamlbl{color:var(--mut);font-size:11px;margin:4px 0 2px 150px;}
-  /* summary + log */
-  .grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-top:16px;}
-  @media(max-width:860px){.grid2{grid-template-columns:1fr;}}
-  .panel{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:14px 16px;}
-  .panel h2{font-size:12px;letter-spacing:.04em;color:var(--mut);margin:0 0 10px;text-transform:uppercase;}
-  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
-  .kpi{background:#0c1420;border:1px solid var(--line);border-radius:8px;padding:9px 10px;}
-  .kpi .k{font-size:11px;color:var(--mut);}.kpi .v{font-size:18px;font-weight:800;margin-top:2px;}
-  #log{font-size:11.5px;font-family:ui-monospace,Consolas,monospace;color:#9db4d0;height:190px;overflow-y:auto;
-       background:#0c1420;border:1px solid var(--line);border-radius:8px;padding:8px 10px;white-space:pre-wrap;}
-  .hz{font-size:11px;color:var(--mut);}
-  .ctrls{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:12px 16px;margin-bottom:14px;}
-  .ctrl{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mut);min-width:168px;}
-  .ctrl b{color:var(--tx);font-size:13px;font-weight:600;}
-  .ctrl .cv{color:#7fb0ff;font-variant-numeric:tabular-nums;}
-  .ctrl input[type=range]{width:100%;accent-color:var(--acc);}
-  .ctrl .opt{margin-top:5px;padding:4px 9px;font-size:11px;border-color:var(--opt);color:#c4b5fd;background:#1b1637;}
+  /* 產品統一藍白殼（與首頁 / 模型 API 控制台同一套 design token） */
+  :root{
+    --blue:#046AFB; --bg:#F6F7FA; --white:#fff; --bdr:#DBDDE0;
+    --text:#061027; --text2:#555; --green:#059669; --green-deep:#052E22;
+    --amber:#B45309; --red:#C0392B;
+    --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-size:14px;
+       font-family:Inter,"Noto Sans TC","Microsoft JhengHei",sans-serif;}
+  .wrap{max-width:1240px;margin:0 auto;padding:22px 28px 56px;}
+  header.site{display:flex;align-items:center;gap:12px;margin-bottom:4px;}
+  .brand{display:inline-flex;align-items:center;justify-content:center;height:30px;padding:0 10px;
+         border-radius:8px;background:var(--green-deep);color:#fff;font-size:13px;font-weight:600;letter-spacing:.5px;}
+  .logo{font-size:19px;font-weight:600;}
+  .site-sub{color:var(--text2);font-size:13px;}
+  .hdr-actions{margin-left:auto;display:flex;gap:8px;}
+  .hbtn{font-size:13px;color:var(--text);text-decoration:none;border:1px solid var(--bdr);border-radius:7px;
+        padding:7px 12px;background:var(--white);cursor:pointer;font-family:inherit;}
+  .hbtn:hover{border-color:var(--blue);color:var(--blue);}
+  h1{font-size:21px;font-weight:600;margin:12px 0 3px;}
+  .sub{color:var(--text2);font-size:13px;margin-bottom:16px;line-height:1.8;}
+  .sub code{background:var(--white);border:1px solid var(--bdr);border-radius:5px;padding:1px 6px;font-family:var(--mono);font-size:11.5px;}
+
+  /* 情境列（chip 膠囊，與 3D 檢視器頂欄同語言） */
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
+  .bar .lbl{color:var(--text2);font-size:12px;font-weight:700;margin-right:2px;}
+  .bar button{padding:6px 14px;border-radius:16px;border:1px solid var(--bdr);background:var(--white);
+       color:var(--text);font-size:12.5px;cursor:pointer;font-family:inherit;}
+  .bar button:hover{border-color:var(--blue);}
+  .bar button.active{background:rgba(4,106,251,.08);border-color:var(--blue);color:var(--blue);font-weight:700;}
+  .hz{font-size:12px;color:var(--text2);}
+
+  /* 操作設點卡 */
+  .ctrls{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-end;background:var(--white);
+         border:1px solid var(--bdr);border-radius:10px;padding:14px 18px;margin-bottom:16px;}
+  .ctrls:empty{display:none;}
+  .ctrl{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--text2);min-width:180px;}
+  .ctrl b{color:var(--text);font-size:13px;font-weight:600;}
+  .ctrl .cv{color:var(--blue);font-weight:700;font-variant-numeric:tabular-nums;}
+  .ctrl input[type=range]{width:100%;accent-color:var(--blue);}
+  .ctrl .opt{margin-top:6px;padding:5px 10px;font-size:11.5px;border:1px solid var(--bdr);border-radius:7px;
+       background:rgba(4,106,251,.06);color:var(--blue);cursor:pointer;font-family:inherit;}
+  .ctrl .opt:hover{border-color:var(--blue);}
+
+  /* KPI 列 */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;}
+  .kpi{background:var(--white);border:1px solid var(--bdr);border-radius:10px;padding:10px 14px;}
+  .kpi .k{font-size:11.5px;color:var(--text2);}
+  .kpi .v{font-size:20px;font-weight:700;margin-top:2px;color:var(--text);font-variant-numeric:tabular-nums;}
+  .kpi .unit{font-size:11px;color:var(--text2);font-weight:400;}
+
+  /* flowsheet：一條 train 一列 */
+  .group-title{font-size:12.5px;color:var(--text2);letter-spacing:1px;margin:6px 0 8px;font-weight:600;}
+  .flow{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding:4px 2px 12px;}
+  .flow.branch{padding-left:64px;}
+  .trainlbl{color:var(--text2);font-size:11px;margin:0 0 2px 8px;}
+  .blk{flex:0 0 158px;background:var(--white);border:1px solid var(--bdr);border-radius:10px;
+       padding:12px 13px;position:relative;transition:border-color .35s, box-shadow .35s;}
+  .blk.gd-warn{border-color:var(--amber);box-shadow:0 0 0 1px rgba(180,83,9,.25);}
+  .blk.gd-out{border-color:var(--red);box-shadow:0 0 0 1px rgba(192,57,43,.3);}
+  .blk.err{opacity:.5;filter:grayscale(.6);}
+  .blk.ref{opacity:.6;border-style:dashed;flex-basis:118px;}
+  .blk .icw{width:34px;height:34px;border-radius:9px;background:rgba(4,106,251,.08);
+       display:flex;align-items:center;justify-content:center;margin-bottom:7px;}
+  .blk .icw svg{width:20px;height:20px;stroke:var(--blue);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;}
+  .blk.anom .icw{background:rgba(5,150,105,.09);}
+  .blk.anom .icw svg{stroke:var(--green);}
+  .blk .tag{font-size:12px;color:var(--blue);font-weight:700;letter-spacing:.02em;}
+  .blk .nm{font-size:12.5px;font-weight:500;margin:1px 0 7px;line-height:1.3;min-height:31px;color:var(--text);}
+  .blk.ref .nm{min-height:auto;margin-bottom:0;}
+  .badge{display:inline-block;font-size:10px;padding:1px 8px;border-radius:999px;font-weight:700;}
+  .b-predict{background:rgba(4,106,251,.09);color:var(--blue);}
+  .b-health{background:rgba(5,150,105,.10);color:var(--green);}
+  .lbl2{font-size:10.5px;color:var(--text2);margin-top:8px;}
+  .val{font-size:22px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums;line-height:1;color:var(--text);}
+  .unit{font-size:11px;color:var(--text2);font-weight:400;}
+  .st{display:inline-block;margin-top:9px;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;}
+  .st.ok{background:rgba(5,150,105,.10);color:var(--green);}
+  .st.warn{background:rgba(180,83,9,.12);color:var(--amber);}
+  .st.crit{background:rgba(192,57,43,.10);color:var(--red);}
+  .st.na{background:#EEF0F3;color:var(--text2);}
+  .key{position:absolute;top:11px;right:11px;width:9px;height:9px;border-radius:50%;background:#C9CFD6;}
+  .mk{font-size:9.5px;color:#9AA3AE;margin-top:9px;word-break:break-all;font-family:var(--mono);}
+  .arrow{flex:0 0 28px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#B9C1CB;font-size:17px;gap:4px;}
+  .arrow.cn{flex-basis:104px;}
+  .ar-lbl{font-size:10px;color:var(--text2);text-align:center;line-height:1.3;background:var(--white);
+          border:1px solid var(--bdr);border-radius:7px;padding:2px 7px;max-width:108px;word-break:break-word;}
+  .ar-lbl b{color:var(--blue);font-weight:700;}
+  .legend{font-size:11px;color:var(--text2);margin:2px 0 14px;display:flex;gap:14px;flex-wrap:wrap;}
+  .legend i{font-style:normal;display:inline-flex;align-items:center;gap:5px;}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
+
+  /* 呼叫紀錄（預設收合） */
+  details.logbox{background:var(--white);border:1px solid var(--bdr);border-radius:10px;padding:12px 16px;margin-top:4px;}
+  details.logbox summary{font-size:12.5px;color:var(--text2);font-weight:600;cursor:pointer;user-select:none;}
+  #log{font-size:11.5px;font-family:var(--mono);color:var(--text2);height:190px;overflow-y:auto;margin-top:10px;
+       background:#FAFBFC;border:1px solid var(--bdr);border-radius:8px;padding:8px 10px;white-space:pre-wrap;}
+  .bootfail{background:var(--white);border:1px solid var(--bdr);border-radius:10px;padding:16px 18px;font-size:13px;line-height:1.8;}
+  .bootfail .mut{color:var(--text2);font-size:12px;}
+  .bootfail button{margin-top:8px;padding:7px 14px;border:1px solid var(--bdr);border-radius:7px;background:var(--white);cursor:pointer;font-family:inherit;}
+  .bootfail button:hover{border-color:var(--blue);color:var(--blue);}
+
+  /* 自訂顯示抽屜 */
+  #drawer{position:fixed;top:0;right:-360px;width:352px;height:100%;background:var(--white);
+          border-left:1px solid var(--bdr);box-shadow:-8px 0 30px rgba(6,16,39,.10);z-index:50;
+          transition:right .25s ease;overflow-y:auto;padding:18px 18px 30px;}
+  #drawer.open{right:0;}
+  #drawer h2{font-size:15px;font-weight:600;margin-bottom:2px;}
+  #drawer .dsub{font-size:11.5px;color:var(--text2);margin-bottom:14px;line-height:1.6;}
+  #drawer .dclose{position:absolute;top:12px;right:14px;background:none;border:none;font-size:18px;color:var(--text2);cursor:pointer;}
+  .dglobal{border:1px solid var(--bdr);border-radius:9px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;}
+  .dglobal label{display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer;}
+  .dglobal input{accent-color:var(--blue);}
+  .dblk{border:1px solid var(--bdr);border-radius:9px;padding:10px 12px;margin-bottom:10px;}
+  .dblk .dhead{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+  .dblk .dhead .tag{font-size:12px;color:var(--blue);font-weight:700;}
+  .dblk .dhead label{margin-left:auto;font-size:11px;color:var(--text2);display:flex;align-items:center;gap:5px;cursor:pointer;}
+  .dgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px;}
+  .dgrid .full{grid-column:1/-1;}
+  .df{display:flex;flex-direction:column;gap:3px;font-size:10.5px;color:var(--text2);}
+  .df input,.df select{padding:5px 7px;border:1px solid var(--bdr);border-radius:6px;font-size:12px;font-family:inherit;color:var(--text);background:var(--white);width:100%;}
+  .dreset{width:100%;margin-top:6px;padding:8px;border:1px solid var(--bdr);border-radius:8px;background:var(--white);
+          color:var(--red);font-size:12.5px;cursor:pointer;font-family:inherit;}
+  .dreset:hover{border-color:var(--red);}
+  .dhint{font-size:10.5px;color:var(--text2);margin-top:10px;line-height:1.6;}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>焚化爐全廠數位孿生 — flowsheet × 模型 API</h1>
-  <div class="sub">8 個 block 各自綁一個<b>已發布的模型 API</b>（<code>model_key</code> 存在場景資料裡）。耦合模擬即時運轉，每拍每個 block 拿自己的即時讀值 call 它的模型端點。
-    調下面的<b>操作設點</b>（尿素/活性碳/λ）→ 全廠模型即時反應；「⚙ 自動最佳化」讓 block 自己去 <code>/optimize/</code> 算最佳設點。這就是 <i>活的 flowsheet：監控 + 決策</i>。</div>
+  <header class="site">
+    <span class="brand">J.S</span>
+    <span class="logo">Process Intelligence</span>
+    <span class="site-sub">工程檢視 · Flowsheet</span>
+    <div class="hdr-actions">
+      <a class="hbtn" id="btn-edit" href="/static/flowsheet_builder.html">✎ 編輯設計</a>
+      <button class="hbtn" id="btn-custom">⚙ 自訂顯示</button>
+      <a class="hbtn" id="btn-3d" href="/twin">3D 智慧運轉</a>
+      <a class="hbtn" href="/">← 回首頁</a>
+    </div>
+  </header>
+  <h1 id="title">Flowsheet 數據孿生（載入規格中…）</h1>
+  <div class="sub" id="sub">泛用 flowsheet 渲染器：讀宣告式規格檔畫圖、每拍呼叫一次全廠求解器、顯示守門員（訓練域）狀態。</div>
 
   <div class="bar">
     <span class="lbl">運轉情境</span>
@@ -72,73 +162,181 @@
 
   <div class="ctrls" id="ctrls"></div>
 
-  <div class="flow" id="flow"></div>
-  <div class="steamlbl">↳ 蒸汽支線</div>
-  <div class="branch" id="branch"></div>
+  <div class="group-title">全廠即時指標</div>
+  <div class="kpis" id="kpis"></div>
 
-  <div class="grid2">
-    <div class="panel">
-      <h2>全廠即時指標</h2>
-      <div class="kpis" id="kpis"></div>
-    </div>
-    <div class="panel">
-      <h2>模型 API 呼叫紀錄（即時）</h2>
-      <div id="log"></div>
-    </div>
+  <div class="group-title">製程流程（模型輸出沿連接傳遞）</div>
+  <div id="trains"></div>
+  <div class="legend">
+    <i><span class="dot" style="background:var(--green)"></span>守門員：訓練域內</i>
+    <i><span class="dot" style="background:var(--amber)"></span>外插（接近邊緣）</i>
+    <i><span class="dot" style="background:var(--red)"></span>出定義域</i>
+    <i><span class="dot" style="background:#C9CFD6"></span>無統計</i>
   </div>
+
+  <details class="logbox">
+    <summary>求解器呼叫紀錄（即時）</summary>
+    <div id="log"></div>
+  </details>
 </div>
 
+<aside id="drawer">
+  <button class="dclose" id="drawer-close">×</button>
+  <h2>自訂顯示</h2>
+  <div class="dsub">名稱、圖示、單位、警戒值、顯示與否全部可改；即改即生效，保存在本機瀏覽器。</div>
+  <div class="dglobal" id="d-global"></div>
+  <div id="d-blocks"></div>
+  <button class="dreset" id="d-reset">還原預設（清除本機自訂）</button>
+  <div class="dhint">自訂只影響這台電腦的顯示，不會改動後端規格檔與模型。</div>
+</aside>
+
 <script>
-const SCENE='incinerator-plant';
-// 各 block 的即時指標顯示：{取值鍵, 單位, 好=低/高, warn, crit}（regression 用；health 用模型輸出）
-const BAND={
- "B-101":{unit:"mg/Nm³",better:"low",warn:340,crit:385,ico:"🔥"},
- "B-201":{unit:"mg/Nm³",better:"low",warn:230,crit:300,ico:"💨"},
- "B-301":{unit:"t/h",better:"high",warn:52,crit:46,ico:"♨️"},
- "B-401":{unit:"mg/Nm³",better:"low",warn:340,crit:420,ico:"🌫️"},
- "B-501":{unit:"µg/Nm³",better:"low",warn:15,crit:25,ico:"⚫"},
- "B-601":{unit:"健康",better:"health",ico:"🧹"},
- "B-701":{unit:"健康",better:"health",ico:"🌀"},
- "B-801":{unit:"MW",better:"high",warn:14,crit:11,ico:"⚡"},
-};
-const GAS_ORDER=["B-101","B-201","B-301","B-401","B-501","B-601","B-701"]; // 氣路
-let BLOCKS={}, scenario="normal", tickN=0;
+// ============================================================================
+// 泛用 flowsheet 渲染頁 — 完全由後端規格檔驅動，頁內不寫死任何 block 清單。
+//   規格：GET  /agatha/flowsheet/{FID}/spec/  → name/desc/trains/blocks/connections/order
+//   求解：POST /agatha/flowsheet/{FID}/run/   → 每拍一次，回全部 block 的預測＋守門員
+//   自訂：localStorage fsCustom:{FID} → 蓋在規格檔上（僅顯示層，不動後端）
+// 換 ?id=xxx 即渲染另一座廠。
+// ============================================================================
+const FID = new URLSearchParams(location.search).get('id') ?? 'incinerator-8b';
+
+let SPEC=null;                 // 規格檔本體
+let BLK={};                    // id → spec block
+let CONNMAP=new Map();         // "from>to" → connection
+let FEDBY=new Map();           // blockId → Set(target_input)
+let GLAST={};                  // blockId → 上一拍守門員狀態
+let scenario='normal', tickN=0, timer=null, running=false;
 
 const $=id=>document.getElementById(id);
-function logln(s){const l=$('log'); l.textContent=(`${new Date().toLocaleTimeString('zh-TW',{hour12:false})}  ${s}\n`)+l.textContent; if(l.textContent.length>4000)l.textContent=l.textContent.slice(0,4000);}
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=v=>Math.abs(v)>=100?v.toFixed(0):v.toFixed(1);
+const prettyFeat=f=>String(f||'').replace(/_(mg_Nm3|ug_Nm3|g_Nm3|kNm3_h|t_h|kJ_kg|L_h|kg_h|m3_h|mm_s|m_h|MW|kPa|bar|pct|mbar|C|A)$/,'').replace(/_/g,' ');
+function logln(s){const l=$('log'); l.textContent=(`${new Date().toLocaleTimeString('zh-TW',{hour12:false})}  ${s}\n`)+l.textContent; if(l.textContent.length>6000)l.textContent=l.textContent.slice(0,6000);}
 
-// ---------------- 操作設點（what-if）：滑桿直接驅動全廠模型 ----------------
+// ---------------- 圖示庫（線條 SVG，取代 emoji；可在自訂抽屜換） ----------------
+const ICONS={
+  flame:   {n:'火焰（燃燒）', p:'<path d="M12 3c2.2 3 5 5.4 5 9a5 5 0 0 1-10 0c0-1.6.6-3 1.7-4.3C9.6 9 12 6.5 12 3z"/><path d="M12 17a2.4 2.4 0 0 0 2.4-2.4c0-1.4-1.1-2.3-2.4-3.6-1.3 1.3-2.4 2.2-2.4 3.6A2.4 2.4 0 0 0 12 17z"/>'},
+  spray:   {n:'噴注（藥劑）', p:'<path d="M7 9c0-2 1.6-3.5 3.5-3.5S14 7 14 9c0 2.4-3.5 5.5-3.5 5.5S7 11.4 7 9z"/><path d="M16 13.5c0-1.1.9-2 2-2s2 .9 2 2c0 1.4-2 3.2-2 3.2s-2-1.8-2-3.2z"/><path d="M4 19h16"/>'},
+  boiler:  {n:'鍋爐（蒸汽）', p:'<rect x="6" y="8" width="12" height="12" rx="2"/><path d="M9 4c0 1-1 1.2-1 2.2M13 4c0 1-1 1.2-1 2.2M17 4c0 1-1 1.2-1 2.2"/><path d="M9 14h6"/>'},
+  scrubber:{n:'洗滌塔', p:'<path d="M8 3h8l-2 8a4 4 0 0 1 2 3.5c0 2.5-2 4.5-4 4.5s-4-2-4-4.5A4 4 0 0 1 10 11L8 3z"/><path d="M9.5 7h5"/>'},
+  carbon:  {n:'吸附（六角）', p:'<path d="M12 3l7 4v8l-7 4-7-4V7z"/><circle cx="12" cy="11" r="2.4"/>'},
+  bag:     {n:'袋濾（過濾）', p:'<path d="M4 4h16l-6 8v6l-4 2v-8z"/>'},
+  fan:     {n:'風機', p:'<circle cx="12" cy="12" r="2"/><path d="M12 10c0-3 -1-5 2.5-5.5S18 8 14 10.5M14 13c2.6 1.5 4.6 2 3 5s-5 .3-5-2.7M10 13.5C7.4 15 5.4 15.4 4.5 12s2.7-4 5.5-1.7"/>'},
+  turbine: {n:'發電（閃電）', p:'<path d="M13 2L4 14h6l-1 8 9-12h-6z"/>'},
+  gauge:   {n:'儀錶（監測）', p:'<path d="M4 14a8 8 0 0 1 16 0"/><path d="M12 14l3.5-3.5"/><path d="M2.5 14h3M18.5 14h3M12 6v-2.5" />'},
+  box:     {n:'方塊（通用）', p:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/>'},
+};
+function iconSvg(key){const ic=ICONS[key]||ICONS.box;return `<svg viewBox="0 0 24 24">${ic.p}</svg>`;}
+// 圖示優先序：規格檔 ico（設計器選的，全使用者一致）→ 名稱推測（客戶可在抽屜改）
+function iconFor(sb){
+  if(sb.ico&&ICONS[sb.ico])return sb.ico;
+  const n=(sb.name||'')+(sb.output_label||'');
+  if(/爐|燃燒/.test(n))return 'flame';
+  if(/脫硝|SNCR|噴/.test(n))return 'spray';
+  if(/鍋爐|蒸汽/.test(n))return 'boiler';
+  if(/洗煙|洗滌|酸/.test(n))return 'scrubber';
+  if(/碳|吸附/.test(n))return 'carbon';
+  if(/袋|集塵|濾/.test(n))return 'bag';
+  if(/風機|引風/.test(n))return 'fan';
+  if(/發電|汽輪|電/.test(n))return 'turbine';
+  return sb.kind==='anomaly'?'gauge':'box';
+}
+
+// ---------------- 自訂顯示層：localStorage 蓋在規格檔上（僅顯示，不動後端） ----------------
+const CKEY='fsCustom:'+FID;
+let CUSTOM={global:{showKey:true,showScenarios:true},blocks:{}};
+try{CUSTOM={...CUSTOM,...JSON.parse(localStorage.getItem(CKEY)||'{}')};}catch{}
+CUSTOM.global={showKey:true,showScenarios:true,...(CUSTOM.global||{})};
+CUSTOM.blocks=CUSTOM.blocks||{};
+function saveCustom(){localStorage.setItem(CKEY,JSON.stringify(CUSTOM));}
+// 有效顯示設定 = 規格檔 + 本機自訂覆蓋
+function eff(sb){
+  const c=CUSTOM.blocks[sb.id]||{};
+  return {...sb,
+    name:c.name??sb.name, unit:c.unit??sb.unit, icon:c.icon??iconFor(sb),
+    warn:c.warn!=null&&c.warn!==''?+c.warn:sb.warn,
+    crit:c.crit!=null&&c.crit!==''?+c.crit:sb.crit,
+    better:c.better??sb.better, hidden:!!c.hidden};
+}
+
+function buildDrawer(){
+  $('d-global').innerHTML=`
+    <label><input type="checkbox" id="dg-key" ${CUSTOM.global.showKey?'checked':''}>顯示 model_key（API 識別碼）</label>
+    <label><input type="checkbox" id="dg-sc" ${CUSTOM.global.showScenarios?'checked':''}>顯示運轉情境列</label>`;
+  $('dg-key').addEventListener('change',e=>{CUSTOM.global.showKey=e.target.checked;saveCustom();rerender();});
+  $('dg-sc').addEventListener('change',e=>{CUSTOM.global.showScenarios=e.target.checked;saveCustom();applyGlobal();});
+  $('d-blocks').innerHTML=(SPEC.blocks||[]).map(sb=>{
+    const e=eff(sb), anom=sb.kind==='anomaly';
+    return `<div class="dblk">
+      <div class="dhead"><span class="tag">${esc(sb.id)}</span>
+        <label><input type="checkbox" data-c="hidden" data-id="${esc(sb.id)}" ${e.hidden?'checked':''}>隱藏</label></div>
+      <div class="dgrid">
+        <div class="df full">顯示名稱<input data-c="name" data-id="${esc(sb.id)}" value="${esc(e.name||'')}"></div>
+        <div class="df">圖示<select data-c="icon" data-id="${esc(sb.id)}">
+          ${Object.entries(ICONS).map(([k,v])=>`<option value="${k}" ${e.icon===k?'selected':''}>${esc(v.n)}</option>`).join('')}
+        </select></div>
+        <div class="df">單位<input data-c="unit" data-id="${esc(sb.id)}" value="${esc(anom?'/100':(e.unit||''))}" ${anom?'disabled':''}></div>
+        ${anom?'':`
+        <div class="df">注意值 warn<input type="number" step="any" data-c="warn" data-id="${esc(sb.id)}" value="${e.warn??''}"></div>
+        <div class="df">警戒值 crit<input type="number" step="any" data-c="crit" data-id="${esc(sb.id)}" value="${e.crit??''}"></div>
+        <div class="df full">方向<select data-c="better" data-id="${esc(sb.id)}">
+          <option value="low" ${e.better==='low'?'selected':''}>數值低比較好（超過警戒→紅）</option>
+          <option value="high" ${e.better==='high'?'selected':''}>數值高比較好（低於警戒→紅）</option>
+        </select></div>`}
+      </div>
+    </div>`;}).join('');
+  $('d-blocks').querySelectorAll('[data-c]').forEach(el=>{
+    const ev=el.tagName==='SELECT'||el.type==='checkbox'?'change':'input';
+    el.addEventListener(ev,()=>{
+      const id=el.dataset.id, k=el.dataset.c;
+      (CUSTOM.blocks[id]??={})[k]=el.type==='checkbox'?el.checked:el.value;
+      saveCustom(); rerender();
+    });
+  });
+  $('d-reset').onclick=()=>{localStorage.removeItem(CKEY);CUSTOM={global:{showKey:true,showScenarios:true},blocks:{}};buildDrawer();rerender();applyGlobal();logln('↺ 已還原預設顯示');};
+}
+function applyGlobal(){document.querySelector('.bar').style.display=CUSTOM.global.showScenarios?'':'none';}
+function rerender(){buildTrains();/* 下一拍會補值；先用上一拍資料立即補渲染 */ if(LASTRESP)renderRun(LASTRESP,true);}
+
+// ---------------- 操作設點（what-if）：滑桿是「虛擬旋鈕」，以特徵名路由 ----------------
 const SLIDERS=[
- {key:'lam',label:'過剩空氣 λ → 爐溫/脫硝',min:1.30,max:1.85,step:0.01,val:1.55,dec:2},
- {key:'urea',label:'尿素噴注 (L/h) → B-201 NOx',min:60,max:200,step:5,val:120,dec:0,opt:1},
- {key:'carbon',label:'活性碳 (kg/h) → B-501 Hg',min:4,max:28,step:1,val:12,dec:0},
+ {key:'lam',   label:'過剩空氣 λ → 爐溫/脫硝',   min:1.30,max:1.85,step:0.01,val:1.55,dec:2, feats:['primary_air_kNm3_h','secondary_air_kNm3_h']},
+ {key:'urea',  label:'尿素噴注 (L/h) → 脫硝 NOx', min:60,max:200,step:5,val:120,dec:0, feats:['urea_inject_L_h'], opt:1},
+ {key:'lime',  label:'消石灰漿 (kg/h) → 酸氣 HCl',min:80,max:320,step:5,val:180,dec:0, feats:['lime_slurry_kg_h']},
+ {key:'carbon',label:'活性碳 (kg/h) → 重金屬 Hg', min:4,max:28,step:1,val:12,dec:0, feats:['carbon_inject_kg_h']},
 ];
 function ctrl(key,def){const el=document.getElementById('sl_'+key);return el?+el.value:def;}
 function buildCtrls(){
-  $('ctrls').innerHTML=SLIDERS.map(s=>`<label class="ctrl"><b>${s.label} <span class="cv" id="cv_${s.key}">${(+s.val).toFixed(s.dec)}</span></b>
+  const featset=new Set();
+  (SPEC.blocks||[]).forEach(b=>Object.keys(b.defaults||{}).forEach(f=>featset.add(f)));
+  $('ctrls').innerHTML=SLIDERS.filter(s=>s.feats.some(f=>featset.has(f))).map(s=>
+    `<label class="ctrl"><b>${s.label} <span class="cv" id="cv_${s.key}">${(+s.val).toFixed(s.dec)}</span></b>
     <input type="range" id="sl_${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${s.val}"
       oninput="document.getElementById('cv_${s.key}').textContent=(+this.value).toFixed(${s.dec})">
     ${s.opt?`<button class="opt" onclick="optimizeUrea()">⚙ 自動最佳化 → 最小 NOx</button>`:''}</label>`).join('');
 }
 async function optimizeUrea(){
-  logln('⚙ 呼叫 B-201 /optimize/ 求最小出口 NOx …');
+  const knob='urea_inject_L_h';
+  const blk=((SPEC&&SPEC.blocks)||[]).find(b=>b.defaults&&Object.prototype.hasOwnProperty.call(b.defaults,knob));
+  if(!blk){logln('⚙ 此規格檔沒有宣告尿素噴注特徵的 block，略過');return;}
+  logln(`⚙ 呼叫 ${blk.id} /optimize/ 求最小出口 NOx …`);
   try{
-    const r=await fetch('/agatha/model/d99cf30d_10014/optimize/',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({mode:'min',knobs:['urea_inject_L_h']})}).then(x=>x.json());
-    const best=r.best.urea_inject_L_h, sl=document.getElementById('sl_urea');
-    sl.value=Math.round(best); document.getElementById('cv_urea').textContent=Math.round(best);
+    const r=await fetch(`/agatha/model/${encodeURIComponent(blk.model_key)}/optimize/`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({mode:'min',knobs:[knob]})}).then(x=>x.json());
+    if(!r||!r.best||r.best[knob]==null)throw new Error('回應缺 best');
+    const best=r.best[knob], sl=document.getElementById('sl_urea');
+    if(sl){sl.value=Math.round(best); document.getElementById('cv_urea').textContent=Math.round(best);}
     logln(`⚙ 建議尿素 ${best.toFixed(0)} L/h → 出口 NOx 預估 ${r.baseline_pred.toFixed(0)}→${r.pred.toFixed(0)} mg/Nm³（已套用到滑桿）`);
-  }catch(e){logln('⚙ 最佳化失敗：'+e);}
+  }catch(e){logln('⚙ 最佳化失敗：'+(e.message||e));}
 }
 
-// ---------------- 耦合廠級模擬器：輸出以「特徵名」為鍵的 S ----------------
-const P={feed:20,lhv:9500,s:1,cl:1,hg:1,lam:1.55,pf:.62,grate:12,pat:180,urea:120,feedw:62,drum:40,lime:180,water:4,carbon:12,pulse:20,fouling:2,bag_extra:0,fan_vib_x:0,fan_brg_x:0};
+// ---------------- 邊界訊號模擬器（假 DCS）：輸出以「模型特徵名」為鍵的 S ----------------
+const P={feed:20,lhv:9500,cl:1,hg:1,lam:1.55,pf:.62,grate:12,pat:180,urea:120,feedw:62,drum:40,lime:180,water:4,carbon:12,pulse:20,fouling:2,bag_extra:0,fan_vib_x:0,fan_brg_x:0};
 function drift(v,t,k){return v+(t-v)*k+(Math.random()-.5)*Math.abs(t||1)*0.01;}
 function sim(){
   const sc=scenario;
   P.feed=drift(P.feed,20,.15); P.lhv=drift(P.lhv, sc==="lhv_drop"?7800:9500,.12);
-  P.s=drift(P.s,1,.1); P.cl=drift(P.cl,1,.1); P.hg=drift(P.hg,1,.1);
-  // 操作設點來自滑桿（what-if）；未建立前用預設
+  P.cl=drift(P.cl,1,.1); P.hg=drift(P.hg,1,.1);
   P.lam=ctrl('lam',1.55); P.urea=ctrl('urea',120); P.lime=ctrl('lime',180); P.carbon=ctrl('carbon',12);
   P.grate=drift(P.grate,12,.1); P.pat=drift(P.pat,180,.1);
   P.fouling=Math.min(18,P.fouling+0.004);
@@ -153,15 +351,9 @@ function sim(){
   const raw_nox=Math.max(150,300+0.5*(furnace-950)+16*(o2-6));
   const raw_hcl=Math.max(20,850*P.cl), raw_hg=Math.max(3,40*P.hg);
   const raw_dust=Math.max(1,4+0.5*(feed-20));
-  const tw=Math.exp(-Math.pow((furnace-950)/70,2));
-  const denox=Math.min(92,Math.max(5,88*tw*(1-Math.exp(-P.urea/90))));
-  const out_nox=raw_nox*(1-denox/100);
   const steam=Math.max(30,heat*1.25*0.98+0.3*(P.feedw-62));
-  const steam_temp=400-0.6*P.fouling, boiler_exit=183+P.fouling+0.3*(feed-20);
-  const scrub_exit=150-3*P.water, lime_ratio=P.lime/(0.6*raw_hcl+0.4*(230*P.s)+50);
-  const hcl_rem=Math.min(99.8,Math.max(70,99*(1-Math.exp(-lime_ratio*1.4))*(1-(scrub_exit-140)/220)));
-  const out_hcl=raw_hcl*(1-hcl_rem/100);
-  const hg_rem=Math.min(99.5,Math.max(40,99*(1-Math.exp(-P.carbon/8)))), out_hg=raw_hg*(1-hg_rem/100);
+  const steam_temp=400-0.6*P.fouling;
+  const scrub_exit=150-3*P.water;
   const inlet_dust=raw_dust+P.lime/1000+P.carbon/2000;
   const bag_dP=8+0.7*inlet_dust+0.12*P.pulse+9*Math.min(1,tickN/400)+P.bag_extra;
   const collect=99.92-0.0006*bag_dP, out_dust=inlet_dust*1000*(1-collect/100);
@@ -176,36 +368,97 @@ function sim(){
     inlet_HCl_mg_Nm3:raw_hcl,scrubber_exit_temp_C:scrub_exit,carbon_inject_kg_h:P.carbon,inlet_Hg_ug_Nm3:raw_hg,
     bag_dP_mbar:bag_dP,collection_eff_pct:collect,outlet_dust_mg_Nm3:out_dust,inlet_dust_g_Nm3:inlet_dust,
     fan_motor_current_A:fan_curr,fan_vibration_mm_s:fan_vib,fan_bearing_temp_C:fan_brg,
-    inlet_steam_t_h:steam,inlet_steam_temp_C:steam_temp,condenser_vac_kPa:cond_vac,
-    _out_nox:out_nox,_out_hcl:out_hcl,_out_dust:out_dust,_steam:steam};
+    inlet_steam_t_h:steam,inlet_steam_temp_C:steam_temp,condenser_vac_kPa:cond_vac};
 }
 
 // ---------------- 初始化 ----------------
 async function boot(){
-  const scene=await fetch(`/api/scenes/${SCENE}`).then(r=>r.json());
-  const eq=scene.plant.units.flatMap(u=>u.equipment).filter(e=>e.model&&e.model.model_key);
-  eq.forEach(e=>BLOCKS[e.tag]={tag:e.tag,name:e.name,m:e.model});
-  const flow=$('flow'), branch=$('branch');
-  GAS_ORDER.forEach((tag,i)=>{
-    flow.insertAdjacentHTML('beforeend',card(BLOCKS[tag]));
-    if(i<GAS_ORDER.length-1) flow.insertAdjacentHTML('beforeend','<div class="arrow">→</div>');
+  $('hz').textContent='載入規格…';
+  let spec;
+  try{
+    const r=await fetch(`/agatha/flowsheet/${encodeURIComponent(FID)}/spec/`,{signal:AbortSignal.timeout(5000)});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    spec=await r.json();
+  }catch(e){ specError(e); return; }
+  SPEC=spec; BLK={}; CONNMAP=new Map(); FEDBY=new Map(); GLAST={};
+  (spec.blocks||[]).forEach(b=>{BLK[b.id]=b;});
+  (spec.connections||[]).forEach(c=>{
+    CONNMAP.set(c.from+'>'+c.to,c);
+    if(!FEDBY.has(c.to))FEDBY.set(c.to,new Set());
+    FEDBY.get(c.to).add(c.target_input);
   });
-  branch.insertAdjacentHTML('beforeend',card(BLOCKS["B-801"]));
-  buildCtrls();
-  logln(`已載入場景，${eq.length} 個 block 各綁定 model_key ✓`);
-  tick(); setInterval(tick,2000);
+  if(!Array.isArray(spec.order)||!spec.order.length) spec.order=(spec.blocks||[]).map(b=>b.id);
+  document.title=(spec.name||FID)+'｜J.S Process Intelligence';
+  $('title').textContent=spec.name||FID;
+  $('sub').innerHTML=`${esc(spec.desc||'')}　<code>?id=${esc(FID)}</code> · 規格 <code>GET /agatha/flowsheet/${esc(FID)}/spec/</code> · 每拍 <code>POST …/run/</code> ×1`;
+  $('btn-3d').href=`/twin?scene=incinerator-plant&flow=1`;
+  $('btn-edit').href=`/static/flowsheet_builder.html?id=${encodeURIComponent(FID)}`;
+  buildTrains(); buildCtrls(); buildDrawer(); applyGlobal();
+  logln(`✓ 規格已載入：${spec.name||FID}（${(spec.blocks||[]).length} blocks / ${(spec.connections||[]).length} connections / ${(spec.trains||[]).length} trains）`);
+  if(timer)clearInterval(timer);
+  tick(); timer=setInterval(tick,2000);
 }
-function card(b){const bd=BAND[b.tag]||{}; const kind=b.m.kind;
-  return `<div class="blk" id="blk_${b.tag}">
-    <span class="key" id="key_${b.tag}"></span>
-    <div class="ico">${bd.ico||"■"}</div>
-    <div class="tag">${b.tag}</div>
-    <div class="nm">${b.name}</div>
-    <span class="badge b-${kind}">${kind==='optimize'?'最佳化':kind==='health'?'健康預警':'預測'}</span>
-    <div class="val" id="val_${b.tag}">--<span class="unit"> ${bd.unit||''}</span></div>
-    <div class="st" id="st_${b.tag}" style="background:#243247;color:#8ba0bd">等待</div>
-    <div class="mk">API ${b.m.model_key}</div>
+function specError(e){
+  $('hz').textContent='';
+  $('title').textContent='Flowsheet 數據孿生';
+  $('trains').innerHTML=`<div class="bootfail">⚠ 規格載入失敗：<b>${esc(String((e&&e.message)||e))}</b><br>
+    <span class="mut">端點 <code>GET /agatha/flowsheet/${esc(FID)}/spec/</code> 尚未就緒，或 <code>?id=${esc(FID)}</code> 不存在。後端上線後按重試即可，頁面不會空轉。</span><br>
+    <button onclick="boot()">↻ 重試</button></div>`;
+  logln('✖ 規格載入失敗：'+((e&&e.message)||e));
+}
+
+function buildTrains(){
+  const wrap=$('trains'); wrap.innerHTML='';
+  const rendered=new Set();
+  const trains=(Array.isArray(SPEC.trains)&&SPEC.trains.length)?SPEC.trains:[SPEC.order];
+  trains.forEach((train,ti)=>{
+    const vis=(train||[]).filter(id=>BLK[id]&&!eff(BLK[id]).hidden);
+    if(!vis.length)return;
+    if(ti>0)wrap.insertAdjacentHTML('beforeend','<div class="trainlbl">↳ 支線</div>');
+    const row=document.createElement('div'); row.className='flow'+(ti>0?' branch':'');
+    vis.forEach((id,i)=>{
+      const sb=BLK[id];
+      if(i>0)row.insertAdjacentHTML('beforeend',arrowHtml(vis[i-1],id));
+      if(rendered.has(id)){row.insertAdjacentHTML('beforeend',refCard(sb));}
+      else{row.insertAdjacentHTML('beforeend',card(sb)); rendered.add(id);}
+    });
+    wrap.appendChild(row);
+  });
+  const left=(SPEC.blocks||[]).filter(b=>!rendered.has(b.id)&&!eff(b).hidden);
+  if(left.length){
+    wrap.insertAdjacentHTML('beforeend','<div class="trainlbl">未排入 train 的 block</div>');
+    const row=document.createElement('div'); row.className='flow branch';
+    left.forEach(b=>{row.insertAdjacentHTML('beforeend',card(b)); rendered.add(b.id);});
+    wrap.appendChild(row);
+  }
+}
+function card(sb){
+  const e=eff(sb), anom=sb.kind==='anomaly';
+  return `<div class="blk ${anom?'anom':''}" id="blk_${esc(sb.id)}">
+    <span class="key" id="key_${esc(sb.id)}" title="守門員（訓練域）狀態"></span>
+    <div class="icw">${iconSvg(e.icon)}</div>
+    <div class="tag">${esc(sb.id)}</div>
+    <div class="nm">${esc(e.name||sb.id)}</div>
+    <span class="badge ${anom?'b-health':'b-predict'}">${anom?'健康預警':'預測'}</span>
+    <div class="lbl2">${esc(sb.output_label||'')}</div>
+    <div class="val" id="val_${esc(sb.id)}">--<span class="unit"> ${esc(anom?'/100':(e.unit||''))}</span></div>
+    <div class="st na" id="st_${esc(sb.id)}">等待</div>
+    ${CUSTOM.global.showKey?`<div class="mk">API ${esc(sb.model_key||'')}</div>`:''}
   </div>`;
+}
+function refCard(sb){
+  const e=eff(sb);
+  return `<div class="blk ref">
+    <div class="icw">${iconSvg(e.icon)}</div>
+    <div class="tag">${esc(sb.id)}</div>
+    <div class="nm">${esc(e.name||sb.id)}</div>
+    <div class="lbl2">↖ 同主線</div>
+  </div>`;
+}
+function arrowHtml(a,b){
+  const c=CONNMAP.get(a+'>'+b);
+  if(!c)return '<div class="arrow">→</div>';
+  return `<div class="arrow cn">→<div class="ar-lbl" id="connlbl_${esc(c.from)}__${esc(c.to)}">${esc(prettyFeat(c.source_output))} → <b>--</b></div></div>`;
 }
 
 document.querySelector('.bar').addEventListener('click',e=>{
@@ -214,52 +467,129 @@ document.querySelector('.bar').addEventListener('click',e=>{
   document.querySelectorAll('.bar button').forEach(x=>x.classList.toggle('active',x===btn));
   logln(`▶ 切換情境：${btn.textContent}`);
 });
+$('btn-custom').addEventListener('click',()=>$('drawer').classList.toggle('open'));
+$('drawer-close').addEventListener('click',()=>$('drawer').classList.remove('open'));
 
+// ---------------- 每拍：組 per-block inputs → POST run 一次 → 渲染 ----------------
+let LASTRESP=null;
 async function tick(){
-  tickN++;
-  const S=sim();
-  // 每個 block 用自己的即時讀值 call 自己的模型 API
-  await Promise.all(Object.values(BLOCKS).map(async b=>{
-    const inputs={}; b.m.inputs.forEach(f=>inputs[f]=+(S[f]).toFixed(3));
-    let out;
-    try{ out=await fetch(`/agatha/model/${b.m.model_key}/predict/`,{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({inputs,source:'flowsheet'})}).then(r=>r.json()); }
-    catch(e){ return; }
-    render(b,(out.predictions&&out.predictions[0])||{});
-  }));
-  // 全廠指標
-  $('kpis').innerHTML=[
-    ['煙囪 NOx',S._out_nox.toFixed(0),'mg/Nm³'],['煙囪 HCl',S._out_hcl.toFixed(1),'mg/Nm³'],
-    ['煙囪粉塵',S._out_dust.toFixed(1),'mg/Nm³'],['蒸汽產量',S._steam.toFixed(1),'t/h'],
-    ['爐膛溫度',S.furnace_temp_C.toFixed(0),'°C']
-  ].map(k=>`<div class="kpi"><div class="k">${k[0]}</div><div class="v">${k[1]} <span class="unit">${k[2]}</span></div></div>`).join('');
-  $('hz').textContent=`● 每 2s · 8 blocks × predict · 第 ${tickN} 拍`;
+  if(!SPEC||running)return;
+  running=true; tickN++;
+  try{
+    const S=sim();
+    const inputs={};
+    for(const sb of (SPEC.blocks||[])){
+      const fed=FEDBY.get(sb.id), bi={};
+      for(const [f,dv] of Object.entries(sb.defaults||{})){
+        if(fed&&fed.has(f))continue;
+        const v=(S[f]!=null&&isFinite(S[f]))?S[f]:dv;
+        bi[f]=+(+v).toFixed(3);
+      }
+      inputs[sb.id]=bi;
+    }
+    let resp;
+    try{
+      const r=await fetch(`/agatha/flowsheet/${encodeURIComponent(FID)}/run/`,{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({inputs,source:'flowsheet-ui'}),
+        signal:AbortSignal.timeout(5000)});
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      resp=await r.json();
+    }catch(e){
+      $('hz').textContent=`● run 失敗（第 ${tickN} 拍）`;
+      if(tickN===1||tickN%15===0)logln('✖ POST run 失敗：'+(e.message||e));
+      return;
+    }
+    LASTRESP=resp;
+    renderRun(resp);
+  }finally{running=false;}
 }
 
-function render(b,p){
-  const bd=BAND[b.tag]||{}; const V=$('val_'+b.tag),ST=$('st_'+b.tag),K=$('key_'+b.tag),BLK=$('blk_'+b.tag);
-  let col='var(--ok)',label='正常',shown='--';
-  if(b.m.kind==='health'){
-    const h=p.health, over=p.over_threshold;
-    shown=(h!=null?Math.round(h):'--');
-    col = over?'var(--crit)':h>=70?'var(--ok)':h>=50?'var(--warn)':'var(--crit)';
-    label = over?'⚠ 超標告警':h>=70?'健康':h>=50?'注意':'劣化';
-    V.innerHTML=`${shown}<span class="unit"> /100</span>`;
-    logln(`${b.tag} predict → health ${h!=null?h.toFixed(1):'--'}${over?' ⚠超標':''}`);
-  }else{
-    const v=p.value; shown=(v!=null?(Math.abs(v)>=100?v.toFixed(0):v.toFixed(1)):'--');
-    if(bd.better==='low'){ col=v>=bd.crit?'var(--crit)':v>=bd.warn?'var(--warn)':'var(--ok)';
-      label=v>=bd.crit?'偏高':v>=bd.warn?'注意':'正常'; }
-    else{ col=v<=bd.crit?'var(--crit)':v<=bd.warn?'var(--warn)':'var(--ok)';
-      label=v<=bd.crit?'偏低':v<=bd.warn?'注意':'正常'; }
-    V.innerHTML=`${shown}<span class="unit"> ${bd.unit||''}</span>`;
-    logln(`${b.tag} predict → ${bd.unit==='健康'?'':''}${shown} ${bd.unit||''}`);
+function renderRun(resp,silent){
+  const rb=(resp&&resp.blocks)||{};
+  const counts={ok:0,warn:0,out:0,unknown:0,err:0};
+  for(const sb of (SPEC.blocks||[])){ if(!eff(sb).hidden) renderBlock(sb,rb[sb.id],counts,silent); }
+  for(const c of ((resp&&resp.connections)||[])){
+    const vtxt=(c.value!=null&&isFinite(c.value))?fmt(c.value):'--';
+    const el=$('connlbl_'+c.from+'__'+c.to);
+    if(el)el.innerHTML=`${esc(prettyFeat(c.source_output))} → <b>${vtxt}</b> ${esc(c.unit||'')}`;
+    if(!silent)logln(`↦ ${c.from}→${c.to} ${c.source_output}=${vtxt} ${c.unit||''}`);
   }
-  ST.textContent=label; ST.style.background=col; ST.style.color='#0b0f16';
-  K.style.background=col; BLK.style.borderColor=(col==='var(--crit)')?'var(--crit)':'var(--line)';
+  renderKpis(rb);
+  if(!silent){
+    const gsum=`guard: ${counts.ok} ok`+(counts.warn?` / ${counts.warn} warn`:'')+(counts.out?` / ${counts.out} out`:'')+(counts.unknown?` / ${counts.unknown} unknown`:'');
+    logln(`run ${resp&&resp.ms!=null?resp.ms:'--'}ms · ${(SPEC.blocks||[]).length} blocks · ${gsum}`+(counts.err?` · ${counts.err} err/skip`:''));
+    $('hz').textContent=`● 每 2s · POST run ×1 · 第 ${tickN} 拍${resp&&resp.ms!=null?` · ${resp.ms}ms`:''}`;
+  }
 }
 
-boot().catch(e=>{document.getElementById('flow').textContent='初始化失敗：'+e;});
+const GTXT={warn:'⚠ 外插',out:'✖ 出定義域'};
+const GDOT={ok:'var(--green)',warn:'var(--amber)',out:'var(--red)',unknown:'#C9CFD6'};
+function renderBlock(sb,rbk,counts,silent){
+  const e=eff(sb);
+  const id=sb.id, V=$('val_'+id),ST=$('st_'+id),K=$('key_'+id),EL=$('blk_'+id);
+  if(!EL||!V||!ST||!K)return;
+  EL.classList.remove('err','gd-warn','gd-out');
+  if(!rbk||rbk.error||rbk.skipped){
+    counts.err++;
+    EL.classList.add('err');
+    const why=!rbk?'無回應':(rbk.skipped?('略過：'+rbk.skipped):('錯誤：'+rbk.error));
+    V.innerHTML=`--<span class="unit"> ${esc(sb.kind==='anomaly'?'/100':(e.unit||''))}</span>`;
+    ST.textContent=why.length>16?why.slice(0,16)+'…':why;
+    ST.className='st na';
+    K.style.background='#C9CFD6';
+    if(!silent&&GLAST[id]!=='err')logln(`✖ ${id} ${why}`);
+    GLAST[id]='err';
+    return;
+  }
+  const p=rbk.prediction||{};
+  let cls='ok',label='正常';
+  if(sb.kind==='anomaly'){
+    const h=p.health, over=!!p.over_threshold;
+    cls=over?'crit':h>=70?'ok':h>=50?'warn':'crit';
+    label=over?'⚠ 超標告警':h>=70?'健康':h>=50?'注意':'劣化';
+    V.innerHTML=`${h!=null?Math.round(h):'--'}<span class="unit"> /100</span>`;
+  }else{
+    const v=p.value;
+    if(v!=null&&e.warn!=null&&e.crit!=null&&!Number.isNaN(e.warn)&&!Number.isNaN(e.crit)){
+      if(e.better==='low'){cls=v>=e.crit?'crit':v>=e.warn?'warn':'ok';label=v>=e.crit?'偏高':v>=e.warn?'注意':'正常';}
+      else{cls=v<=e.crit?'crit':v<=e.warn?'warn':'ok';label=v<=e.crit?'偏低':v<=e.warn?'注意':'正常';}
+    }
+    V.innerHTML=`${v!=null?fmt(v):'--'}<span class="unit"> ${esc(e.unit||'')}</span>`;
+  }
+  const gs=(rbk.guard&&rbk.guard.status)||'unknown';
+  if(counts[gs]!=null)counts[gs]++;else counts.unknown++;
+  if(gs==='warn'||gs==='out'){
+    ST.textContent=GTXT[gs]; ST.className='st '+(gs==='out'?'crit':'warn');
+    EL.classList.add(gs==='out'?'gd-out':'gd-warn');
+  }else{
+    ST.textContent=label; ST.className='st '+cls;
+  }
+  K.style.background=GDOT[gs]||GDOT.unknown;
+  if(!silent&&gs!==GLAST[id]){
+    if(gs==='warn'||gs==='out'){
+      const checks=(rbk.guard&&rbk.guard.checks)||[];
+      for(const c of checks)logln(`⚠ ${id} ${c.feature}=${c.value!=null?fmt(+c.value):'--'} 超出訓練域 [${c.lo}, ${c.hi}]（${c.band||''}）`);
+      if(!checks.length)logln(`⚠ ${id} guard=${gs}`);
+    }else if(GLAST[id]==='warn'||GLAST[id]==='out'){
+      logln(`✓ ${id} 回到訓練域內`);
+    }
+  }
+  GLAST[id]=gs;
+}
+
+function renderKpis(rb){
+  const items=[];
+  for(const id of (SPEC.order||[])){
+    const sb=BLK[id]; if(!sb||sb.kind==='anomaly')continue;
+    const e=eff(sb); if(e.hidden)continue;
+    const en=rb[id], v=en&&en.prediction&&en.prediction.value;
+    items.push([sb.output_label||e.name||id, (v!=null&&isFinite(v))?fmt(v):'--', e.unit||'']);
+  }
+  $('kpis').innerHTML=items.map(k=>`<div class="kpi"><div class="k">${esc(k[0])}</div><div class="v">${k[1]} <span class="unit">${esc(k[2])}</span></div></div>`).join('');
+}
+
+boot().catch(e=>{specError(e);});
 </script>
 </body>
 </html>

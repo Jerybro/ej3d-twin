@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flowsheet 設計器｜J.S Process Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --blue:#046AFB; --bg:#F6F7FA; --white:#fff; --bdr:#DBDDE0;
+    --text:#061027; --text2:#555; --green:#059669; --green-deep:#052E22;
+    --amber:#B45309; --red:#C0392B;
+    --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-size:14px;
+       font-family:Inter,"Noto Sans TC","Microsoft JhengHei",sans-serif;}
+  .wrap{max-width:1320px;margin:0 auto;padding:22px 28px 56px;}
+  header.site{display:flex;align-items:center;gap:12px;margin-bottom:4px;}
+  .brand{display:inline-flex;align-items:center;justify-content:center;height:30px;padding:0 10px;
+         border-radius:8px;background:var(--green-deep);color:#fff;font-size:13px;font-weight:600;letter-spacing:.5px;}
+  .logo{font-size:19px;font-weight:600;}
+  .site-sub{color:var(--text2);font-size:13px;}
+  .hdr-actions{margin-left:auto;display:flex;gap:8px;}
+  .hbtn{font-size:13px;color:var(--text);text-decoration:none;border:1px solid var(--bdr);border-radius:7px;
+        padding:7px 12px;background:var(--white);cursor:pointer;font-family:inherit;}
+  .hbtn:hover{border-color:var(--blue);color:var(--blue);}
+  h1{font-size:21px;font-weight:600;margin:12px 0 3px;}
+  .sub{color:var(--text2);font-size:13px;margin-bottom:16px;line-height:1.8;}
+
+  /* 基本資料列 */
+  .meta{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:var(--white);
+        border:1px solid var(--bdr);border-radius:10px;padding:14px 16px;margin-bottom:16px;}
+  .mf{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--text2);}
+  .mf input,.mf select{padding:7px 10px;border:1px solid var(--bdr);border-radius:7px;font-size:13px;
+       font-family:inherit;color:var(--text);background:var(--white);}
+  .mf.grow{flex:1;min-width:180px;}
+  #m-fid{font-family:var(--mono);font-size:12.5px;width:200px;}
+  .save-btn{padding:9px 20px;border:none;border-radius:8px;background:var(--blue);color:#fff;
+       font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;}
+  .save-btn:hover{background:#0357d6;}
+  .save-btn:disabled{background:#9db4d8;cursor:default;}
+  .view-btn{padding:9px 16px;border:1px solid var(--bdr);border-radius:8px;background:var(--white);
+       color:var(--blue);font-size:13px;cursor:pointer;font-family:inherit;text-decoration:none;}
+  .view-btn:hover{border-color:var(--blue);}
+
+  /* 三欄 */
+  .cols{display:grid;grid-template-columns:290px 1fr 320px;gap:14px;align-items:start;}
+  @media(max-width:1080px){.cols{grid-template-columns:1fr;}}
+  .panel{background:var(--white);border:1px solid var(--bdr);border-radius:10px;padding:14px 15px;}
+  .panel h2{font-size:12.5px;letter-spacing:.6px;color:var(--text2);margin-bottom:10px;font-weight:600;}
+  .phint{font-size:11px;color:var(--text2);line-height:1.7;margin-top:10px;}
+
+  /* 模型庫 */
+  #models{max-height:70vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;}
+  .mrow{border:1px solid var(--bdr);border-radius:9px;padding:9px 11px;}
+  .mrow .mn{font-size:13px;font-weight:600;}
+  .mrow .mt{font-size:11px;color:var(--text2);margin-top:2px;}
+  .mrow .chip{display:inline-block;font-size:10px;padding:1px 7px;border-radius:5px;margin-right:4px;
+       background:rgba(4,106,251,.09);color:var(--blue);font-weight:700;}
+  .mrow .chip.an{background:rgba(5,150,105,.10);color:var(--green);}
+  .mrow .addb{margin-top:7px;width:100%;padding:5px;border:1px solid var(--bdr);border-radius:7px;
+       background:rgba(4,106,251,.05);color:var(--blue);font-size:12px;cursor:pointer;font-family:inherit;}
+  .mrow .addb:hover{border-color:var(--blue);}
+
+  /* 流程設計 */
+  .train{border:1px dashed var(--bdr);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:#FAFBFC;}
+  .train .thead{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);font-weight:700;margin-bottom:8px;}
+  .train .thead .tdel{margin-left:auto;background:none;border:none;color:var(--text2);cursor:pointer;font-size:12px;}
+  .train .thead .tdel:hover{color:var(--red);}
+  .bcard{background:var(--white);border:1px solid var(--bdr);border-radius:9px;padding:10px 12px;margin-bottom:8px;}
+  .bcard .bhead{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+  .bcard .bid{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--blue);
+       width:88px;padding:4px 7px;border:1px solid var(--bdr);border-radius:6px;}
+  .bcard .bctl{margin-left:auto;display:flex;gap:4px;align-items:center;}
+  .bcard .bctl button,.bcard .bctl select{border:1px solid var(--bdr);border-radius:6px;background:var(--white);
+       color:var(--text2);font-size:11px;cursor:pointer;padding:3px 7px;font-family:inherit;}
+  .bcard .bctl button:hover{color:var(--blue);border-color:var(--blue);}
+  .bcard .bctl .bdel:hover{color:var(--red);border-color:var(--red);}
+  .bgrid{display:grid;grid-template-columns:1.4fr .9fr .7fr .7fr 1fr;gap:7px;}
+  @media(max-width:900px){.bgrid{grid-template-columns:1fr 1fr;}}
+  .bf{display:flex;flex-direction:column;gap:3px;font-size:10.5px;color:var(--text2);}
+  .bf input,.bf select{padding:5px 7px;border:1px solid var(--bdr);border-radius:6px;font-size:12px;
+       font-family:inherit;color:var(--text);background:var(--white);width:100%;}
+  .bmeta{font-size:10px;color:#9AA3AE;margin-top:7px;font-family:var(--mono);}
+  .addtrain{width:100%;padding:8px;border:1px dashed var(--bdr);border-radius:9px;background:none;
+       color:var(--text2);font-size:12.5px;cursor:pointer;font-family:inherit;}
+  .addtrain:hover{color:var(--blue);border-color:var(--blue);}
+  .empty{padding:26px;text-align:center;color:var(--text2);font-size:12.5px;line-height:1.8;}
+
+  /* 連接 */
+  .conn{display:flex;align-items:center;gap:7px;border:1px solid var(--bdr);border-radius:8px;
+        padding:8px 10px;margin-bottom:7px;font-size:12px;}
+  .conn .cx{margin-left:auto;background:none;border:none;color:var(--text2);cursor:pointer;font-size:13px;}
+  .conn .cx:hover{color:var(--red);}
+  .conn b{color:var(--blue);font-family:var(--mono);font-size:11px;}
+  .cform{border-top:1px solid var(--bdr);margin-top:10px;padding-top:10px;display:flex;flex-direction:column;gap:7px;}
+  .cform select{padding:6px 8px;border:1px solid var(--bdr);border-radius:7px;font-size:12.5px;font-family:inherit;background:var(--white);color:var(--text);}
+  .cform .cadd{padding:7px;border:1px solid var(--bdr);border-radius:7px;background:rgba(4,106,251,.05);
+       color:var(--blue);font-size:12.5px;cursor:pointer;font-family:inherit;}
+  .cform .cadd:hover{border-color:var(--blue);}
+  .result{margin-top:12px;font-size:12.5px;line-height:1.7;border-radius:8px;padding:10px 12px;display:none;}
+  .result.ok{display:block;background:rgba(5,150,105,.08);color:#1d7a4f;}
+  .result.err{display:block;background:rgba(192,57,43,.08);color:var(--red);}
+  .result a{color:var(--blue);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="site">
+    <span class="brand">J.S</span>
+    <span class="logo">Process Intelligence</span>
+    <span class="site-sub">Flowsheet 設計器</span>
+    <div class="hdr-actions">
+      <a class="hbtn" href="/static/model_api.html">模型 API 控制台</a>
+      <a class="hbtn" href="/">← 回首頁</a>
+    </div>
+  </header>
+  <h1>Flowsheet 設計器</h1>
+  <div class="sub">從已發布模型庫挑 block、排流程、拉連接、設警戒值——儲存即成一座可運轉的數據孿生流程。焚化爐示範就是用同一套規格組出來的。</div>
+
+  <div class="meta">
+    <div class="mf">識別碼 flowsheet_id<input id="m-fid" placeholder="my-plant-01" /></div>
+    <div class="mf grow">名稱<input id="m-name" placeholder="我的廠區數據孿生" /></div>
+    <div class="mf grow">說明<input id="m-desc" placeholder="流程簡述（顯示在檢視頁副標）" /></div>
+    <div class="mf">載入現有<select id="m-load"><option value="">— 選擇 —</option></select></div>
+    <button class="save-btn" id="btn-save">儲存 flowsheet</button>
+    <a class="view-btn" id="btn-view" style="display:none" target="_blank">▶ 開啟檢視</a>
+  </div>
+
+  <div class="cols">
+    <div class="panel">
+      <h2>① 已發布模型庫</h2>
+      <div id="models"><div class="empty">載入模型清單…</div></div>
+      <div class="phint">模型先在「資料工作台」訓練並發布（<span style="font-family:var(--mono)">POST /agatha/model/publish/</span>）後，就會出現在這裡。</div>
+    </div>
+    <div class="panel">
+      <h2>② 流程設計（主線與支線，由上而下、由左而右）</h2>
+      <div id="trains-edit"><div class="empty">從左側「＋加入流程」挑模型開始。<br>每個 block 可改編號、名稱、圖示、單位與警戒值。</div></div>
+      <button class="addtrain" id="btn-addtrain">＋ 新增支線</button>
+    </div>
+    <div class="panel">
+      <h2>③ 模型輸出傳遞（連接）</h2>
+      <div id="conns"><div class="empty">尚無連接</div></div>
+      <div class="cform">
+        <select id="c-from"><option value="">上游 block（迴歸模型）</option></select>
+        <select id="c-to"><option value="">下游 block</option></select>
+        <select id="c-feat"><option value="">餵入下游哪個輸入特徵</option></select>
+        <button class="cadd" id="c-add">＋ 建立連接</button>
+      </div>
+      <div class="phint">上游模型的預測輸出，執行期會覆蓋下游該特徵——這就是「A 算完、B 跟著變」。異常偵測模型無數值輸出，不能當上游。</div>
+      <div class="result" id="result"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// Flowsheet 設計器 — 客戶自組數據孿生流程：
+//   模型庫（find_model_list）→ 加入 block → 排 trains → 拉 connections
+//   → POST /agatha/flowsheet/ 儲存（後端驗證＋自動補訓練中位數 defaults）
+//   → 泛用檢視頁 ?id={fid} 立即可跑。
+// ============================================================================
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// 與檢視頁同一套圖示鍵（檢視頁 ICONS）
+const ICON_OPTS={flame:'火焰（燃燒）',spray:'噴注（藥劑）',boiler:'鍋爐（蒸汽）',scrubber:'洗滌塔',
+  carbon:'吸附（六角）',bag:'袋濾（過濾）',fan:'風機',turbine:'發電（閃電）',gauge:'儀錶（監測）',box:'方塊（通用）'};
+
+let MODELS=[];                        // 已發布模型清單
+// 設計狀態：trains = [[blockRef,...],...]；blockRef = {id,model_key,name,ico,unit,warn,crit,better,kind,target,features,defaults}
+let TRAINS=[[]];
+let CONNS=[];                         // {from,to,target_input,unit}
+
+function allBlocks(){return TRAINS.flat();}
+function findBlock(id){return allBlocks().find(b=>b.id===id);}
+
+// ---------------- 模型庫 ----------------
+async function loadModels(){
+  try{
+    const r=await fetch('/agatha/find_model_list/?only_enabled=yes');
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    MODELS=await r.json();
+  }catch(e){$('models').innerHTML=`<div class="empty">模型清單載入失敗：${esc(e.message)}</div>`;return;}
+  if(!MODELS.length){$('models').innerHTML='<div class="empty">尚無已發布模型。<br>先到「模型工作區」訓練並發布。</div>';return;}
+  $('models').innerHTML=MODELS.map((m,i)=>`
+    <div class="mrow">
+      <div class="mn">${esc(m.display_name||m.model_key)}</div>
+      <div class="mt">
+        <span class="chip ${m.task==='anomaly'?'an':''}">${esc(m.product_type||m.task)}</span>
+        ${m.target&&m.target!=='（無監督）'?`目標 ${esc(m.target)}`:'無監督（健康監測）'}
+      </div>
+      <button class="addb" data-i="${i}">＋ 加入流程</button>
+    </div>`).join('');
+  $('models').querySelectorAll('.addb').forEach(b=>b.addEventListener('click',()=>addBlock(MODELS[+b.dataset.i])));
+}
+
+// ---------------- block 管理 ----------------
+function nextId(){
+  // B-101, B-201… 取下一個未用的百位；滿了退回 B-901 之後流水
+  const used=new Set(allBlocks().map(b=>b.id));
+  for(let n=1;n<=99;n++){const id=`B-${n}01`;if(!used.has(id))return id;}
+  let k=1;while(used.has('BLK-'+k))k++;return 'BLK-'+k;
+}
+function guessIcon(m){
+  const n=(m.display_name||'')+(m.target||'');
+  if(/爐|燃燒/.test(n))return 'flame';
+  if(/脫硝|SNCR|NOx/.test(n))return 'spray';
+  if(/鍋爐|蒸汽|steam/i.test(n))return 'boiler';
+  if(/洗煙|洗滌|HCl|酸/.test(n))return 'scrubber';
+  if(/碳|吸附|Hg/.test(n))return 'carbon';
+  if(/袋|集塵|濾|dust/i.test(n))return 'bag';
+  if(/風機|引風|fan/i.test(n))return 'fan';
+  if(/發電|汽輪|power|MW/i.test(n))return 'turbine';
+  return m.task==='anomaly'?'gauge':'box';
+}
+function addBlock(m){
+  const anom=m.task==='anomaly';
+  TRAINS[0].push({
+    id:nextId(), model_key:m.model_key, name:m.display_name||m.model_key,
+    ico:guessIcon(m), unit:anom?'/100':'', warn:'', crit:'',
+    better:anom?'high':'low', kind:anom?'anomaly':'regression',
+    target:m.target, features:m.features||[], defaults:{},
+  });
+  renderTrains(); renderConnForm();
+}
+function removeBlock(id){
+  TRAINS=TRAINS.map(t=>t.filter(b=>b.id!==id));
+  CONNS=CONNS.filter(c=>c.from!==id&&c.to!==id);
+  renderTrains(); renderConns(); renderConnForm();
+}
+function moveBlock(id,dir){
+  for(const t of TRAINS){
+    const i=t.findIndex(b=>b.id===id);
+    if(i<0)continue;
+    const j=i+dir;
+    if(j<0||j>=t.length)return;
+    [t[i],t[j]]=[t[j],t[i]];
+    renderTrains();return;
+  }
+}
+function moveToTrain(id,ti){
+  let blk=null;
+  TRAINS=TRAINS.map(t=>t.filter(b=>{if(b.id===id){blk=b;return false;}return true;}));
+  (TRAINS[ti]??=[]).push(blk);
+  renderTrains();
+}
+
+function renderTrains(){
+  const wrap=$('trains-edit');
+  if(!allBlocks().length){wrap.innerHTML='<div class="empty">從左側「＋加入流程」挑模型開始。<br>每個 block 可改編號、名稱、圖示、單位與警戒值。</div>';return;}
+  wrap.innerHTML=TRAINS.map((t,ti)=>`
+    <div class="train">
+      <div class="thead">${ti===0?'主線':'支線 '+ti}
+        ${ti>0?`<button class="tdel" data-t="${ti}" title="刪除此支線（block 移回主線）">刪除支線</button>`:''}
+      </div>
+      ${t.map(b=>bcard(b,ti)).join('')||'<div class="empty" style="padding:10px">（空）拖模型進來或用 block 的「移至」</div>'}
+    </div>`).join('');
+  // 綁事件
+  wrap.querySelectorAll('[data-act]').forEach(el=>{
+    const id=el.dataset.id;
+    if(el.dataset.act==='del')el.onclick=()=>removeBlock(id);
+    if(el.dataset.act==='up')el.onclick=()=>moveBlock(id,-1);
+    if(el.dataset.act==='dn')el.onclick=()=>moveBlock(id,1);
+    if(el.dataset.act==='mv')el.onchange=()=>moveToTrain(id,+el.value);
+  });
+  wrap.querySelectorAll('[data-f]').forEach(el=>{
+    el.addEventListener(el.tagName==='SELECT'?'change':'input',()=>{
+      const b=findBlock(el.dataset.id); if(!b)return;
+      const old=b.id;
+      b[el.dataset.f]=el.value;
+      if(el.dataset.f==='id'&&el.value!==old){
+        // 連接跟著改 id
+        CONNS.forEach(c=>{if(c.from===old)c.from=el.value;if(c.to===old)c.to=el.value;});
+        renderConns();renderConnForm();
+      }
+    });
+  });
+  wrap.querySelectorAll('.tdel').forEach(el=>el.onclick=()=>{
+    const ti=+el.dataset.t;
+    TRAINS[0].push(...TRAINS[ti]);TRAINS.splice(ti,1);renderTrains();
+  });
+  renderConnForm();
+}
+function bcard(b,ti){
+  const anom=b.kind==='anomaly';
+  return `<div class="bcard">
+    <div class="bhead">
+      <input class="bid" data-f="id" data-id="${esc(b.id)}" value="${esc(b.id)}">
+      <span style="font-size:11px;color:var(--text2)">${anom?'健康預警':'預測'}｜目標 ${esc(b.target||'—')}</span>
+      <span class="bctl">
+        <button data-act="up" data-id="${esc(b.id)}" title="往前移">←</button>
+        <button data-act="dn" data-id="${esc(b.id)}" title="往後移">→</button>
+        <select data-act="mv" data-id="${esc(b.id)}" title="移至別條線">
+          ${TRAINS.map((_,i)=>`<option value="${i}" ${i===ti?'selected':''}>${i===0?'主線':'支線 '+i}</option>`).join('')}
+        </select>
+        <button class="bdel" data-act="del" data-id="${esc(b.id)}" title="移除">✕</button>
+      </span>
+    </div>
+    <div class="bgrid">
+      <div class="bf">顯示名稱<input data-f="name" data-id="${esc(b.id)}" value="${esc(b.name)}"></div>
+      <div class="bf">圖示<select data-f="ico" data-id="${esc(b.id)}">
+        ${Object.entries(ICON_OPTS).map(([k,v])=>`<option value="${k}" ${b.ico===k?'selected':''}>${v}</option>`).join('')}
+      </select></div>
+      <div class="bf">單位<input data-f="unit" data-id="${esc(b.id)}" value="${esc(b.unit)}" ${anom?'disabled':''}></div>
+      ${anom?'<div class="bf">注意值<input disabled placeholder="—"></div><div class="bf">警戒值<input disabled placeholder="—"></div>':`
+      <div class="bf">注意值 warn<input type="number" step="any" data-f="warn" data-id="${esc(b.id)}" value="${esc(b.warn)}"></div>
+      <div class="bf">警戒值 crit<input type="number" step="any" data-f="crit" data-id="${esc(b.id)}" value="${esc(b.crit)}"></div>`}
+    </div>
+    ${anom?'':`<div class="bgrid" style="margin-top:7px;grid-template-columns:1fr">
+      <div class="bf">方向<select data-f="better" data-id="${esc(b.id)}">
+        <option value="low" ${b.better==='low'?'selected':''}>數值低比較好（超過警戒→紅）</option>
+        <option value="high" ${b.better==='high'?'selected':''}>數值高比較好（低於警戒→紅）</option>
+      </select></div></div>`}
+    <div class="bmeta">API ${esc(b.model_key)} · 輸入特徵 ${b.features.length} 個（預設值存檔時自動以訓練中位數補齊）</div>
+  </div>`;
+}
+
+// ---------------- 連接 ----------------
+function renderConns(){
+  $('conns').innerHTML=CONNS.length?CONNS.map((c,i)=>`
+    <div class="conn"><span>${esc(c.from)} <b>${esc(findBlock(c.from)?.target||'')}</b> → ${esc(c.to)} <b>${esc(c.target_input)}</b></span>
+    <button class="cx" data-i="${i}" title="移除連接">✕</button></div>`).join('')
+    :'<div class="empty">尚無連接</div>';
+  $('conns').querySelectorAll('.cx').forEach(b=>b.onclick=()=>{CONNS.splice(+b.dataset.i,1);renderConns();});
+}
+function renderConnForm(){
+  const blocks=allBlocks();
+  $('c-from').innerHTML='<option value="">上游 block（迴歸模型）</option>'+
+    blocks.filter(b=>b.kind==='regression').map(b=>`<option value="${esc(b.id)}">${esc(b.id)}｜${esc(b.name)}（輸出 ${esc(b.target||'')}）</option>`).join('');
+  $('c-to').innerHTML='<option value="">下游 block</option>'+
+    blocks.map(b=>`<option value="${esc(b.id)}">${esc(b.id)}｜${esc(b.name)}</option>`).join('');
+  fillFeatSelect();
+}
+function fillFeatSelect(){
+  const to=findBlock($('c-to').value);
+  $('c-feat').innerHTML='<option value="">餵入下游哪個輸入特徵</option>'+
+    (to?to.features.map(f=>`<option value="${esc(f)}">${esc(f)}</option>`).join(''):'');
+}
+$('c-to').addEventListener('change',fillFeatSelect);
+$('c-add').addEventListener('click',()=>{
+  const from=$('c-from').value,to=$('c-to').value,ti=$('c-feat').value;
+  const R=$('result');
+  if(!from||!to||!ti){R.className='result err';R.textContent='連接需要：上游、下游、下游輸入特徵。';return;}
+  if(from===to){R.className='result err';R.textContent='不可自迴接。';return;}
+  if(CONNS.some(c=>c.from===from&&c.to===to&&c.target_input===ti)){R.className='result err';R.textContent='這條連接已存在。';return;}
+  CONNS.push({from,to,target_input:ti,unit:findBlock(from)?.unit||''});
+  R.className='result';R.textContent='';
+  renderConns();
+});
+
+// ---------------- 支線 ----------------
+$('btn-addtrain').addEventListener('click',()=>{TRAINS.push([]);renderTrains();});
+
+// ---------------- 儲存 / 載入 ----------------
+$('btn-save').addEventListener('click',async()=>{
+  const R=$('result');
+  const fid=$('m-fid').value.trim().toLowerCase();
+  if(!/^[a-z0-9][a-z0-9_-]{2,39}$/.test(fid)){R.className='result err';R.textContent='識別碼格式：小寫英數/連字號/底線，3~40 字，英數開頭。';return;}
+  if(!allBlocks().length){R.className='result err';R.textContent='至少加入一個 block。';return;}
+  const spec={
+    flowsheet_id:fid, name:$('m-name').value.trim()||fid, desc:$('m-desc').value.trim(),
+    trains:TRAINS.filter(t=>t.length).map(t=>t.map(b=>b.id)),
+    blocks:allBlocks().map(b=>({id:b.id,model_key:b.model_key,name:b.name,ico:b.ico,unit:b.unit,
+      warn:b.warn===''?null:+b.warn, crit:b.crit===''?null:+b.crit, better:b.better,
+      output_label:b.kind==='anomaly'?'健康分數':(b.target||''), defaults:b.defaults||{}})),
+    connections:CONNS,
+  };
+  $('btn-save').disabled=true;$('btn-save').textContent='儲存中…';
+  try{
+    const r=await fetch('/agatha/flowsheet/',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(spec)});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+    const nfill=Object.values(d.auto_filled_defaults||{}).reduce((s,a)=>s+a.length,0);
+    R.className='result ok';
+    R.innerHTML=`✓ 已儲存 <b>${esc(d.flowsheet_id)}</b>（${d.n_blocks} blocks / ${d.n_connections} 連接${nfill?`，自動補 ${nfill} 個訓練中位數預設值`:''}）。<br>
+      <a href="/static/incinerator_flowsheet.html?id=${encodeURIComponent(d.flowsheet_id)}" target="_blank">▶ 開啟檢視（每拍求解即時跑）</a>`;
+    const v=$('btn-view');v.style.display='';v.href=`/static/incinerator_flowsheet.html?id=${encodeURIComponent(d.flowsheet_id)}`;
+    loadList();
+  }catch(e){R.className='result err';R.textContent='儲存失敗：'+(e.message||e);}
+  finally{$('btn-save').disabled=false;$('btn-save').textContent='儲存 flowsheet';}
+});
+
+async function loadList(){
+  try{
+    const rows=await fetch('/agatha/flowsheet/').then(r=>r.json());
+    $('m-load').innerHTML='<option value="">— 選擇 —</option>'+rows.map(f=>`<option value="${esc(f.flowsheet_id)}">${esc(f.name)}（${f.n_blocks}）</option>`).join('');
+  }catch{}
+}
+$('m-load').addEventListener('change',async()=>{
+  const fid=$('m-load').value; if(!fid)return;
+  const R=$('result');
+  try{
+    const spec=await fetch(`/agatha/flowsheet/${encodeURIComponent(fid)}/spec/`).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();});
+    $('m-fid').value=spec.flowsheet_id;$('m-name').value=spec.name||'';$('m-desc').value=spec.desc||'';
+    // blocks → 設計狀態（features/target/kind 以模型清單為準；不在清單=已下架，warn 提示）
+    const byKey=Object.fromEntries(MODELS.map(m=>[m.model_key,m]));
+    const mkBlock=b=>{
+      const m=byKey[b.model_key]||{};
+      return {id:b.id,model_key:b.model_key,name:b.name||b.id,
+        ico:(b.ico&&ICON_OPTS[b.ico])?b.ico:guessIcon({display_name:b.name,target:m.target,task:m.task||b.kind}),
+        unit:b.unit||'',warn:b.warn??'',crit:b.crit??'',better:b.better||'low',
+        kind:b.kind||( (m.task==='anomaly')?'anomaly':'regression'),
+        target:m.target||b.output_label||'',features:m.features||Object.keys(b.feature_ranges||{}),
+        defaults:b.defaults||{}};
+    };
+    const blkmap={};(spec.blocks||[]).forEach(b=>blkmap[b.id]=mkBlock(b));
+    TRAINS=(spec.trains&&spec.trains.length?spec.trains:[Object.keys(blkmap)]).map(t=>t.map(id=>blkmap[id]).filter(Boolean));
+    const placed=new Set(TRAINS.flat().map(b=>b.id));
+    const rest=Object.values(blkmap).filter(b=>!placed.has(b.id));
+    if(rest.length)TRAINS[0].push(...rest);
+    CONNS=(spec.connections||[]).map(c=>({from:c.from,to:c.to,target_input:c.target_input,unit:c.unit||''}));
+    renderTrains();renderConns();renderConnForm();
+    const v=$('btn-view');v.style.display='';v.href=`/static/incinerator_flowsheet.html?id=${encodeURIComponent(fid)}`;
+    R.className='result ok';R.textContent=`✓ 已載入 ${fid}，可編輯後重新儲存（同識別碼＝覆存）。`;
+  }catch(e){R.className='result err';R.textContent='載入失敗：'+(e.message||e);}
+});
+
+// ?id= 直接進編輯模式
+(async function(){
+  await loadModels(); await loadList();
+  const qid=new URLSearchParams(location.search).get('id');
+  if(qid){$('m-load').value=qid;$('m-load').dispatchEvent(new Event('change'));}
+})();
+</script>
+</body>
+</html>

@@ -1,329 +1,330 @@
 {
-  "plant": {
-    "id": "INCIN-PLANT",
-    "name": "焚化爐全廠數位孿生（8 block flowsheet）",
-    "units": [
-      {
-        "id": "U-INCIN",
-        "name": "焚化廠",
-        "equipment": [
-          {
-            "tag": "B-101",
-            "type": "furnace",
-            "name": "B-101 爐排燃燒爐",
-            "pos": [
-              0,
-              0,
-              0
-            ],
-            "dims": {
-              "w": 4.5,
-              "h": 6.0,
-              "d": 4.5
-            },
-            "pid_ref": "",
-            "design": {},
-            "instruments": [],
-            "model": {
-              "model_key": "1058a8d8_10013",
-              "product_type": "optimize",
-              "task": "regression",
-              "kind": "optimize",
-              "title": "B-101 爐排燃燒爐",
-              "inputs": [
-                "waste_feed_t_h",
-                "waste_LHV_kJ_kg",
-                "primary_air_kNm3_h",
-                "secondary_air_kNm3_h",
-                "grate_speed_m_h",
-                "primary_air_temp_C"
-              ],
-              "key_label": "NOx mg/Nm³",
-              "capabilities": [
-                "predict",
-                "evaluate",
-                "whatif",
-                "optimize",
-                "optimize2"
-              ]
-            }
-          },
-          {
-            "tag": "B-201",
-            "type": "reactor",
-            "name": "B-201 SNCR 脫硝",
-            "pos": [
-              12,
-              0,
-              0
-            ],
-            "dims": {
-              "r": 1.6,
-              "h": 6.0
-            },
-            "pid_ref": "",
-            "design": {},
-            "instruments": [],
-            "model": {
-              "model_key": "d99cf30d_10014",
-              "product_type": "optimize",
-              "task": "regression",
-              "kind": "optimize",
-              "title": "B-201 SNCR 脫硝",
-              "inputs": [
-                "urea_inject_L_h",
-                "furnace_temp_C",
-                "inlet_NOx_mg_Nm3",
-                "flue_gas_flow_kNm3_h"
-              ],
-              "key_label": "出口 NOx",
-              "capabilities": [
-                "predict",
-                "evaluate",
-                "whatif",
-                "optimize",
-                "optimize2"
-              ]
-            }
-          },
-          {
-            "tag": "B-301",
-            "type": "building",
-            "name": "B-301 餘熱鍋爐",
-            "pos": [
-              24,
-              0,
-              0
-            ],
-            "dims": {
-              "w": 6.0,
-              "h": 9.0,
-              "d": 5.0
-            },
-            "pid_ref": "",
-            "design": {},
-            "instruments": [],
-            "model": {
-              "model_key": "22dbd537_10015",
-              "product_type": "quality",
-              "task": "regression",
-              "kind": "predict",
-              "title": "B-301 餘熱鍋爐",
-              "inputs": [
-                "heat_release_MW",
-                "feedwater_t_h",
-                "drum_pressure_bar",
-                "boiler_inlet_gas_C"
-              ],
-              "key_label": "蒸汽 t/h",
-              "capabilities": [
-                "predict",
-                "evaluate",
-                "whatif",
-                "batch"
-              ]
-            }
-          },
-          {
-            "tag": "B-401",
-            "type": "column",
-            "name": "B-401 半乾式洗煙塔",
-            "pos": [
-              36,
-              0,
-              0
-            ],
-            "dims": {
-              "r": 1.8,
-              "h": 9.0
-            },
-            "pid_ref": "",
-            "design": {},
-            "instruments": [],
-            "model": {
-              "model_key": "f56b7b69_10016",
-              "product_type": "quality",
-              "task": "regression",
-              "kind": "predict",
-              "title": "B-401 半乾式洗煙塔",
-              "inputs": [
-                "lime_slurry_kg_h",
-                "water_inject_m3_h",
-                "inlet_HCl_mg_Nm3",
-                "scrubber_exit_temp_C",
-                "flue_gas_flow_kNm3_h"
-              ],
-              "key_label": "出口 HCl",
-              "capabilities": [
-                "predict",
-                "evaluate",
-                "whatif",
-                "batch"
-              ]
-            }
-          },
-          {
-            "tag": "B-501",
-            "type": "tank",
-            "name": "B-501 活性碳吸附",
-            "pos": [
-              48,
-              0,
-              0
-            ],
-            "dims": {
-              "r": 1.4,
-              "h": 5.0
-            },
-            "pid_ref": "",
-            "design": {},
-            "instruments": [],
-            "model": {
-              "model_key": "6f2e592c_10017",
-              "product_type": "quality",
-              "task": "regression",
-              "kind": "predict",
-              "title": "B-501 活性碳吸附",
-              "inputs": [
-                "carbon_inject_kg_h",
-                "inlet_Hg_ug_Nm3",
-                "flue_gas_flow_kNm3_h"
-              ],
-              "key_label": "出口 Hg",
-              "capabilities": [
-                "predict",
-                "evaluate",
-                "whatif",
-                "batch"
-              ]
-            }
-          },
-          {
-            "tag": "B-601",
-            "type": "building",
-            "name": "B-601 袋式集塵器",
-            "pos": [
-              60,
-              0,
-              0
-            ],
-            "dims": {
-              "w": 5.0,
-              "h": 6.0,
-              "d": 4.0
-            },
-            "pid_ref": "",
-            "design": {},
-            "instruments": [],
-            "model": {
-              "model_key": "f6f501dc_10018",
-              "product_type": "occ",
-              "task": "anomaly",
-              "kind": "health",
-              "title": "B-601 袋式集塵器",
-              "inputs": [
-                "bag_dP_mbar",
-                "collection_eff_pct",
-                "outlet_dust_mg_Nm3",
-                "inlet_dust_g_Nm3"
-              ],
-              "key_label": "健康度",
-              "capabilities": [
-                "predict",
-                "evaluate",
-                "threshold"
-              ]
-            }
-          },
-          {
-            "tag": "B-701",
-            "type": "block",
-            "name": "B-701 引風機",
-            "pos": [
-              72,
-              0,
-              0
-            ],
-            "dims": {
-              "w": 3.0,
-              "h": 3.0,
-              "d": 3.0
-            },
-            "pid_ref": "",
-            "design": {},
-            "instruments": [],
-            "model": {
-              "model_key": "ff6e5db6_10019",
-              "product_type": "occ",
-              "task": "anomaly",
-              "kind": "health",
-              "title": "B-701 引風機",
-              "inputs": [
-                "fan_motor_current_A",
-                "fan_vibration_mm_s",
-                "fan_bearing_temp_C",
-                "flue_gas_flow_kNm3_h"
-              ],
-              "key_label": "健康度",
-              "capabilities": [
-                "predict",
-                "evaluate",
-                "threshold"
-              ]
-            }
-          },
-          {
-            "tag": "B-801",
-            "type": "building",
-            "name": "B-801 汽輪發電機",
-            "pos": [
-              24,
-              0,
-              -16
-            ],
-            "dims": {
-              "w": 6.0,
-              "h": 4.0,
-              "d": 5.0
-            },
-            "pid_ref": "",
-            "design": {},
-            "instruments": [],
-            "model": {
-              "model_key": "facdf2a4_10020",
-              "product_type": "quality",
-              "task": "regression",
-              "kind": "predict",
-              "title": "B-801 汽輪發電機",
-              "inputs": [
-                "inlet_steam_t_h",
-                "inlet_steam_temp_C",
-                "condenser_vac_kPa"
-              ],
-              "key_label": "發電 MW",
-              "capabilities": [
-                "predict",
-                "evaluate",
-                "whatif",
-                "batch"
-              ]
-            }
-          }
-        ]
+ "flowsheet": "incinerator-8b",
+ "plant": {
+  "id": "INCIN-PLANT",
+  "name": "焚化爐全廠數位孿生（8 block flowsheet）",
+  "units": [
+   {
+    "id": "U-INCIN",
+    "name": "焚化廠",
+    "equipment": [
+     {
+      "tag": "B-101",
+      "type": "furnace",
+      "name": "B-101 爐排燃燒爐",
+      "pos": [
+       0,
+       0,
+       0
+      ],
+      "dims": {
+       "w": 4.5,
+       "h": 6.0,
+       "d": 4.5
+      },
+      "pid_ref": "",
+      "design": {},
+      "instruments": [],
+      "model": {
+       "model_key": "1058a8d8_10013",
+       "product_type": "optimize",
+       "task": "regression",
+       "kind": "optimize",
+       "title": "B-101 爐排燃燒爐",
+       "inputs": [
+        "waste_feed_t_h",
+        "waste_LHV_kJ_kg",
+        "primary_air_kNm3_h",
+        "secondary_air_kNm3_h",
+        "grate_speed_m_h",
+        "primary_air_temp_C"
+       ],
+       "key_label": "NOx mg/Nm³",
+       "capabilities": [
+        "predict",
+        "evaluate",
+        "whatif",
+        "optimize",
+        "optimize2"
+       ]
       }
+     },
+     {
+      "tag": "B-201",
+      "type": "reactor",
+      "name": "B-201 SNCR 脫硝",
+      "pos": [
+       12,
+       0,
+       0
+      ],
+      "dims": {
+       "r": 1.6,
+       "h": 6.0
+      },
+      "pid_ref": "",
+      "design": {},
+      "instruments": [],
+      "model": {
+       "model_key": "d99cf30d_10014",
+       "product_type": "optimize",
+       "task": "regression",
+       "kind": "optimize",
+       "title": "B-201 SNCR 脫硝",
+       "inputs": [
+        "urea_inject_L_h",
+        "furnace_temp_C",
+        "inlet_NOx_mg_Nm3",
+        "flue_gas_flow_kNm3_h"
+       ],
+       "key_label": "出口 NOx",
+       "capabilities": [
+        "predict",
+        "evaluate",
+        "whatif",
+        "optimize",
+        "optimize2"
+       ]
+      }
+     },
+     {
+      "tag": "B-301",
+      "type": "building",
+      "name": "B-301 餘熱鍋爐",
+      "pos": [
+       24,
+       0,
+       0
+      ],
+      "dims": {
+       "w": 6.0,
+       "h": 9.0,
+       "d": 5.0
+      },
+      "pid_ref": "",
+      "design": {},
+      "instruments": [],
+      "model": {
+       "model_key": "22dbd537_10015",
+       "product_type": "quality",
+       "task": "regression",
+       "kind": "predict",
+       "title": "B-301 餘熱鍋爐",
+       "inputs": [
+        "heat_release_MW",
+        "feedwater_t_h",
+        "drum_pressure_bar",
+        "boiler_inlet_gas_C"
+       ],
+       "key_label": "蒸汽 t/h",
+       "capabilities": [
+        "predict",
+        "evaluate",
+        "whatif",
+        "batch"
+       ]
+      }
+     },
+     {
+      "tag": "B-401",
+      "type": "column",
+      "name": "B-401 半乾式洗煙塔",
+      "pos": [
+       36,
+       0,
+       0
+      ],
+      "dims": {
+       "r": 1.8,
+       "h": 9.0
+      },
+      "pid_ref": "",
+      "design": {},
+      "instruments": [],
+      "model": {
+       "model_key": "f56b7b69_10016",
+       "product_type": "quality",
+       "task": "regression",
+       "kind": "predict",
+       "title": "B-401 半乾式洗煙塔",
+       "inputs": [
+        "lime_slurry_kg_h",
+        "water_inject_m3_h",
+        "inlet_HCl_mg_Nm3",
+        "scrubber_exit_temp_C",
+        "flue_gas_flow_kNm3_h"
+       ],
+       "key_label": "出口 HCl",
+       "capabilities": [
+        "predict",
+        "evaluate",
+        "whatif",
+        "batch"
+       ]
+      }
+     },
+     {
+      "tag": "B-501",
+      "type": "tank",
+      "name": "B-501 活性碳吸附",
+      "pos": [
+       48,
+       0,
+       0
+      ],
+      "dims": {
+       "r": 1.4,
+       "h": 5.0
+      },
+      "pid_ref": "",
+      "design": {},
+      "instruments": [],
+      "model": {
+       "model_key": "6f2e592c_10017",
+       "product_type": "quality",
+       "task": "regression",
+       "kind": "predict",
+       "title": "B-501 活性碳吸附",
+       "inputs": [
+        "carbon_inject_kg_h",
+        "inlet_Hg_ug_Nm3",
+        "flue_gas_flow_kNm3_h"
+       ],
+       "key_label": "出口 Hg",
+       "capabilities": [
+        "predict",
+        "evaluate",
+        "whatif",
+        "batch"
+       ]
+      }
+     },
+     {
+      "tag": "B-601",
+      "type": "building",
+      "name": "B-601 袋式集塵器",
+      "pos": [
+       60,
+       0,
+       0
+      ],
+      "dims": {
+       "w": 5.0,
+       "h": 6.0,
+       "d": 4.0
+      },
+      "pid_ref": "",
+      "design": {},
+      "instruments": [],
+      "model": {
+       "model_key": "f6f501dc_10018",
+       "product_type": "occ",
+       "task": "anomaly",
+       "kind": "health",
+       "title": "B-601 袋式集塵器",
+       "inputs": [
+        "bag_dP_mbar",
+        "collection_eff_pct",
+        "outlet_dust_mg_Nm3",
+        "inlet_dust_g_Nm3"
+       ],
+       "key_label": "健康度",
+       "capabilities": [
+        "predict",
+        "evaluate",
+        "threshold"
+       ]
+      }
+     },
+     {
+      "tag": "B-701",
+      "type": "block",
+      "name": "B-701 引風機",
+      "pos": [
+       72,
+       0,
+       0
+      ],
+      "dims": {
+       "w": 3.0,
+       "h": 3.0,
+       "d": 3.0
+      },
+      "pid_ref": "",
+      "design": {},
+      "instruments": [],
+      "model": {
+       "model_key": "ff6e5db6_10019",
+       "product_type": "occ",
+       "task": "anomaly",
+       "kind": "health",
+       "title": "B-701 引風機",
+       "inputs": [
+        "fan_motor_current_A",
+        "fan_vibration_mm_s",
+        "fan_bearing_temp_C",
+        "flue_gas_flow_kNm3_h"
+       ],
+       "key_label": "健康度",
+       "capabilities": [
+        "predict",
+        "evaluate",
+        "threshold"
+       ]
+      }
+     },
+     {
+      "tag": "B-801",
+      "type": "building",
+      "name": "B-801 汽輪發電機",
+      "pos": [
+       24,
+       0,
+       -16
+      ],
+      "dims": {
+       "w": 6.0,
+       "h": 4.0,
+       "d": 5.0
+      },
+      "pid_ref": "",
+      "design": {},
+      "instruments": [],
+      "model": {
+       "model_key": "facdf2a4_10020",
+       "product_type": "quality",
+       "task": "regression",
+       "kind": "predict",
+       "title": "B-801 汽輪發電機",
+       "inputs": [
+        "inlet_steam_t_h",
+        "inlet_steam_temp_C",
+        "condenser_vac_kPa"
+       ],
+       "key_label": "發電 MW",
+       "capabilities": [
+        "predict",
+        "evaluate",
+        "whatif",
+        "batch"
+       ]
+      }
+     }
     ]
-  },
-  "pipes": [],
-  "instruments": {},
-  "scenarios": [
-    {
-      "id": "normal",
-      "name": "正常運轉",
-      "kind": "normal",
-      "desc": ""
-    }
-  ],
-  "scan_models": [],
-  "props": [],
-  "underlays": []
+   }
+  ]
+ },
+ "pipes": [],
+ "instruments": {},
+ "scenarios": [
+  {
+   "id": "normal",
+   "name": "正常運轉",
+   "kind": "normal",
+   "desc": ""
+  }
+ ],
+ "scan_models": [],
+ "props": [],
+ "underlays": []
 }

@@ -9,6 +9,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { std, markShadow, builders, detailedBuilders, dm, dFlange, mergeByMaterial, labelHeight, buildPipeComponent } from './plant-builders.js';
 import { initSprite } from './sprite.js';
+import { initTwinFlow, flowAlarm, flowInfoSection } from './twinflow.js';
 
 const ACCENT = new THREE.Color('#46c2e0');
 const ALARM_RED = new THREE.Color('#ff2a2d');
@@ -660,6 +661,8 @@ function renderInfoCard(entry) {
         <tr><td>${t}</td><td><span class="inst-val" id="inst-${t}">--</span></td></tr>
         <tr class="spark-row"><td colspan="2"><svg class="spark" id="spark-${t}" viewBox="0 0 240 36" preserveAspectRatio="none"></svg></td></tr>`).join('')
     : '<tr><td colspan="2">（無儀錶點位）</td></tr>';
+  // AI 模型段（智慧運轉）：設備有綁模型才出現，開啟後由 twinflow 每拍即時更新
+  document.getElementById('info-model').innerHTML = flowInfoSection(eq);
   infoCard.classList.remove('hidden');
   refreshSparks(eq.instruments);
 }
@@ -1872,7 +1875,8 @@ function animate() {
   // 設備警報脈動 / 選取高亮 / 數據熱力圖
   const pulse = 0.35 + 0.45 * Math.abs(Math.sin(t * 4));
   for (const [tag, entry] of Object.entries(eqMap)) {
-    const alarming = alarmEquipment.has(tag) && currentScenario !== 'normal';
+    // 警報來源二擇一：DCS 情境警報（原有）或智慧運轉守門員「出定義域」
+    const alarming = (alarmEquipment.has(tag) && currentScenario !== 'normal') || flowAlarm.has(tag);
     const selected = tag === selectedTag;
     const heat = heatOn && entry.def.instruments.length ? (eqHeat[tag] ?? 0) : null;
     entry.group.traverse((o) => {
@@ -1954,3 +1958,35 @@ addEventListener('resize', onResize);
 // ResizeObserver 在視窗真正有尺寸時補一次
 new ResizeObserver(onResize).observe(document.body);
 onResize();
+
+// ---------------------------------------------------- 介面自訂（頂欄狀態 chip）
+// UI 減噪：效能/GD 等工程指標預設隱藏，使用者以 ⚙ 自選要顯示哪些（存 localStorage）
+const UI_CHIPS = [
+  { id: 'perf-chip', label: '效能檔位（FPS）', def: false },
+  { id: 'gd-chip', label: 'GD 酸霧偵測', def: false },
+  { id: 'vision-chip', label: 'AI 攝影機辨識', def: true },
+  { id: 'ws-status', label: '數據源連線', def: true },
+];
+const uiCfg = { ...Object.fromEntries(UI_CHIPS.map((c) => [c.id, c.def])), ...JSON.parse(localStorage.getItem('ej3d_chips') ?? '{}') };
+function applyUiCfg() {
+  for (const c of UI_CHIPS) document.getElementById(c.id)?.classList.toggle('hidden', !uiCfg[c.id]);
+}
+applyUiCfg();
+const uiPop = document.getElementById('ui-pop');
+document.getElementById('ui-pop-rows').innerHTML = UI_CHIPS.map((c) => `
+  <label class="ui-pop-row"><input type="checkbox" data-chip="${c.id}" ${uiCfg[c.id] ? 'checked' : ''}>${c.label}</label>`).join('');
+uiPop.querySelectorAll('input[data-chip]').forEach((cb) => cb.addEventListener('change', () => {
+  uiCfg[cb.dataset.chip] = cb.checked;
+  localStorage.setItem('ej3d_chips', JSON.stringify(uiCfg));
+  applyUiCfg();
+}));
+document.getElementById('ui-config').addEventListener('click', (e) => {
+  e.stopPropagation();
+  uiPop.classList.toggle('hidden');
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!uiPop.contains(e.target) && e.target.id !== 'ui-config') uiPop.classList.add('hidden');
+});
+
+// 智慧運轉（數據孿生求解器疊加）：場景 JSON 有宣告 flowsheet 才會啟用
+initTwinFlow({ plantData, eqMap, sceneId: SCENE_ID });

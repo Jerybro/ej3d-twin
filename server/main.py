@@ -382,6 +382,10 @@ from .data_api import router as data_api_router  # noqa: E402
 
 app.include_router(data_api_router)
 
+from .flowsheet import router as flowsheet_router  # noqa: E402
+
+app.include_router(flowsheet_router)
+
 # --------------------------------------------------------- 登入與權限（Google OAuth）
 from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
 

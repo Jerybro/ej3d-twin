@@ -339,6 +339,142 @@ body.splat-mode .cam-label { display: none !important; }
 
 .hidden { display: none !important; }
 
+/* ------------------------------------------------ 智慧運轉（數據孿生求解器） */
+#flow-toggle.active { background: rgba(4, 106, 251, 0.14); border-color: var(--accent); font-weight: 700; }
+#flow-panel {
+  position: absolute; bottom: 70px; right: 12px; width: 308px;
+  max-height: 56vh; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: 10px; padding: 12px 14px; z-index: 27;
+  backdrop-filter: blur(6px);
+}
+/* 智慧運轉開啟時：資訊卡適度封頂；監看卡頂端由 JS 依資訊卡實際底部動態排（不互疊） */
+body.flow-on #info-card { max-height: 46vh; }
+
+/* Block 工作面：點設備→「⤢ 放大檢視」，該 block 的 flowsheet 綁定完整載入（半版） */
+#block-ws {
+  position: absolute; top: 64px; bottom: 70px; right: 12px;
+  width: min(640px, calc(100vw - 24px));
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: 10px; padding: 16px 18px; z-index: 32;
+  overflow-y: auto; backdrop-filter: blur(6px);
+}
+#ws-close {
+  position: absolute; top: 10px; right: 12px;
+  background: none; border: none; color: var(--text-dim);
+  font-size: 20px; cursor: pointer; z-index: 2;
+}
+#ws-close:hover { color: var(--text); }
+.ws-tag { font-size: 22px; font-weight: 700; color: var(--accent); }
+.ws-name { font-size: 14px; margin-left: 8px; }
+.ws-sub { font-size: 11px; color: var(--text-dim); margin: 3px 0 6px; }
+.ws-cols { display: grid; grid-template-columns: 1fr 1.1fr; gap: 0 20px; }
+@media (max-width: 900px) { .ws-cols { grid-template-columns: 1fr; } }
+.ws-big { font-size: 36px; font-weight: 800; line-height: 1.1; color: var(--text); font-variant-numeric: tabular-nums; }
+.ws-big .unit { font-size: 13px; color: var(--text-dim); font-weight: 400; }
+.ws-spark { width: 100%; height: 48px; display: block; background: rgba(10, 16, 22, 0.04);
+  border: 1px solid var(--panel-border); border-radius: 6px; margin-top: 8px; }
+.ws-inputs { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ws-inputs td { padding: 4px 2px; border-bottom: 1px dashed var(--panel-border); }
+.ws-inputs td:first-child { color: var(--text-dim); font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+.ws-src { display: inline-block; font-size: 9.5px; padding: 0 6px; border-radius: 8px; margin-left: 6px; font-weight: 700; }
+.ws-src.up { background: rgba(4, 106, 251, 0.10); color: var(--accent); }
+.ws-src.ov { background: rgba(180, 83, 9, 0.12); color: #b96f10; }
+.ws-src.bd { background: rgba(92, 103, 115, 0.10); color: var(--text-dim); }
+
+/* 最佳化工作台 */
+.fo-row { margin-bottom: 8px; }
+.fo-row select, .fo-row input[type="number"] {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--panel-border); border-radius: 7px;
+  font-size: 12.5px; font-family: inherit; color: var(--text); background: #fff;
+}
+.fo-inline { display: flex; gap: 6px; }
+.fo-inline > * { flex: 1; }
+.fo-knob { padding: 7px 8px; border: 1px solid var(--panel-border); border-radius: 8px; margin-bottom: 6px; background: rgba(4,106,251,0.03); }
+.fo-knob.overridden { border-color: var(--accent); background: rgba(4,106,251,0.07); }
+.fo-knob-head { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.fo-knob-head label { display: flex; align-items: center; gap: 6px; cursor: pointer; flex: 1; min-width: 0; }
+.fo-knob-head .fo-feat { font-family: ui-monospace, Consolas, monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.fo-knob-head .fo-cur { margin-left: auto; color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+.fo-knob-head .fo-clear { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; padding: 0 2px; }
+.fo-knob-head .fo-clear:hover { color: var(--alarm); }
+.fo-ctrl { display: flex; gap: 8px; align-items: center; margin-top: 5px; }
+.fo-ctrl input[type="range"] { flex: 1; accent-color: var(--accent); height: 4px; }
+.fo-ctrl input[type="number"] {
+  width: 86px; padding: 4px 6px; border: 1px solid var(--panel-border); border-radius: 6px;
+  font-size: 12px; font-family: ui-monospace, Consolas, monospace; color: var(--text);
+}
+.fo-range { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.fo-run {
+  width: 100%; padding: 9px; margin-top: 4px;
+  border: none; border-radius: 8px; cursor: pointer; font-family: inherit;
+  background: var(--accent); color: #fff; font-size: 13px; font-weight: 700;
+}
+.fo-run:hover { background: #0559d6; }
+.fo-run:disabled { background: #9db4d8; cursor: default; }
+.fo-result { margin-top: 8px; font-size: 12px; }
+.fo-result table { width: 100%; border-collapse: collapse; }
+.fo-result td { padding: 4px 2px; border-bottom: 1px dashed var(--panel-border); }
+.fo-result td:first-child { color: var(--text-dim); font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+.fo-result .fo-best { font-weight: 700; color: var(--accent); }
+.fo-apply {
+  padding: 3px 10px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 11.5px;
+  background: rgba(4, 106, 251, 0.08); border: 1px solid var(--panel-border); color: var(--accent);
+}
+.fo-apply:hover { border-color: var(--accent); }
+.fo-headline { padding: 8px 10px; border-radius: 8px; background: rgba(53, 224, 140, 0.10);
+  color: #1d7a4f; font-size: 12.5px; font-weight: 500; margin-top: 8px; line-height: 1.6; }
+.fo-headline.err { background: rgba(255, 77, 79, 0.08); color: var(--alarm); }
+.flow-status { font-size: 11px; color: var(--text-dim); margin-bottom: 8px; display: flex; justify-content: space-between; }
+.flow-status b { color: var(--accent); font-weight: 700; }
+.flow-status .fl-guard-sum.warn { color: #ffaa3c; font-weight: 700; }
+.flow-status .fl-guard-sum.out { color: var(--alarm); font-weight: 700; }
+.fl-kpis { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin: 8px 0 4px; }
+.fl-kpi { background: rgba(4, 106, 251, 0.05); border: 1px solid var(--panel-border);
+  border-radius: 8px; padding: 6px 8px; }
+.fl-kpi .k { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
+.fl-kpi .v { font-size: 14px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+.fl-kpi .v .unit { font-size: 9px; color: var(--text-dim); font-weight: 400; }
+.fl-kpi.warn .v { color: #ffaa3c; }
+.fl-kpi.crit .v { color: var(--alarm); }
+.fl-conns { margin: 6px 0 2px; font-size: 11px; color: var(--text-dim); line-height: 1.7; }
+.fl-conns b { color: var(--accent); font-weight: 700; }
+.fl-demo { margin-top: 8px; display: flex; gap: 6px; }
+.fl-demo .sc-btn { flex: 1; padding: 6px 8px; font-size: 11.5px; border-radius: 7px; }
+.fl-opt-note { font-size: 11px; color: var(--text-dim); margin-top: 6px; line-height: 1.6; }
+.fl-opt-note b { color: var(--accent); }
+
+/* 3D 標籤徽章化（智慧運轉開啟時） */
+.eq-label.flow-badge { text-align: center; line-height: 1.25; padding: 3px 9px; }
+.eq-label.flow-badge .fl-val { display: block; font-size: 10.5px; font-weight: 700; color: var(--text); }
+.eq-label.flow-badge .fl-val .unit { font-size: 8.5px; color: var(--text-dim); font-weight: 400; }
+.eq-label.flow-badge.fl-warn { border-color: #ffaa3c; }
+.eq-label.flow-badge.fl-warn .fl-val { color: #b96f10; }
+.eq-label.flow-badge.fl-crit { border-color: var(--alarm); }
+.eq-label.flow-badge.fl-crit .fl-val { color: var(--alarm); }
+.eq-label.flow-badge.fl-guard-out { box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.35); }
+
+/* ------------------------------------------------ 介面自訂（狀態 chip 顯示） */
+#ui-config { padding: 4px 8px; }
+#ui-pop {
+  position: absolute; top: 54px; right: 12px; width: 210px;
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: 10px; padding: 10px 12px; z-index: 45;
+  backdrop-filter: blur(6px); box-shadow: 0 8px 28px rgba(6, 16, 39, 0.18);
+}
+#ui-pop .panel-title { font-size: 12px; margin-bottom: 6px; }
+.ui-pop-row { display: flex; align-items: center; gap: 8px; padding: 5px 2px; font-size: 12.5px; cursor: pointer; }
+.ui-pop-row input { accent-color: var(--accent); }
+.ui-pop-hint { font-size: 10.5px; color: var(--text-dim); margin-top: 6px; }
+
+/* 資訊卡 AI 模型段 */
+#info-model .mono { font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+.fl-chip { display: inline-block; font-size: 10.5px; padding: 1px 7px; border-radius: 9px;
+  background: rgba(53, 224, 140, 0.12); color: #1d7a4f; font-weight: 700; }
+.fl-chip.warn { background: rgba(255, 170, 60, 0.15); color: #b96f10; }
+.fl-chip.out { background: rgba(255, 77, 79, 0.12); color: var(--alarm); }
+.fl-chip.unknown { background: rgba(92, 103, 115, 0.12); color: var(--text-dim); }
+
 /* 3DGS 掃描檢視模式：隱藏示範廠的標籤與情境元素 */
 body.splat-mode .eq-label,
 body.splat-mode .muster-label { display: none !important; }

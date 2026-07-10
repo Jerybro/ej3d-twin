@@ -105,6 +105,55 @@
     .step h3 { font-size: 14.5px; font-weight: 600; margin: 10px 0 6px; }
     .step p { font-size: 12.5px; color: var(--text2); line-height: 1.75; flex: 1; }
     .step .go { font-size: 12.5px; color: var(--blue); margin-top: 10px; }
+
+    /* ---- AI 引導列 ---- */
+    .ai-bar { background: var(--white); border: 1px solid var(--bdr); border-radius: 12px;
+      padding: 14px 16px; margin: 0 0 20px; }
+    .ai-row { display: flex; gap: 10px; align-items: center; }
+    .ai-row svg { width: 18px; height: 18px; stroke: var(--blue); fill: none;
+      stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+    .ai-row input { flex: 1; border: none; outline: none; font: inherit; font-size: 14.5px;
+      color: var(--text); background: none; }
+    .ai-row input::placeholder { color: #9AA3AE; }
+    .ai-go { border: none; border-radius: 8px; background: var(--blue); color: #fff;
+      font-size: 13px; font-weight: 600; padding: 8px 18px; cursor: pointer; font-family: inherit; }
+    .ai-go:hover { background: #0357d6; }
+    .ai-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+    .ai-chip { font-size: 12px; padding: 4px 12px; border-radius: 14px; border: none;
+      background: rgba(4,106,251,.08); color: var(--blue); cursor: pointer; font-family: inherit; }
+    .ai-chip:hover { background: rgba(4,106,251,.16); }
+    .ai-result { margin-top: 10px; font-size: 13px; display: none; padding: 10px 13px;
+      border-radius: 8px; background: rgba(5,150,105,.07); color: var(--green-deep); line-height: 1.7; }
+    .ai-result.show { display: block; }
+    .ai-result a { color: var(--blue); font-weight: 600; }
+
+    /* ---- 三旅程卡 ---- */
+    .journeys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px; }
+    @media (max-width: 860px) { .journeys { grid-template-columns: 1fr; } }
+    .jcard { background: var(--white); border: 1px solid var(--bdr); border-radius: 10px; padding: 18px 20px; }
+    .jcard.hero { border: 2px solid var(--blue); }
+    .jcard svg { width: 22px; height: 22px; stroke: var(--green); fill: none;
+      stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .jcard h2 { font-size: 16px; font-weight: 600; margin: 10px 0 4px; }
+    .jcard > p { font-size: 13px; color: var(--text2); margin-bottom: 12px; line-height: 1.7; }
+    .jsteps { display: flex; flex-direction: column; gap: 6px; }
+    .jsteps a { display: flex; gap: 9px; align-items: center; font-size: 13px; color: var(--text);
+      text-decoration: none; padding: 8px 11px; border: 1px solid var(--bdr); border-radius: 7px; }
+    .jsteps a:hover { border-color: var(--blue); color: var(--blue); }
+    .jsteps .n { width: 18px; height: 18px; border-radius: 50%; background: rgba(4,106,251,.10);
+      color: var(--blue); font-size: 11px; font-weight: 700; display: inline-flex;
+      align-items: center; justify-content: center; flex: none; }
+
+    /* ---- 摺疊區（全部功能／七步導覽） ---- */
+    details.fold { margin: 14px 0; border: 1px solid var(--bdr); border-radius: 10px; background: var(--white); }
+    details.fold > summary { cursor: pointer; padding: 13px 18px; font-size: 13.5px; color: var(--text2);
+      font-weight: 600; user-select: none; list-style: none; display: flex; align-items: center; gap: 9px; }
+    details.fold > summary::-webkit-details-marker { display: none; }
+    details.fold > summary::before { content: '▸'; color: var(--blue); font-size: 12px; }
+    details.fold[open] > summary::before { content: '▾'; }
+    details.fold > summary .cnt { font-size: 11.5px; color: var(--text2); background: var(--bg);
+      border: 1px solid var(--bdr); border-radius: 12px; padding: 0 8px; font-weight: 500; }
+    details.fold > .fold-body { padding: 0 18px 18px; }
   </style>
 </head>
 <body>
@@ -154,7 +203,57 @@
       數據與物理雙驅動的流程工業平台：先成就數據孿生，再映射視覺孿生。物理約束治理 AI 外插，每一個模型附驗證度。
     </p>
 
-    <div class="group-title" data-i18n="guide.title">第一次使用？從數據到數位孿生，照這七步走</div>
+    <div class="ai-bar">
+      <div class="ai-row">
+        <svg viewBox="0 0 24 24"><path d="M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 15.6l-1.7-4.6L6 9.3l4.3-1.7z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
+        <input id="ai-q" data-i18n-ph="ai.ph" placeholder="告訴我你要做什麼——例如「我有一批壓縮機數據想做健康預警」" />
+        <button class="ai-go" id="ai-go" data-i18n="ai.go">帶我去</button>
+      </div>
+      <div class="ai-chips">
+        <button class="ai-chip" data-q="上傳數據建模型">上傳數據建模型</button>
+        <button class="ai-chip" data-q="組一座自己的孿生">組一座自己的孿生</button>
+        <button class="ai-chip" data-q="看焚化爐示範">看焚化爐示範</button>
+        <button class="ai-chip" data-q="把P&ID變3D廠區">把 P&amp;ID 變 3D 廠區</button>
+      </div>
+      <div class="ai-result" id="ai-result"></div>
+    </div>
+
+    <div class="journeys">
+      <div class="jcard">
+        <svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
+        <h2 data-i18n="j1.h">建模型</h2>
+        <p data-i18n="j1.p">從製程數據到可用的模型服務。</p>
+        <div class="jsteps">
+          <a href="/data"><span class="n">1</span><span data-i18n="j1.s1">上傳數據（CSV／Excel）</span></a>
+          <a href="/data?view=model"><span class="n">2</span><span data-i18n="j1.s2">自動建模與評估</span></a>
+          <a href="/static/model_api.html"><span class="n">3</span><span data-i18n="j1.s3">發布成模型 API</span></a>
+        </div>
+      </div>
+      <div class="jcard hero">
+        <svg viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v10"/></svg>
+        <h2 data-i18n="j2.h">組孿生</h2>
+        <p data-i18n="j2.p">把模型組成會運轉的廠。</p>
+        <div class="jsteps">
+          <a href="/static/flowsheet_builder.html"><span class="n">1</span><span data-i18n="j2.s1">Flowsheet 設計器：挑模型、拉連接</span></a>
+          <a href="/static/incinerator_flowsheet.html"><span class="n">2</span><span data-i18n="j2.s2">工程檢視：每拍求解驗證</span></a>
+          <a href="/twin?scene=incinerator-plant&flow=1"><span class="n">3</span><span data-i18n="j2.s3">綁 3D 場景：智慧運轉</span></a>
+        </div>
+      </div>
+      <div class="jcard">
+        <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+        <h2 data-i18n="j3.h">看運轉</h2>
+        <p data-i18n="j3.p">每天回來看的那一頁。</p>
+        <div class="jsteps">
+          <a href="/twin?scene=incinerator-plant&flow=1"><span class="n">›</span><span data-i18n="j3.s1">3D 廠區＋即時預測（智慧運轉）</span></a>
+          <a href="/static/block_health.html"><span class="n">›</span><span data-i18n="j3.s2">設備健康預警（PHM）</span></a>
+          <a href="/static/incinerator_flowsheet.html"><span class="n">›</span><span data-i18n="j3.s3">全廠指標與守門員（工程檢視）</span></a>
+        </div>
+      </div>
+    </div>
+
+    <details class="fold" id="fold-guide">
+      <summary><span data-i18n="fold.guide">第一次使用？七步導覽</span></summary>
+      <div class="fold-body">
     <div class="steps">
       <a class="step" href="/data">
         <span class="no">1</span>
@@ -199,7 +298,12 @@
         <span class="go" data-i18n="s7.go">進入孿生檢視</span>
       </a>
     </div>
+      </div>
+    </details>
 
+    <details class="fold" id="fold-all">
+      <summary><span data-i18n="fold.all">全部功能</span><span class="cnt">13</span></summary>
+      <div class="fold-body">
     <div class="group-title" data-i18n="grp.data">資料智能</div>
     <div class="cards">
       <a class="card" href="/data">
@@ -254,13 +358,13 @@
 
     <div class="group-title" data-i18n="grp.dtwin">數據孿生</div>
     <div class="cards">
-      <a class="card" href="/static/incinerator_flowsheet.html">
+      <a class="card" href="/twin?scene=incinerator-plant&flow=1">
         <div class="head">
           <svg viewBox="0 0 24 24"><rect x="3" y="4" width="6" height="6" rx="1"/><rect x="15" y="4" width="6" height="6" rx="1"/><rect x="9" y="14" width="6" height="6" rx="1"/><path d="M6 10v2a2 2 0 0 0 2 2h1"/><path d="M18 10v2a2 2 0 0 1-2 2h-1"/></svg>
-          <h2 data-i18n="c.flow.h">流程耦合模擬</h2>
+          <h2 data-i18n="c.flow.h">智慧運轉（3D 流程模擬）</h2>
         </div>
-        <p data-i18n="c.flow.p">多 block 串接的即時流程模擬：每個單元綁定已發布模型 API，拉桿即時調參、上下游耦合傳遞、一鍵配方最佳化。以焚化爐 8-block 全套為示範。</p>
-        <span class="go" data-i18n="c.flow.go">開啟流程模擬</span>
+        <p data-i18n="c.flow.p">在 3D 廠區上直接運轉數據孿生：每個設備 block 呼叫已發布模型 API，模型輸出沿製程連接傳遞，設備標籤即時顯示預測值，出訓練域自動紅色警示；拉桿調參、一鍵配方最佳化。</p>
+        <span class="go" data-i18n="c.flow.go">進入 3D 智慧運轉</span>
       </a>
       <a class="card" href="/static/block_health.html">
         <div class="head">
@@ -269,6 +373,14 @@
         </div>
         <p data-i18n="c.health.p">把異常偵測／預測模型綁進設備 block：即時風險值、健康門檻與預警。以壓縮機 K-101 為示範，模型直接由 model API 供給。</p>
         <span class="go" data-i18n="c.health.go">開啟健康度示範</span>
+      </a>
+      <a class="card" href="/static/flowsheet_builder.html">
+        <div class="head">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M10 6.5h7a2 2 0 0 1 2 2V14"/><path d="M14 17.5H7a2 2 0 0 1-2-2V10"/></svg>
+          <h2 data-i18n="c.fsb.h">Flowsheet 設計器</h2>
+        </div>
+        <p data-i18n="c.fsb.p">客戶自組數據孿生流程：從已發布模型庫挑 block、排主線支線、拉模型輸出連接、設警戒值——儲存即成一座可運轉的流程，焚化爐示範就是這樣組出來的。</p>
+        <span class="go" data-i18n="c.fsb.go">開啟設計器</span>
       </a>
     </div>
 
@@ -311,6 +423,8 @@
         <span class="go" data-i18n="c.mapi.go">進入 API 控制台</span>
       </a>
     </div>
+      </div>
+    </details>
 
     <footer class="site">
       <span data-i18n="footer.l">J.S Process Intelligence</span>
@@ -338,8 +452,18 @@
       's7.h': { en: 'Twin view — data on 3D' }, 's7.p': { en: 'Live data heatmaps over the plant, anomaly-injection AI matching, construction-clash and EHS simulation — your data comes alive in the plant.' }, 's7.go': { en: 'Open twin view' },
       'grp.data': { en: 'DATA INTELLIGENCE' }, 'grp.twin': { en: 'VISUAL TWIN' },
       'grp.dtwin': { en: 'DATA TWIN' }, 'grp.mapi': { en: 'MODEL SERVICE · API' },
-      'c.flow.h': { en: 'Process Co-simulation' }, 'c.flow.p': { en: 'Live multi-block process simulation: each unit binds a published model API, with live slider tuning, upstream/downstream coupling and one-click recipe optimization. Demonstrated on the full 8-block incinerator.' }, 'c.flow.go': { en: 'Open flowsheet' },
+      'ai.ph': { en: 'Tell me what you want to do — e.g. "I have compressor data and want health early-warning"' },
+      'ai.go': { en: 'Take me there' },
+      'j1.h': { en: 'Build models' }, 'j1.p': { en: 'From process data to a served model.' },
+      'j1.s1': { en: 'Upload data (CSV / Excel)' }, 'j1.s2': { en: 'Auto-model and evaluate' }, 'j1.s3': { en: 'Publish as model API' },
+      'j2.h': { en: 'Compose a twin' }, 'j2.p': { en: 'Assemble models into a running plant.' },
+      'j2.s1': { en: 'Flowsheet builder: pick models, wire connections' }, 'j2.s2': { en: 'Engineering view: solve every tick' }, 'j2.s3': { en: 'Bind a 3D scene: smart operation' },
+      'j3.h': { en: 'Operate & watch' }, 'j3.p': { en: 'The page you come back to daily.' },
+      'j3.s1': { en: '3D plant + live predictions (smart operation)' }, 'j3.s2': { en: 'Equipment health early-warning (PHM)' }, 'j3.s3': { en: 'Plant KPIs and domain guard (engineering view)' },
+      'fold.guide': { en: 'First time? The 7-step guide' }, 'fold.all': { en: 'All features' },
+      'c.flow.h': { en: 'Smart Operation (3D flowsheet)' }, 'c.flow.p': { en: 'Run the data twin directly on the 3D plant: every block calls its published model API, outputs propagate along process connections, equipment labels show live predictions, and out-of-domain inputs raise red alerts; slider tuning and one-click recipe optimization.' }, 'c.flow.go': { en: 'Enter 3D smart operation' },
       'c.health.h': { en: 'Equipment Health (PHM)' }, 'c.health.p': { en: 'Bind anomaly-detection / prediction models into an equipment block: live risk value, health thresholds and early warning. Demonstrated on compressor K-101, fed directly by the model API.' }, 'c.health.go': { en: 'Open health demo' },
+      'c.fsb.h': { en: 'Flowsheet Builder' }, 'c.fsb.p': { en: 'Customers compose their own data-twin flowsheet: pick blocks from the published model registry, arrange main line and branches, wire model-output connections, set alert thresholds — save and it runs. The incinerator demo was built exactly this way.' }, 'c.fsb.go': { en: 'Open builder' },
       'c.mapi.h': { en: 'Model API Console' }, 'c.mapi.p': { en: 'Publish-registry model registry: publish a trained model into a stable model_key, serving unified predict / evaluate / optimize endpoints with usage metering and audit. Every data-twin block consumes it (L3).' }, 'c.mapi.go': { en: 'Open API console' },
       'c.workbench.h': { en: 'Data Workbench' }, 'c.workbench.p': { en: 'Upload process data; explore with the column card wall, box-select to exclude/extract, replay the edit history, run data-health and property modules (CoolProp extrapolation guardrails).' }, 'c.workbench.go': { en: 'Open data prep' },
       'c.quality.h': { en: 'Quality Prediction' }, 'c.quality.p': { en: 'Regression / classification modeling: auto-compare many algorithms or hand-tune hyperparameters, cross-validation ranking, feature importance, on-demand evaluation.' }, 'c.quality.go': { en: 'Open model workspace' },
@@ -386,6 +510,46 @@
     }
     fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((me) => { ME = me; renderAccount(); }).catch(() => renderAccount());
     window.addEventListener('js-lang-change', renderAccount);
+
+    // ---- AI 引導列（階段 1：規則路由——零成本、不會胡說；階段 2 再接 LLM+RAG） ----
+    // 規則由「專門」到「通用」排序：先命中專門意圖（健康/最佳化/P&ID），再落到通用（上傳/建模）。
+    const ROUTES = [
+      { re: /健康|預警|PHM|異常|振動|軸承|劣化/i, url: '/static/block_health.html', t: '設備健康預警示範（壓縮機 K-101，模型由 API 供給）' },
+      { re: /最佳化|優化|优化|配方|藥劑|節省/i, url: '/twin?scene=incinerator-plant&flow=1', t: '3D 智慧運轉——點設備 →「⤢ 放大檢視」→ 此模型最佳化' },
+      { re: /P&?ID|圖面|圖紙/i, url: '/twin/pid', t: 'P&ID 工作流——上傳圖面，OCR 自動生成 3D 廠區草稿' },
+      { re: /設計器|組.*孿生|flowsheet|串接|連接/i, url: '/static/flowsheet_builder.html', t: 'Flowsheet 設計器——從模型庫挑 block、拉連接、儲存即可運轉' },
+      { re: /發布|API|服務|key/i, url: '/static/model_api.html', t: '模型 API 控制台（publish-registry）——發布、試呼叫、用量稽核' },
+      { re: /建模|模型|訓練|迴歸|分類|時序/i, url: '/data?view=model', t: '模型工作區——自動比較演算法、交叉驗證排名' },
+      { re: /上傳|資料|數據|CSV|Excel/i, url: '/data', t: '資料工作台——拖放上傳、探索清洗、資料健檢' },
+      { re: /3D|廠區|智慧運轉|即時|孿生/i, url: '/twin?scene=incinerator-plant&flow=1', t: '3D 智慧運轉（焚化爐示範）——模型輸出直接畫在廠區上' },
+      { re: /焚化|示範|demo/i, url: '/static/incinerator_flowsheet.html', t: '焚化爐 8-block 工程檢視——每拍求解、守門員、傳遞值' },
+      { re: /studio|編輯|工作室/i, url: '/studio', t: '3D 設計工作室——素材庫自建與精修場景' },
+      { re: /教學|上手|怎麼|如何|新手/i, guide: true, t: '已展開下方「第一次使用」七步導覽 ↓' },
+    ];
+    const aiQ = document.getElementById('ai-q');
+    const aiR = document.getElementById('ai-result');
+    function aiRoute() {
+      const q = aiQ.value.trim();
+      if (!q) return;
+      const hit = ROUTES.find((r) => r.re.test(q));
+      aiR.classList.add('show');
+      if (!hit) {
+        aiR.innerHTML = '這句我還沒聽懂（目前是關鍵詞版引導，AI 版開發中）。試試「上傳數據」「組孿生」「健康預警」，或展開下方「全部功能」。';
+        return;
+      }
+      if (hit.guide) {
+        document.getElementById('fold-guide').open = true;
+        aiR.innerHTML = `💡 ${hit.t}`;
+        document.getElementById('fold-guide').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      aiR.innerHTML = `💡 ${hit.t}　<a href="${hit.url}">→ 前往</a>`;
+    }
+    document.getElementById('ai-go').addEventListener('click', aiRoute);
+    aiQ.addEventListener('keydown', (e) => { if (e.key === 'Enter') aiRoute(); });
+    document.querySelectorAll('.ai-chip').forEach((c) => c.addEventListener('click', () => {
+      aiQ.value = c.dataset.q; aiRoute();
+    }));
   </script>
 </body>
 </html>

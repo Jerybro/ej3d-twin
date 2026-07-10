@@ -33,6 +33,7 @@
         <button class="chip chip-btn" id="view-toggle" title="切換：程式生成示範廠 / 真實 3DGS 掃描場景">3DGS</button>
       </div>
       <div class="chip-group" data-glabel="模擬">
+        <button class="chip chip-btn" id="flow-toggle" style="display:none" title="智慧運轉：flowsheet 求解器即時驅動——每個 block 呼叫已發布模型 API，模型輸出沿製程連接傳遞，設備標籤顯示即時預測，出定義域自動警示">智慧運轉</button>
         <button class="chip chip-btn" id="calc-toggle" title="製程計算：灰箱代理模型 What-if——調整進料組成即時計算出口組成">製程計算</button>
         <button class="chip chip-btn" id="mode-construction" title="施工模擬：規劃中設備/管線 ghost 檢視＋路徑衝突檢測">施工模擬</button>
       </div>
@@ -41,6 +42,7 @@
         <div class="chip chip-stat" id="vision-chip" title="AI 攝影機影像辨識（電子圍籬／PPE）">AI <b id="vision-status">正常</b></div>
         <div class="chip chip-stat" id="gd-chip" title="廠區酸霧偵測 GD-001">GD <b id="gd-value">--</b><span class="unit">ppm</span></div>
         <div class="chip chip-stat" id="ws-status">連線中…</div>
+        <button class="chip chip-btn" id="ui-config" title="自訂介面：選擇頂欄要顯示的狀態指標">⚙</button>
       </div>
       <div class="chip-group" data-glabel="動作">
         <a class="chip chip-btn chip-primary" id="btn-edit-e3d" href="#" style="display:none"
@@ -57,6 +59,12 @@
   <div id="alarm-banner" class="hidden">
     <div class="alarm-title" id="alarm-message"></div>
     <div class="alarm-list" id="alarm-list"></div>
+  </div>
+
+  <div id="ui-pop" class="hidden">
+    <div class="panel-title">頂欄狀態指標</div>
+    <div id="ui-pop-rows"></div>
+    <div class="ui-pop-hint">設定保存在本機瀏覽器（localStorage）</div>
   </div>
 
   <aside id="left-panel">
@@ -77,6 +85,7 @@
     <table class="info-table" id="info-design"></table>
     <div class="info-section">即時儀錶（模擬 DCS 數據）</div>
     <table class="info-table" id="info-instruments"></table>
+    <div id="info-model"></div>
     <button class="pid-btn" id="info-pid-btn">開啟 P&amp;ID 圖面</button>
   </aside>
 
@@ -91,6 +100,29 @@
     <div class="panel-title">施工衝突檢測</div>
     <div id="conflict-list"></div>
     <div class="panel-hint">規劃管線取樣點 vs 既有設備／安全淨距 1.0 m</div>
+  </aside>
+
+  <aside id="flow-panel" class="hidden">
+    <div class="panel-title" id="flow-title">智慧運轉｜數據孿生求解器</div>
+    <div class="flow-status">
+      <span id="flow-tick">連線求解器…</span>
+      <span class="fl-guard-sum" id="flow-guard">—</span>
+    </div>
+    <div id="flow-sliders"></div>
+    <div class="info-section">全廠即時指標（求解器回應）</div>
+    <div class="fl-kpis" id="flow-kpis"></div>
+    <div class="info-section">模型輸出傳遞（沿製程連接）</div>
+    <div class="fl-conns" id="flow-conns">—</div>
+    <div class="fl-demo">
+      <button class="sc-btn" id="flow-demo-fan" title="演示：注入引風機振動劣化訊號，觀察定義域守門員將設備標紅">演示：風機劣化</button>
+      <button class="sc-btn" id="flow-demo-lhv" title="演示：進料熱值下降情境，觀察全鏈預測值連動">演示：熱值下降</button>
+    </div>
+    <div class="panel-hint">點設備開資訊卡，按「⤢ 放大檢視」進入該 block 工作面｜<a href="/static/incinerator_flowsheet.html" target="_blank" style="color:var(--accent)">工程檢視</a></div>
+  </aside>
+
+  <aside id="block-ws" class="hidden">
+    <button id="ws-close" title="關閉">×</button>
+    <div id="ws-body"></div>
   </aside>
 
   <div id="pid-modal" class="hidden">

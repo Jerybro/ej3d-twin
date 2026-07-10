@@ -26,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from fastapi import HTTPException
 
 # 重用 automl 既有原語（不改其簽章）——落盤路徑、record 讀取、統一推論、異常評分
@@ -38,6 +39,8 @@ from .automl import (
     _load_pipe,
     _pipe_path,
 )
+# 重用 dataprep 既有「以 sid 載入現行視圖 DataFrame」原語（feature_stats 用；不自己重刻讀 parquet）
+from .dataprep import _load_base, _load_steps, apply_steps
 
 # ------------------------------------------------------ 落盤位置
 REGISTRY_DIR = DATA_DIR / "registry"           # uploads/data/registry/
@@ -136,6 +139,50 @@ def _abs(rel: str) -> Path:
     return p if p.is_absolute() else (base / p)
 
 
+# ------------------------------------------------------ feature_stats（守門員統計快照）
+def _compute_feature_stats(sid: str, features: list, target: str | None) -> dict | None:
+    """對 origin sid 的現行視圖，算 features（含 target，若該欄存在）的分布統計快照。
+
+    重用 dataprep 既有「以 sid 載入現行視圖」原語（_load_base + apply_steps），
+    不自己重刻讀 parquet 邏輯。每欄回 {min, p1, p50, p99, max, mean, std}（float, round 6）。
+    任何一步失敗（資料被清、欄位對不上等）→ 回 None，由呼叫端（publish）靜默略過。
+    """
+    try:
+        df = _load_base(sid)
+        view, *_ = apply_steps(df, _load_steps(sid))
+    except Exception:  # noqa: BLE001  資料 session 已清等，不得中斷發布主流程
+        return None
+
+    cols = list(dict.fromkeys([*features, *([target] if target else [])]))  # 去重，保序
+    out: dict[str, dict] = {}
+    for col in cols:
+        if col not in view.columns:
+            continue
+        s = np.asarray(pd.to_numeric(view[col], errors="coerce").dropna(), dtype=float)
+        if s.size == 0:
+            continue
+        out[col] = {
+            "min": round(float(np.min(s)), 6),
+            "p1": round(float(np.percentile(s, 1)), 6),
+            "p50": round(float(np.percentile(s, 50)), 6),
+            "p99": round(float(np.percentile(s, 99)), 6),
+            "max": round(float(np.max(s)), 6),
+            "mean": round(float(np.mean(s)), 6),
+            "std": round(float(np.std(s)), 6),
+        }
+    return out or None
+
+
+def feature_stats(model_key: str) -> dict | None:
+    """查已發布模型的 feature_stats 快照（供 flowsheet 守門員用）。
+
+    從註冊表 record 讀（發布時已算好快照，非即時重算）；
+    無此模型 → 404（沿用 get() 的行為）；有此模型但無快照（算失敗或舊發布）→ None。
+    """
+    rec = get(model_key)
+    return rec.get("feature_stats")
+
+
 # ------------------------------------------------------ 發布
 def publish(
     sid: str,
@@ -223,6 +270,15 @@ def publish(
             "updated_at": now,
             "note": note or "",
         }
+        # feature_stats：盡力算（供 flowsheet 守門員用）。失敗（資料被清等）靜默略過，
+        # record 不帶此欄，發布照常成功——不得因統計快照失敗而擋住發布主流程。
+        stats_target = target if task != "anomaly" else None
+        try:
+            fs = _compute_feature_stats(sid, features, stats_target)
+        except Exception:  # noqa: BLE001  絕不因統計快照失敗擋住發布
+            fs = None
+        if fs:
+            record["feature_stats"] = fs
         data["models"][model_key] = record
         _write(data)
     return record

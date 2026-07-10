@@ -390,8 +390,7 @@ function rebuildEquipment(def) {
   entry.group.add(body);
   renderNozzles(entry.group, def);
   entry.group.children.find((c) => c.isCSS2DObject)?.position.set(0, labelHeight(def), 0);
-  if (xrayOn || wireframeOn) applyRenderOverride();   // 重建後若審查模式開啟，讓新 mesh 也套 X-ray/線框（避免只有編輯過的設備變不透明）
-  if (udaColorKey) applyUdaColor(true);   // 重建後若屬性著色開啟，對新 mesh 重套色（不搶面板）
+  if (udaColorKey || xrayOn || wireframeOn) refreshRenderLayers(true);   // 重建後統一重組兩層 override（UDA 著色＋X-ray/線框），不搶屬性面板
 }
 
 // ------------------------------------------------------------ 管線渲染
@@ -685,6 +684,7 @@ function rebuildAllPipes() {
   pipeObjects.length = 0;
   sceneData.pipes.forEach((pipe, i) => buildPipe(pipe, i));
   applyLayers();
+  if (udaColorKey || xrayOn || wireframeOn) refreshRenderLayers(true);   // 管線重建後重套 UDA 著色/X-ray，避免掉色/不一致
 }
 
 // 單條管重建：dispose 舊 group 幾何後重繪，index 對齊不變。
@@ -702,6 +702,7 @@ function rebuildPipe(index) {
   }
   buildPipe(sceneData.pipes[index], index);
   applyLayers();
+  if (udaColorKey || xrayOn || wireframeOn) refreshRenderLayers(true);   // 管線重建後重套 UDA 著色/X-ray
 }
 
 // 設備移動/旋轉後，帶 head/tail 參考該設備的管線端點跟動（沿用 nozzle 現在世界座標）。
@@ -3589,7 +3590,7 @@ function elevSvg(dir, meta = {}) {
     for (const hx of [bd.box.min.x, bd.box.max.x]) for (const hz of [bd.box.min.z, bd.box.max.z]) hs.push(H_OF(hx, hz));
     vs.push(bd.box.min.y, bd.box.max.y);
   }
-  for (const pipe of sceneData.pipes) for (const p of pipe.pts) pushHV(H_OF(p[0], p[2]), p[1]);
+  for (const pipe of sceneData.pipes) for (const p of (pipe.pts ?? [])) pushHV(H_OF(p[0], p[2]), p[1]);
   if (!hs.length) { hs.push(H_OF(b.min.x, b.min.z), H_OF(b.max.x, b.max.z)); vs.push(b.min.y, b.max.y); }
   const pad = 4;
   const hLo = Math.min(...hs) - pad, hHi = Math.max(...hs) + pad;
@@ -4734,13 +4735,13 @@ function wireUda(obj, repaint) {
   propBody.querySelectorAll('[data-udak]').forEach((inp) => inp.addEventListener('change', () => {
     pushUndo();
     obj.uda[inp.dataset.udak] = inp.value;
-    if (udaColorKey) applyUdaColor();
+    if (udaColorKey) refreshRenderLayers(false);
   }));
   propBody.querySelectorAll('[data-udadel]').forEach((b) => b.addEventListener('click', () => {
     pushUndo();
     delete obj.uda[b.dataset.udadel];
     if (obj.uda && Object.keys(obj.uda).length === 0) delete obj.uda;
-    if (udaColorKey) applyUdaColor();
+    if (udaColorKey) refreshRenderLayers(false);
     repaint();
   }));
   document.getElementById('uda-add')?.addEventListener('click', () => {
@@ -4750,7 +4751,7 @@ function wireUda(obj, repaint) {
     pushUndo();
     obj.uda = obj.uda ?? {};
     obj.uda[k] = v;
-    if (udaColorKey) applyUdaColor();
+    if (udaColorKey) refreshRenderLayers(false);
     repaint();
   });
 }
@@ -4781,10 +4782,9 @@ function udaValueOfMesh(m) {
 // 與 review 同源的實體 mesh 蒐集（跳過已透明/標記材質，避免污染）
 function colorMeshes() { return reviewMeshes(); }
 
-// reapplyAfterRebuild=true：舊 mesh 已被 dispose，不可還原→只清空記錄，直接對新 mesh 套色（比照 review 重建後重套）
-function applyUdaColor(reapplyAfterRebuild) {
-  if (reapplyAfterRebuild) udaColorOverride.clear();
-  else restoreUdaColor();   // 先還原上一輪，再依目前鍵/值重算（值改變時色表也隨之更新）
+// skipLegend=true：重建/重組時不重繪圖例面板（不搶正在編輯的屬性面板）；一律先 restoreUdaColor 再依現況套色
+function applyUdaColor(skipLegend) {
+  restoreUdaColor();   // 一律先還原上一輪（換回 base、dispose clone、清 map）——避免 clone 疊 clone、X-ray 暫態被烙進 clone、rebuild 後洩漏
   if (!udaColorKey) return;
   // 依「出現過的值」穩定指派調色盤色（依字典序，重繪一致）
   const values = new Set();
@@ -4810,7 +4810,7 @@ function applyUdaColor(reapplyAfterRebuild) {
     }
     mat.needsUpdate = true;
   }
-  if (!reapplyAfterRebuild) renderUdaLegend(valList, colorOf);   // 重建後重套不搶面板（使用者可能正在編別的設備）
+  if (!skipLegend) renderUdaLegend(valList, colorOf);   // 重建/重組時不搶面板（使用者可能正在編別的設備）
 }
 
 function restoreUdaColor() {
@@ -4839,9 +4839,9 @@ function renderUdaLegend(valList, colorOf) {
         : '<label style="grid-column:1/-1;color:var(--dim)">此屬性在場景中尚無任何值</label>'}
     </div>
     <button class="pbtn danger" id="uda-color-off">關閉著色（還原原色）</button>`;
-  document.getElementById('uda-color-key').addEventListener('change', (e) => { udaColorKey = e.target.value; applyUdaColor(); });
-  document.getElementById('uda-filter').addEventListener('change', (e) => { udaFilter = e.target.checked; applyUdaColor(); });
-  document.getElementById('uda-color-off').addEventListener('click', () => { udaColorKey = null; udaFilter = false; restoreUdaColor(); syncUdaButton(); setHint('屬性著色：關（已還原原色）'); });
+  document.getElementById('uda-color-key').addEventListener('change', (e) => { udaColorKey = e.target.value; refreshRenderLayers(false); });
+  document.getElementById('uda-filter').addEventListener('change', (e) => { udaFilter = e.target.checked; refreshRenderLayers(false); });
+  document.getElementById('uda-color-off').addEventListener('click', () => { udaColorKey = null; udaFilter = false; refreshRenderLayers(false); syncUdaButton(); setHint('屬性著色：關（已還原原色）'); });
   syncUdaButton();
 }
 
@@ -4858,11 +4858,11 @@ function resetUdaColor() {
 }
 
 document.getElementById('btn-uda-color').addEventListener('click', () => {
-  if (udaColorKey) { udaColorKey = null; udaFilter = false; restoreUdaColor(); syncUdaButton(); setHint('屬性著色：關（已還原原色）'); return; }
+  if (udaColorKey) { udaColorKey = null; udaFilter = false; refreshRenderLayers(false); syncUdaButton(); setHint('屬性著色：關（已還原原色）'); return; }
   const keys = udaKeysInScene();
   if (!keys.length) { setHint('場景中尚無任何 UDA 屬性；請先在設備/管線屬性面板新增屬性'); return; }
   udaColorKey = keys[0];
-  applyUdaColor();   // 內部會重繪圖例面板並套色
+  refreshRenderLayers(false);   // 內部重繪圖例面板並套色，並與 X-ray 正確疊加
 });
 
 // ------------------------------------------------------------ 審查工具：X-ray/線框＋截圖（e3d/feat-review）
@@ -4913,6 +4913,14 @@ function restoreRenderOverride() {
   renderOverride.clear();
 }
 
+// 統一重組兩層材質 override（UDA 著色 + X-ray/線框），避免交互殘留：先全拆，再「UDA 先套→X-ray 後疊」。
+// 保證 UDA clone 一定從乾淨 base 複製、X-ray 一定作用在 mesh「當下」材質（有 UDA 時＝clone），任何開關順序都能正確還原。
+function refreshRenderLayers(skipLegend) {
+  restoreRenderOverride();                            // 拆 X-ray（還原被記錄的材質實例、清 map）
+  applyUdaColor(skipLegend);                          // 內部先 restoreUdaColor；UDA 關＝只還原，有開＝在乾淨 base 重套
+  if (xrayOn || wireframeOn) applyRenderOverride();   // 再把 X-ray/線框疊到當前材質
+}
+
 function syncReviewButtons() {
   document.getElementById('btn-xray').classList.toggle('active', xrayOn);
   document.getElementById('btn-wireframe').classList.toggle('active', wireframeOn);
@@ -4928,14 +4936,14 @@ function resetReviewRender() {
 
 document.getElementById('btn-xray').addEventListener('click', () => {
   xrayOn = !xrayOn;
-  if (xrayOn || wireframeOn) applyRenderOverride(); else restoreRenderOverride();
+  refreshRenderLayers(true);   // 統一重組，避免與 UDA 著色交互殘留（不搶屬性面板）
   syncReviewButtons();
   setHint(xrayOn ? '透視 X-ray：<b>開</b>（再按恢復）' : '透視 X-ray：關');
 });
 
 document.getElementById('btn-wireframe').addEventListener('click', () => {
   wireframeOn = !wireframeOn;
-  if (xrayOn || wireframeOn) applyRenderOverride(); else restoreRenderOverride();
+  refreshRenderLayers(true);
   syncReviewButtons();
   setHint(wireframeOn ? '線框顯示：<b>開</b>（再按恢復）' : '線框顯示：關');
 });

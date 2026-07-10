@@ -155,6 +155,7 @@
   </div>
 </div>
 
+<script src="/static/js/tour.js"></script>
 <script>
 // ============================================================================
 // Flowsheet 設計器 — 客戶自組數據孿生流程：
@@ -424,6 +425,13 @@ $('m-load').addEventListener('change',async()=>{
   await loadModels(); await loadList();
   const qid=new URLSearchParams(location.search).get('id');
   if(qid){$('m-load').value=qid;$('m-load').dispatchEvent(new Event('change'));}
+  // 首次進頁導覽（spotlight）
+  if(window.Tour)Tour.auto('builder',[
+    {el:'.cols .panel:nth-child(1)',title:'① 模型庫',text:'已發布的模型都在這；按「＋加入流程」變成一個 block。'},
+    {el:'.cols .panel:nth-child(2)',title:'② 流程設計',text:'排主線與支線、改編號名稱圖示、設警戒值——這就是你的廠。'},
+    {el:'.cols .panel:nth-child(3)',title:'③ 模型輸出傳遞',text:'把上游模型的輸出接到下游的輸入特徵——「A 算完、B 跟著變」。'},
+    {el:'.save-btn',title:'儲存即運轉',text:'存檔後後端會驗證並自動補訓練中位數預設值，馬上就能開檢視頁跑。'},
+  ]);
 })();
 </script>
 </body>

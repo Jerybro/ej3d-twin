@@ -187,6 +187,10 @@
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             <span data-i18n="menu.admin">權限管理</span>
           </a>
+          <button class="tm-item" id="tm-tour">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+            <span data-i18n="menu.tour">重看導覽</span>
+          </button>
           <a class="tm-item" href="mailto:jerry.s2@engjay.com.tw">
             <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="m22 6-10 7L2 6"/></svg>
             <span data-i18n="menu.feedback">回饋聯繫</span>
@@ -432,12 +436,14 @@
     </footer>
   </div>
   <script src="/static/js/i18n.js"></script>
+  <script src="/static/js/tour.js"></script>
   <script>
     // 首頁字典（zh 直接取 DOM 原文為預設，這裡只提供 en）
     JSI18N.register({
       'site.sub': { en: 'Process Intelligence Platform' },
       'menu.guest': { en: 'Guest' },
       'menu.docs': { en: 'User Guide' },
+      'menu.tour': { en: 'Replay tour' },
       'menu.admin': { en: 'Access Control' },
       'menu.feedback': { en: 'Feedback' },
       'menu.logout': { en: 'Sign out' },
@@ -550,6 +556,15 @@
     document.querySelectorAll('.ai-chip').forEach((c) => c.addEventListener('click', () => {
       aiQ.value = c.dataset.q; aiRoute();
     }));
+
+    // ---- 首次進站導覽（spotlight；選單可重看） ----
+    const HOME_TOUR = [
+      { el: '.ai-bar', title: 'AI 引導', text: '打一句你要做的事（例如「健康預警」「組孿生」），直接帶你到對的工具。' },
+      { el: '.journeys', title: '三條旅程', text: '建模型 → 組孿生 → 看運轉。平台的主線就這三件事，每一步都可以直接點進去。' },
+      { el: '#fold-all', title: '全部功能', text: '進階功能都收在這裡，需要再展開；「第一次使用」的七步導覽也在上方摺疊列。' },
+    ];
+    Tour.auto('home', HOME_TOUR);
+    document.getElementById('tm-tour').addEventListener('click', () => { menu.classList.remove('open'); Tour.replay('home', HOME_TOUR); });
   </script>
 </body>
 </html>

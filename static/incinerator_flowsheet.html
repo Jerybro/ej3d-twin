@@ -133,6 +133,38 @@
           color:var(--red);font-size:12.5px;cursor:pointer;font-family:inherit;}
   .dreset:hover{border-color:var(--red);}
   .dhint{font-size:10.5px;color:var(--text2);margin-top:10px;line-height:1.6;}
+
+  /* 檢視切換（卡片⇄組態） */
+  .viewseg{display:inline-flex;border:1px solid var(--bdr);border-radius:8px;overflow:hidden;margin-left:10px;}
+  .viewseg button{border:none;background:var(--white);color:var(--text2);font-size:12px;
+      padding:6px 13px;cursor:pointer;font-family:inherit;}
+  .viewseg button.on{background:rgba(4,106,251,.09);color:var(--blue);font-weight:700;}
+
+  /* 組態畫面（PI Vision 式運轉圖）：灰底畫布＋圖符＋數值框＋KPI 面板 */
+  #mimic{background:#E7EAEE;border:1px solid var(--bdr);border-radius:10px;padding:8px;overflow-x:auto;}
+  #mimic svg{display:block;min-width:860px;width:100%;height:auto;font-family:Inter,"Noto Sans TC",sans-serif;}
+  #mimic .sym{stroke:#46525E;stroke-width:1.6;fill:#FDFEFE;stroke-linecap:round;stroke-linejoin:round;}
+  #mimic .pipe{stroke:#8A939E;stroke-width:3;fill:none;}
+  #mimic .mtag{font-size:10.5px;font-weight:700;fill:#046AFB;}
+  #mimic .mnm{font-size:9.5px;fill:#5C6773;}
+  #mimic .vbox{fill:#fff;stroke:#9AA3AE;stroke-width:1;}
+  #mimic .vbox.warn{stroke:#B45309;stroke-width:1.6;}
+  #mimic .vbox.crit{stroke:#C0392B;stroke-width:1.8;}
+  #mimic .vtxt{font-size:12px;font-weight:700;fill:#061027;font-variant-numeric:tabular-nums;}
+  #mimic .vtxt.warn{fill:#B45309;}
+  #mimic .vtxt.crit{fill:#C0392B;}
+  #mimic .vunit{font-size:8.5px;fill:#5C6773;font-weight:400;}
+  #mimic .connbox{fill:#fff;stroke:#B8C0C9;stroke-width:0.8;}
+  #mimic .conntxt{font-size:9px;fill:#046AFB;font-weight:700;}
+  #mimic .connlbl{font-size:8px;fill:#5C6773;}
+  #mimic .kpanel{fill:#F4F6F8;stroke:#B8C0C9;stroke-width:1;}
+  #mimic .ktitle{font-size:10px;font-weight:700;fill:#5C6773;letter-spacing:.5px;}
+  #mimic .krow{font-size:10.5px;fill:#061027;}
+  #mimic .kval{font-size:11px;font-weight:700;fill:#061027;font-variant-numeric:tabular-nums;}
+  #mimic .kval.warn{fill:#B45309;} #mimic .kval.crit{fill:#C0392B;}
+  #mimic .gsum{font-size:10px;font-weight:700;}
+  @keyframes mblink{50%{opacity:.35;}}
+  #mimic g.out .sym,#mimic g.out .vbox{stroke:#C0392B;animation:mblink 1s step-end infinite;}
 </style>
 </head>
 <body>
@@ -157,11 +189,16 @@
     <button data-s="lhv_drop">進料熱值下降</button>
     <button data-s="bag_clog">濾袋阻塞</button>
     <button data-s="fan_degrade">風機軸承劣化</button>
+    <span class="viewseg">
+      <button id="v-cards" class="on">卡片</button>
+      <button id="v-mimic">組態</button>
+    </span>
     <span class="hz" id="hz" style="margin-left:auto"></span>
   </div>
 
   <div class="ctrls" id="ctrls"></div>
 
+  <div id="view-cards">
   <div class="group-title">全廠即時指標</div>
   <div class="kpis" id="kpis"></div>
 
@@ -173,6 +210,9 @@
     <i><span class="dot" style="background:var(--red)"></span>出定義域</i>
     <i><span class="dot" style="background:#C9CFD6"></span>無統計</i>
   </div>
+  </div>
+
+  <div id="mimic" style="display:none"></div>
 
   <details class="logbox">
     <summary>求解器呼叫紀錄（即時）</summary>
@@ -190,6 +230,7 @@
   <div class="dhint">自訂只影響這台電腦的顯示，不會改動後端規格檔與模型。</div>
 </aside>
 
+<script src="/static/js/tour.js"></script>
 <script>
 // ============================================================================
 // 泛用 flowsheet 渲染頁 — 完全由後端規格檔驅動，頁內不寫死任何 block 清單。
@@ -296,7 +337,7 @@ function buildDrawer(){
   $('d-reset').onclick=()=>{localStorage.removeItem(CKEY);CUSTOM={global:{showKey:true,showScenarios:true},blocks:{}};buildDrawer();rerender();applyGlobal();logln('↺ 已還原預設顯示');};
 }
 function applyGlobal(){document.querySelector('.bar').style.display=CUSTOM.global.showScenarios?'':'none';}
-function rerender(){buildTrains();/* 下一拍會補值；先用上一拍資料立即補渲染 */ if(LASTRESP)renderRun(LASTRESP,true);}
+function rerender(){buildTrains();buildMimic();/* 下一拍會補值；先用上一拍資料立即補渲染 */ if(LASTRESP)renderRun(LASTRESP,true);}
 
 // ---------------- 操作設點（what-if）：滑桿是「虛擬旋鈕」，以特徵名路由 ----------------
 const SLIDERS=[
@@ -393,10 +434,18 @@ async function boot(){
   $('sub').innerHTML=`${esc(spec.desc||'')}　<code>?id=${esc(FID)}</code> · 規格 <code>GET /agatha/flowsheet/${esc(FID)}/spec/</code> · 每拍 <code>POST …/run/</code> ×1`;
   $('btn-3d').href=`/twin?scene=incinerator-plant&flow=1`;
   $('btn-edit').href=`/static/flowsheet_builder.html?id=${encodeURIComponent(FID)}`;
-  buildTrains(); buildCtrls(); buildDrawer(); applyGlobal();
+  buildTrains(); buildCtrls(); buildDrawer(); applyGlobal(); buildMimic(); applyView();
   logln(`✓ 規格已載入：${spec.name||FID}（${(spec.blocks||[]).length} blocks / ${(spec.connections||[]).length} connections / ${(spec.trains||[]).length} trains）`);
   if(timer)clearInterval(timer);
   tick(); timer=setInterval(tick,2000);
+  // 首次進頁導覽（spotlight）
+  if(window.Tour)Tour.auto('flowsheet',[
+    {el:'.viewseg',title:'兩種檢視',text:'「卡片」看模型細節與守門員；「組態」是 DCS 式運轉圖——同一份資料、兩種畫面。'},
+    {el:'#ctrls',title:'操作設點（what-if）',text:'拉滑桿即時改運轉條件，模型每 2 秒重算一次全廠。'},
+    {el:'#trains .blk',title:'模型 block',text:'每張卡是一個模型：預測值、警戒配色、右上圓點是守門員（訓練域）狀態。'},
+    {el:'#btn-custom',title:'自訂顯示',text:'名稱、圖示、警戒值、顯示與否都能改，存在你這台電腦。'},
+    {el:'#btn-edit',title:'編輯設計',text:'要改流程本身（加 block、拉連接）就進設計器。'},
+  ]);
 }
 function specError(e){
   $('hz').textContent='';
@@ -516,6 +565,7 @@ function renderRun(resp,silent){
     if(!silent)logln(`↦ ${c.from}→${c.to} ${c.source_output}=${vtxt} ${c.unit||''}`);
   }
   renderKpis(rb);
+  updateMimic(resp);
   if(!silent){
     const gsum=`guard: ${counts.ok} ok`+(counts.warn?` / ${counts.warn} warn`:'')+(counts.out?` / ${counts.out} out`:'')+(counts.unknown?` / ${counts.unknown} unknown`:'');
     logln(`run ${resp&&resp.ms!=null?resp.ms:'--'}ms · ${(SPEC.blocks||[]).length} blocks · ${gsum}`+(counts.err?` · ${counts.err} err/skip`:''));
@@ -588,6 +638,141 @@ function renderKpis(rb){
   }
   $('kpis').innerHTML=items.map(k=>`<div class="kpi"><div class="k">${esc(k[0])}</div><div class="v">${k[1]} <span class="unit">${esc(k[2])}</span></div></div>`).join('');
 }
+
+// ============================================================================
+// 組態畫面（PI Vision 式運轉圖）：由同一份規格檔自動生成——灰底畫布、ISA 式圖符、
+// 數值框、連接傳遞標籤、右側 KPI 面板；與卡片檢視共用同一個 /run/ 迴圈。
+// 客戶用設計器組的任何 flowsheet，存檔後自動就有組態畫面（不是手繪的板）。
+// ============================================================================
+const SYMBOLS={
+  flame:'<rect class="sym" x="24" y="14" width="16" height="12"/><rect class="sym" x="10" y="26" width="44" height="46" rx="3"/><path class="sym" style="fill:none" d="M32 64c-7-4-9-9-5-15 2 4 4 5 6 4-2-6 0-11 6-15-2 7 6 9 4 16-1 6-6 10-11 10z"/>',
+  spray:'<path class="pipe" d="M32 20V8"/><rect class="sym" x="16" y="20" width="32" height="52" rx="10"/><path class="sym" style="fill:none" d="M26 38l-4-9M32 40V29M38 38l4-9"/>',
+  boiler:'<ellipse class="sym" cx="32" cy="24" rx="22" ry="10"/><path class="sym" style="fill:none" d="M18 34v28M32 34v28M46 34v28"/><rect class="sym" x="12" y="62" width="40" height="9"/>',
+  scrubber:'<rect class="sym" x="20" y="12" width="24" height="60" rx="9"/><path class="sym" style="fill:none" d="M22 32h20M22 44h20M22 56h20"/>',
+  carbon:'<rect class="sym" x="18" y="18" width="28" height="54" rx="9"/><circle class="sym" cx="28" cy="34" r="2.2"/><circle class="sym" cx="37" cy="42" r="2.2"/><circle class="sym" cx="28" cy="52" r="2.2"/><circle class="sym" cx="36" cy="60" r="2.2"/><circle class="sym" cx="32" cy="26" r="2.2"/>',
+  bag:'<rect class="sym" x="14" y="22" width="36" height="38"/><path class="sym" style="fill:none" d="M23 26v30M32 26v30M41 26v30"/><path class="sym" style="fill:none" d="M14 60l18 12 18-12"/>',
+  fan:'<circle class="sym" cx="32" cy="44" r="20"/><path class="sym" style="fill:none" d="M32 44c2-8 8-10 14-8M32 44c-8 2-10 8-8 14M32 44c6 6 4 12-2 14M32 44c-6-6-4-12 2-14"/><circle class="sym" cx="32" cy="44" r="3"/>',
+  turbine:'<path class="sym" d="M14 30l36-10v46L14 58z"/><path class="pipe" d="M4 44h10M50 42h10"/>',
+  gauge:'<circle class="sym" cx="32" cy="46" r="20"/><path class="sym" style="fill:none" d="M32 46L20 34"/><path class="sym" style="fill:none" d="M32 28v-5M46 33l4-4M18 33l-4-4"/>',
+  box:'<rect class="sym" x="12" y="20" width="40" height="52" rx="4"/>',
+};
+const M={SP:150,X0:30,ROW:175,Y0:34};
+let MIMIC_BUILT=false;
+
+function buildMimic(){
+  if(!SPEC)return;
+  const trains=(Array.isArray(SPEC.trains)&&SPEC.trains.length)?SPEC.trains:[SPEC.order];
+  const visTrains=trains.map(t=>(t||[]).filter(id=>BLK[id]&&!eff(BLK[id]).hidden)).filter(t=>t.length);
+  const regs=(SPEC.order||[]).filter(id=>BLK[id]&&BLK[id].kind!=='anomaly'&&!eff(BLK[id]).hidden);
+  const maxCols=Math.max(1,...visTrains.map(t=>t.length));
+  const kpx=M.X0+maxCols*M.SP+30;
+  const kph=64+regs.length*22+40;
+  const svgW=kpx+236, svgH=Math.max(M.Y0+visTrains.length*M.ROW+20, kph+40);
+  const rendered=new Set();
+  let out=`<rect x="0" y="0" width="${svgW}" height="${svgH}" fill="#E7EAEE"/>`;
+  visTrains.forEach((train,ti)=>{
+    const rowY=M.Y0+ti*M.ROW;
+    if(ti>0)out+=`<text class="mnm" x="${M.X0-14}" y="${rowY+2}">↳ 支線</text>`;
+    train.forEach((id,i)=>{
+      const sb=BLK[id], e=eff(sb), x=M.X0+i*M.SP;
+      // 管線（前一塊 → 這一塊），有 connection 就掛傳遞值標籤
+      if(i>0){
+        const px=M.X0+(i-1)*M.SP+66, py=rowY+56, ex=x-4;
+        out+=`<path class="pipe" d="M${px} ${py}H${ex}"/><path class="pipe" d="M${ex-6} ${py-4}l7 4-7 4" style="fill:none"/>`;
+        const c=CONNMAP.get(train[i-1]+'>'+id);
+        if(c){const mx=(px+ex)/2;
+          out+=`<rect class="connbox" x="${mx-46}" y="${py-36}" width="92" height="27" rx="3"/>
+          <text class="connlbl" x="${mx}" y="${py-26}" text-anchor="middle">${esc(prettyFeat(c.source_output))}</text>
+          <text class="conntxt" id="mconn_${esc(c.from)}__${esc(c.to)}" x="${mx}" y="${py-14}" text-anchor="middle">--</text>`;}
+      }
+      const ref=rendered.has(id);
+      out+=`<g id="gm_${esc(id)}" transform="translate(${x},${rowY})">
+        <text class="mtag" x="32" y="6" text-anchor="middle">${esc(id)}</text>`;
+      if(ref){
+        out+=`<rect class="sym" x="12" y="20" width="40" height="52" rx="4" stroke-dasharray="4 3" style="fill:none"/>
+          <text class="mnm" x="32" y="50" text-anchor="middle">同主線</text></g>`;
+        return;
+      }
+      rendered.add(id);
+      out+=SYMBOLS[e.icon]||SYMBOLS.box;
+      out+=`<rect class="vbox" id="mbox_${esc(id)}" x="-22" y="90" width="108" height="30" rx="3"/>
+        <text class="vtxt" id="mval_${esc(id)}" x="32" y="110" text-anchor="middle">--</text>
+        <text class="mnm" x="32" y="134" text-anchor="middle">${esc((e.name||id).slice(0,10))}</text></g>`;
+    });
+  });
+  // 右側 KPI 面板（像 DCS 總覽的資訊塊）
+  out+=`<rect class="kpanel" x="${kpx}" y="20" width="216" height="${kph}" rx="4"/>
+    <text class="ktitle" x="${kpx+14}" y="42">全廠即時指標</text>
+    <line x1="${kpx+12}" y1="50" x2="${kpx+204}" y2="50" stroke="#C6CDD5" stroke-width="1"/>`;
+  regs.forEach((id,i)=>{
+    const e=eff(BLK[id]), y=68+i*22;
+    out+=`<text class="krow" x="${kpx+14}" y="${y}">${esc((BLK[id].output_label||e.name||id).slice(0,12))}</text>
+      <text class="kval" id="mk_${esc(id)}" x="${kpx+202}" y="${y}" text-anchor="end">--</text>`;
+  });
+  out+=`<line x1="${kpx+12}" y1="${68+regs.length*22}" x2="${kpx+204}" y2="${68+regs.length*22}" stroke="#C6CDD5" stroke-width="1"/>
+    <text class="gsum" id="m_guard" x="${kpx+14}" y="${68+regs.length*22+22}" fill="#059669">守門員 —</text>`;
+  $('mimic').innerHTML=`<svg viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg">${out}</svg>`;
+  MIMIC_BUILT=true;
+}
+
+function updateMimic(resp){
+  if(!MIMIC_BUILT)return;
+  const rb=(resp&&resp.blocks)||{};
+  const counts={ok:0,warn:0,out:0,unknown:0};
+  for(const sb of (SPEC.blocks||[])){
+    const e=eff(sb); if(e.hidden)continue;
+    const rbk=rb[sb.id], g=document.getElementById('gm_'+sb.id);
+    const V=document.getElementById('mval_'+sb.id), B=document.getElementById('mbox_'+sb.id);
+    if(!V||!B)continue;
+    if(!rbk||rbk.error||rbk.skipped){
+      V.innerHTML='--'; B.setAttribute('class','vbox'); V.setAttribute('class','vtxt');
+      g&&g.classList.remove('out'); continue;
+    }
+    const p=rbk.prediction||{};
+    let cls='ok';
+    if(sb.kind==='anomaly'){
+      const h=p.health;
+      cls=p.over_threshold?'crit':h>=70?'ok':h>=50?'warn':'crit';
+      V.innerHTML=`${h!=null?Math.round(h):'--'}<tspan class="vunit"> /100</tspan>`;
+    }else{
+      const v=p.value;
+      if(v!=null&&e.warn!=null&&e.crit!=null&&!Number.isNaN(e.warn)&&!Number.isNaN(e.crit)){
+        if(e.better==='low')cls=v>=e.crit?'crit':v>=e.warn?'warn':'ok';
+        else cls=v<=e.crit?'crit':v<=e.warn?'warn':'ok';
+      }
+      V.innerHTML=`${v!=null?fmt(v):'--'}<tspan class="vunit"> ${esc(e.unit||'')}</tspan>`;
+      const K=document.getElementById('mk_'+sb.id);
+      if(K){K.textContent=v!=null?fmt(v):'--';K.setAttribute('class','kval'+(cls!=='ok'?' '+cls:''));}
+    }
+    const gs=(rbk.guard&&rbk.guard.status)||'unknown';
+    if(counts[gs]!=null)counts[gs]++;
+    B.setAttribute('class','vbox'+(cls!=='ok'?' '+cls:''));
+    V.setAttribute('class','vtxt'+(cls!=='ok'?' '+cls:''));
+    if(g)g.classList.toggle('out',gs==='out');
+  }
+  for(const c of ((resp&&resp.connections)||[])){
+    const el=document.getElementById('mconn_'+c.from+'__'+c.to);
+    if(el)el.textContent=(c.value!=null&&isFinite(c.value))?`${fmt(c.value)} ${c.unit||''}`:'--';
+  }
+  const G=document.getElementById('m_guard');
+  if(G){
+    if(counts.out){G.textContent=`✖ ${counts.out} 台出定義域`;G.setAttribute('fill','#C0392B');}
+    else if(counts.warn){G.textContent=`⚠ ${counts.warn} 台外插`;G.setAttribute('fill','#B45309');}
+    else{G.textContent=`守門員 ${counts.ok} ok`;G.setAttribute('fill','#059669');}
+  }
+}
+
+// 檢視切換（記住偏好）
+function applyView(v){
+  const mode=v||localStorage.getItem('fsView:'+FID)||'cards';
+  $('view-cards').style.display=mode==='mimic'?'none':'';
+  $('mimic').style.display=mode==='mimic'?'':'none';
+  $('v-cards').classList.toggle('on',mode!=='mimic');
+  $('v-mimic').classList.toggle('on',mode==='mimic');
+  localStorage.setItem('fsView:'+FID,mode);
+}
+$('v-cards').addEventListener('click',()=>applyView('cards'));
+$('v-mimic').addEventListener('click',()=>applyView('mimic'));
 
 boot().catch(e=>{specError(e);});
 </script>

@@ -463,7 +463,16 @@ function setOn(v) {
   document.body.classList.toggle('flow-on', on); // 資訊卡封頂（style.css）
   $('flow-toggle').classList.toggle('active', on);
   $('flow-panel').classList.toggle('hidden', !on);
-  if (on) { tick(); timer = setInterval(tick, 2200); layoutRightRail(); }
+  if (on) {
+    tick(); timer = setInterval(tick, 2200); layoutRightRail();
+    // 首次開啟智慧運轉 → spotlight 導覽（等第一拍徽章長出來再框）
+    if (window.Tour) setTimeout(() => Tour.auto('twin3d', [
+      { el: '#flow-toggle', title: '智慧運轉', text: '這顆開關把 flowsheet 求解器疊上 3D：每 2 秒全廠重算一次。' },
+      { el: '.eq-label.flow-badge', title: '設備即時徽章', text: '標籤直接顯示模型預測值；出訓練域的設備會整台紅色脈動。' },
+      { el: '#flow-panel', title: '監看卡', text: '常用旋鈕、全廠 KPI、模型輸出傳遞值都在這張小卡。' },
+      { el: '#left-panel', title: '設備樹', text: '點任一設備開資訊卡，再按「⤢ 放大檢視」進入該 block 的完整工作面（what-if＋最佳化）。' },
+    ]), 3200);
+  }
   else {
     clearInterval(timer); timer = null; clearBadges(); closeBlockWs();
     const panel = $('flow-panel');

@@ -4071,7 +4071,7 @@ function bearingSurfaceAt(x, z, pipeBottomY) {
     const rot = eq.rot_y ?? 0, c = Math.cos(rot), s = Math.sin(rot);
     // 落點相對構件的本地平面座標（反旋轉；本地 X/Z）
     const dx = x - ex, dz = z - ez;
-    const lx = dx * c + dz * s, lz = -dx * s + dz * c;
+    const lx = dx * c - dz * s, lz = dx * s + dz * c;
     let topY, halfX, halfZ;
     if (eq.type === 'scolumn') {                 // 柱：頂面 y=pos.y+h，footprint 用底板外框近似
       const bp = Math.max(0.42, 0.3) / 2 + 0.06; // 底板半寬近似（含裕度）

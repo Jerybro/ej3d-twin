@@ -4521,7 +4521,7 @@ document.getElementById('btn-uda-color').addEventListener('click', () => {
 // 用 override 群集記錄每個被改 mesh 的原 { transparent, opacity, wireframe }，恢復時逐一還原、清空。
 let xrayOn = false;
 let wireframeOn = false;
-const renderOverride = new Map();   // mesh → { transparent, opacity, wireframe }
+const renderOverride = new Map();   // mesh → { mat, transparent, opacity, wireframe }（連材質實例一起存，還原以記錄當下的材質為準，避免 UDA clone 交叉污染共用單例）
 
 function reviewMeshes() {
   const out = [];
@@ -4537,7 +4537,7 @@ function reviewMeshes() {
 
 function rememberOverride(m) {
   if (!renderOverride.has(m)) {
-    renderOverride.set(m, { transparent: m.material.transparent, opacity: m.material.opacity, wireframe: m.material.wireframe });
+    renderOverride.set(m, { mat: m.material, transparent: m.material.transparent, opacity: m.material.opacity, wireframe: m.material.wireframe });
   }
 }
 
@@ -4545,20 +4545,21 @@ function applyRenderOverride() {
   // 依 xray/wireframe 目前狀態，對現有實體 mesh 套用 override（先記錄原值）
   for (const m of reviewMeshes()) {
     rememberOverride(m);
-    m.material.transparent = xrayOn ? true : renderOverride.get(m).transparent;
-    m.material.opacity = xrayOn ? 0.25 : renderOverride.get(m).opacity;
-    m.material.wireframe = wireframeOn;
-    m.material.needsUpdate = true;
+    const orig = renderOverride.get(m);   // 作用在記錄當下的材質實例，避免 UDA clone 換材後找不到同一目標
+    orig.mat.transparent = xrayOn ? true : orig.transparent;
+    orig.mat.opacity = xrayOn ? 0.25 : orig.opacity;
+    orig.mat.wireframe = wireframeOn;
+    orig.mat.needsUpdate = true;
   }
 }
 
 function restoreRenderOverride() {
   // 全部關閉時：逐一還原原始材質狀態並清空記錄，避免污染
-  for (const [m, orig] of renderOverride) {
-    m.material.transparent = orig.transparent;
-    m.material.opacity = orig.opacity;
-    m.material.wireframe = orig.wireframe;
-    m.material.needsUpdate = true;
+  for (const [, orig] of renderOverride) {
+    orig.mat.transparent = orig.transparent;   // 還原到被記錄當下的材質實例，而非可能已被 UDA 換掉的 m.material
+    orig.mat.opacity = orig.opacity;
+    orig.mat.wireframe = orig.wireframe;
+    orig.mat.needsUpdate = true;
   }
   renderOverride.clear();
 }

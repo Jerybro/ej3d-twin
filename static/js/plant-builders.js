@@ -1607,18 +1607,87 @@ builders.cageladder = function ({ h }) {
   return g;
 };
 
-// -------------------------------------------------- 管線支撐＋儀電橋架（elec discipline）
-builders.psupport = function ({ h, r }) {
+// -------------------------------------------------- 管線支撐（型式庫）＋儀電橋架（elec discipline）
+// 型式庫（對標 E3D 管支撐族）：rest 鞍座承載／guide 導向含側擋／anchor 固定含底板全抱箍／
+// hanger 由上吊桿＋抱箍／trunnion 焊接凸緣支墩。psupport 的 def.stype 決定幾何，預設 rest（維持既有場景）。
+// 幾何契約：管軸沿本地 Z 通過（放置時 rot_y 對齊管向），承管中心在 y=h；底端在 y=0（editor 已依附面調好 h）。
+export const SUPPORT_TYPES = [
+  { code: 'rest', name: '鞍座 Rest（承載）' },
+  { code: 'guide', name: '導向 Guide（側擋）' },
+  { code: 'anchor', name: '固定 Anchor（底板抱箍）' },
+  { code: 'hanger', name: '吊架 Hanger（由上吊）' },
+  { code: 'trunnion', name: '凸緣 Trunnion（焊接支墩）' },
+];
+export const SUPPORT_TYPE_SET = new Set(SUPPORT_TYPES.map((s) => s.code));
+const supMat = { base: 0x55606c, post: 0x6b7683, saddle: 0x8d99a6, attach: 0x9aa5b1 };
+// U-bolt 示意：跨管半圓＋兩支腳，管軸沿 Z，故半圓落在 XY 平面、開口朝下扣住管。
+function uBolt(r, yc, g) {
+  const rad = Math.max(r * 1.15, 0.075);
+  const arc = new THREE.Mesh(new THREE.TorusGeometry(rad, 0.012, 5, 12, Math.PI), std(supMat.attach, { metalness: 0.5 }));
+  arc.position.y = yc;                            // 半環開口朝下（+Y 側為環頂）扣住管頂
+  g.add(arc);
+  for (const sx of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, rad, 8), std(supMat.attach, { metalness: 0.5 }));
+    leg.position.set(sx * rad, yc - rad / 2, 0);
+    g.add(leg);
+  }
+}
+// clamp 抱箍示意：繞管一圈的環（管軸沿 Z → 環面在 XY，繞 Z）。
+function pipeClamp(r, yc, g, color = supMat.attach) {
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(Math.max(r * 1.12, 0.07), 0.02, 6, 16), std(color, { metalness: 0.5 }));
+  ring.position.y = yc;                            // 環面預設在 XY 平面、法線沿 Z＝繞管一圈
+  g.add(ring);
+}
+builders.psupport = function ({ h, r }, def) {
   const g = new THREE.Group();
-  const base = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.06, 0.36), std(0x55606c));
+  const stype = def?.stype ?? 'rest';
+  const saddleR = Math.max(r * 1.1, 0.07);
+  const yc = h + 0.01;                             // 承管中心高
+  if (stype === 'hanger') {
+    // 吊架：由上方鋼構垂下吊桿＋抱箍夾住管（無落地支柱）。頂端在承載面（editor 令 h＝吊點下方淨距）。
+    const rodH = Math.max(h, 0.1);
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, rodH, 8), std(supMat.post));
+    rod.position.y = yc + rodH / 2;               // 從承管中心往上吊到承載面
+    const clevis = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, 0.06), std(supMat.post));
+    clevis.position.y = yc + rodH;                // 頂端吊耳
+    g.add(rod, clevis);
+    pipeClamp(r, yc, g);                           // 抱箍承管
+    return g;
+  }
+  // 落地族（rest/guide/anchor/trunnion）共用底板＋立柱
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.06, 0.36), std(supMat.base));
   base.position.y = 0.03;
   const postH = Math.max(h - 0.05, 0.1);
-  const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, postH, 0.12), std(0x6b7683));
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, postH, 0.12), std(supMat.post));
   post.position.y = postH / 2 + 0.06;
-  const saddle = new THREE.Mesh(new THREE.TorusGeometry(Math.max(r * 1.1, 0.07), 0.035, 6, 14, Math.PI), std(0x8d99a6));
-  saddle.rotation.z = Math.PI;                    // 開口朝上承管；管沿 Z 通過（放置時 rot_y 對齊管向）
-  saddle.position.y = h + 0.01;
-  g.add(base, post, saddle);
+  g.add(base, post);
+  const saddle = new THREE.Mesh(new THREE.TorusGeometry(saddleR, 0.035, 6, 14, Math.PI), std(supMat.saddle));
+  saddle.rotation.z = Math.PI;                    // 開口朝上承管
+  saddle.position.y = yc;
+  if (stype === 'trunnion') {
+    // 凸緣：短圓柱支墩由管底焊出、頂承鞍座；示意為立於柱頂的粗凸緣。
+    const stub = new THREE.Mesh(new THREE.CylinderGeometry(Math.max(r * 0.5, 0.05), Math.max(r * 0.5, 0.05), 0.18, 12), std(supMat.saddle, { metalness: 0.5 }));
+    stub.position.y = yc - 0.12;
+    g.add(stub, saddle);
+    return g;
+  }
+  g.add(saddle);
+  if (stype === 'guide') {
+    // 導向：鞍座兩側加擋板限制側向位移（管沿 Z，故擋板在 ±X）。
+    for (const sx of [-1, 1]) {
+      const guide = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.14, saddleR * 2.4), std(supMat.attach, { metalness: 0.5 }));
+      guide.position.set(sx * (saddleR + 0.02), yc + 0.02, 0);
+      g.add(guide);
+    }
+    uBolt(r, yc, g);                               // 導向常配 U-bolt 壓管
+  } else if (stype === 'anchor') {
+    // 固定：頂加銲接底座塊＋整圈抱箍鎖死三向位移。
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.22), std(supMat.base));
+    shoe.position.y = yc - 0.05;
+    g.add(shoe);
+    pipeClamp(r, yc, g, supMat.base);              // 全抱箍（深色示錨定）
+  }
+  // rest：純鞍座承載，無附件（維持既有外觀）
   return g;
 };
 

@@ -387,6 +387,7 @@ function rebuildEquipment(def) {
   renderNozzles(entry.group, def);
   entry.group.children.find((c) => c.isCSS2DObject)?.position.set(0, labelHeight(def), 0);
   if (xrayOn || wireframeOn) applyRenderOverride();   // 重建後若審查模式開啟，讓新 mesh 也套 X-ray/線框（避免只有編輯過的設備變不透明）
+  if (udaColorKey) applyUdaColor(true);   // 重建後若屬性著色開啟，對新 mesh 重套色（不搶面板）
 }
 
 // ------------------------------------------------------------ 管線渲染
@@ -740,6 +741,7 @@ function loadSceneData(data, id) {
   transform.detach();
   clearNodeHandles();
   resetReviewRender();   // 換場景前清掉 X-ray/線框 override 記錄，避免持有舊 mesh 參照
+  resetUdaColor();       // 同上：清掉屬性著色 override 記錄與旗標，避免持有舊 mesh 參照
   // 移除群組前先清 CSS2D 標籤 DOM（設備/管嘴/坡度 ‰ 標籤掛在 overlay，scene.remove 不回收 → undo/redo 會殘留孤兒）
   for (const { group } of eqObjects.values()) { group.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); }); scene.remove(group); }
   eqObjects.clear();
@@ -993,6 +995,7 @@ function renderPropPanel(def) {
         <button data-nzdel="${i}" style="margin-left:6px;border:none;background:none;color:#d03050;cursor:pointer;font-size:11.5px;font-family:inherit">刪除</button>`)).join('')}</div>` : ''}
     ${def.type === 'piperack' ? `<div class="pg-section">儀電</div><button class="pbtn" id="prop-tray">沿此管架佈橋架</button><button class="pbtn" id="prop-tray-chain">串接共線管架佈線</button>` : ''}
     ${def.type === 'assembly' ? primsSection(def) : ''}
+    ${udaSection(def)}
     ${infoRows ? `<div class="pg-section">Information</div><div class="pg-grid">${infoRows}</div>` : ''}
     <button class="pbtn" id="prop-zoom">縮放至（F）</button>
     <button class="pbtn danger" id="prop-delete">刪除（Delete）</button>`;
@@ -1107,6 +1110,7 @@ function renderPropPanel(def) {
     rebuildTree(); updateTopbar();
     setHint(res.trays > 1 ? `已串接 ${res.racks} 座共線管架：${res.trays} 段橋架＋${res.bends} 轉角彎頭（儀電圖層）` : `僅此管架佈 1 段橋架（找不到共線相鄰管架）`);
   });
+  wireUda(def, () => renderPropPanel(def));
   document.getElementById('prop-zoom').addEventListener('click', () => zoomToSelection());
   document.getElementById('prop-delete').addEventListener('click', deleteSelected);
 }
@@ -1255,8 +1259,10 @@ function renderPipeProps(index) {
       <select class="rsel" id="comp-kind" style="flex:1">${compOpts}</select>
       <button class="pbtn" id="comp-place" style="width:auto;margin:0;padding:6px 12px">沿管放置</button>
     </div>
+    ${udaSection(pipe)}
     <button class="pbtn" id="prop-nodes">節點編輯</button>
     <button class="pbtn danger" id="prop-delete">刪除（Delete）</button>`;
+  wireUda(pipe, () => selectPipe(index));
   propBody.querySelector('[data-k="od"]')?.addEventListener('change', (e) => {   // 風管不渲染此欄→null-safe
     pushUndo();
     pipe.dn = null;   // 手改外徑＝自訂 bore，清掉 DN 名目避免下拉與實際 r 矛盾（也不污染存檔/USD）
@@ -4351,6 +4357,164 @@ function runIntegrityDock() {
   }));
 }
 document.getElementById('btn-model-lint').addEventListener('click', runIntegrityDock);
+
+// ------------------------------------------------------------ UDA 使用者自訂屬性（E3D UDA）＋依屬性著色
+// def.uda = { 鍵:'值', ... } 任意字串鍵值，設備/管線皆可掛；純 metadata、與單位無關、隨場景 JSON 存讀（undo/複製沿用深拷貝）。
+function escAttr(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// 屬性面板 UDA 區塊：列出現有鍵值可編輯/刪除，末列「＋ 新增屬性」（key/value 輸入）。
+function udaSection(obj) {
+  const uda = obj.uda ?? {};
+  const rows = Object.entries(uda).map(([k, v]) => `
+    <label title="${escAttr(k)}" style="overflow:hidden;text-overflow:ellipsis">${escAttr(k)}</label>
+    <div class="pg-v" style="display:flex;gap:4px;align-items:center">
+      <input data-udak="${escAttr(k)}" value="${escAttr(v)}" style="flex:1" title="屬性值（可編輯）">
+      <button class="pane-x" data-udadel="${escAttr(k)}" title="刪除此屬性">✕</button>
+    </div>`).join('');
+  return `<div class="pg-section">使用者自訂屬性 UDA</div>
+    <div class="pg-grid">${rows}</div>
+    <div style="display:flex;gap:6px;margin-top:6px">
+      <input id="uda-newk" placeholder="屬性名（如 狀態）" style="flex:1;min-width:0">
+      <input id="uda-newv" placeholder="值（如 運轉中）" style="flex:1;min-width:0">
+      <button class="pbtn" id="uda-add" style="width:auto;margin:0;padding:6px 12px">＋ 新增</button>
+    </div>`;
+}
+
+// 綁定 UDA 區塊事件；repaint 為所屬面板重繪閉包（設備/管線各自傳入）。存改前 pushUndo，著色開啟時即時重套。
+function wireUda(obj, repaint) {
+  propBody.querySelectorAll('[data-udak]').forEach((inp) => inp.addEventListener('change', () => {
+    pushUndo();
+    obj.uda[inp.dataset.udak] = inp.value;
+    if (udaColorKey) applyUdaColor();
+  }));
+  propBody.querySelectorAll('[data-udadel]').forEach((b) => b.addEventListener('click', () => {
+    pushUndo();
+    delete obj.uda[b.dataset.udadel];
+    if (obj.uda && Object.keys(obj.uda).length === 0) delete obj.uda;
+    if (udaColorKey) applyUdaColor();
+    repaint();
+  }));
+  document.getElementById('uda-add')?.addEventListener('click', () => {
+    const k = document.getElementById('uda-newk').value.trim();
+    const v = document.getElementById('uda-newv').value;
+    if (!k) { setHint('請先輸入屬性名'); return; }
+    pushUndo();
+    obj.uda = obj.uda ?? {};
+    obj.uda[k] = v;
+    if (udaColorKey) applyUdaColor();
+    repaint();
+  });
+}
+
+// ---- 依屬性著色：獨立 override 群集（只記錄/還原 material.color），與 review 的 transparent/opacity/wireframe 群集互不干擾 ----
+let udaColorKey = null;                 // 目前著色的 UDA 鍵；null=關閉
+let udaFilter = false;                   // true=值不符者半透明過濾聚焦
+// mesh → { origMat, cloneMat }：管身 cylinder/joint 用共用單例材質（pipeMat/serviceMats），
+// 直接改 color 會污染同服務其他管線與快取；故著色時換上該 mesh 專屬 clone，還原時換回原材質並 dispose clone。
+const udaColorOverride = new Map();
+const UDA_PALETTE = [0x2e7cf6, 0xef5350, 0x66bb6a, 0xffa726, 0xab47bc, 0x26c6da, 0xd4e157, 0x8d6e63, 0xec407a, 0x78909c];
+
+// 蒐集場景中所有 UDA 鍵（設備 def + 管線），去重
+function udaKeysInScene() {
+  const keys = new Set();
+  for (const { def } of eqObjects.values()) for (const k of Object.keys(def.uda ?? {})) keys.add(k);
+  for (const p of (sceneData?.pipes ?? [])) for (const k of Object.keys(p.uda ?? {})) keys.add(k);
+  return [...keys];
+}
+
+// 依 tag 取設備 def；依 index 取管線；回傳該物件的 uda 值（key 對應）
+function udaValueOfMesh(m) {
+  if (m.userData.eqTag !== undefined) return eqObjects.get(m.userData.eqTag)?.def?.uda?.[udaColorKey];
+  if (m.userData.pipeIndex !== undefined) return sceneData.pipes[m.userData.pipeIndex]?.uda?.[udaColorKey];
+  return undefined;
+}
+
+// 與 review 同源的實體 mesh 蒐集（跳過已透明/標記材質，避免污染）
+function colorMeshes() { return reviewMeshes(); }
+
+// reapplyAfterRebuild=true：舊 mesh 已被 dispose，不可還原→只清空記錄，直接對新 mesh 套色（比照 review 重建後重套）
+function applyUdaColor(reapplyAfterRebuild) {
+  if (reapplyAfterRebuild) udaColorOverride.clear();
+  else restoreUdaColor();   // 先還原上一輪，再依目前鍵/值重算（值改變時色表也隨之更新）
+  if (!udaColorKey) return;
+  // 依「出現過的值」穩定指派調色盤色（依字典序，重繪一致）
+  const values = new Set();
+  for (const m of colorMeshes()) { const v = udaValueOfMesh(m); if (v !== undefined && v !== '') values.add(String(v)); }
+  const valList = [...values].sort();
+  const colorOf = new Map(valList.map((v, i) => [v, UDA_PALETTE[i % UDA_PALETTE.length]]));
+  for (const m of colorMeshes()) {
+    const raw = udaValueOfMesh(m);
+    const has = raw !== undefined && raw !== '';
+    if (!has && !udaFilter) continue;   // 無值且不過濾：此 mesh 不動（保原共用材質）
+    if (!udaColorOverride.has(m)) {
+      const clone = m.material.clone();   // 專屬 clone，避免污染共用單例材質與快取
+      udaColorOverride.set(m, { origMat: m.material, cloneMat: clone });
+      m.material = clone;
+    }
+    const mat = m.material;
+    if (has) {
+      mat.color.setHex(colorOf.get(String(raw)));
+    } else {
+      // 過濾聚焦：無此屬性者半透明淡出，保原色（color 從 origMat 承接、不改）
+      mat.transparent = true;
+      mat.opacity = 0.08;
+    }
+    mat.needsUpdate = true;
+  }
+  if (!reapplyAfterRebuild) renderUdaLegend(valList, colorOf);   // 重建後重套不搶面板（使用者可能正在編別的設備）
+}
+
+function restoreUdaColor() {
+  for (const [m, o] of udaColorOverride) {
+    m.material = o.origMat;   // 換回原共用材質
+    o.cloneMat.dispose();     // 釋放專屬 clone，避免洩漏
+    m.material.needsUpdate = true;
+  }
+  udaColorOverride.clear();
+}
+
+// 圖例（沿用屬性面板顯示區；不入存檔）
+function renderUdaLegend(valList, colorOf) {
+  const hex = (n) => '#' + n.toString(16).padStart(6, '0');
+  document.getElementById('prop-title').textContent = `屬性著色：${udaColorKey}`;
+  propBody.innerHTML = `
+    <div class="pg-section">依屬性著色（UDA）</div>
+    <div class="pg-grid">
+      ${pgRow('著色屬性', `<select id="uda-color-key" style="width:100%">${
+        udaKeysInScene().map((k) => `<option value="${escAttr(k)}" ${k === udaColorKey ? 'selected' : ''}>${escAttr(k)}</option>`).join('')}</select>`)}
+      ${pgRow('過濾聚焦', `<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="uda-filter"${udaFilter ? ' checked' : ''}>值缺者淡出</label>`)}
+    </div>
+    <div class="pg-section">色表 Legend</div>
+    <div class="pg-grid">
+      ${valList.length ? valList.map((v) => `<label>${escAttr(v)}</label><div class="pg-v"><span style="display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:middle;background:${hex(colorOf.get(v))};border:1px solid var(--bdr)"></span></div>`).join('')
+        : '<label style="grid-column:1/-1;color:var(--dim)">此屬性在場景中尚無任何值</label>'}
+    </div>
+    <button class="pbtn danger" id="uda-color-off">關閉著色（還原原色）</button>`;
+  document.getElementById('uda-color-key').addEventListener('change', (e) => { udaColorKey = e.target.value; applyUdaColor(); });
+  document.getElementById('uda-filter').addEventListener('change', (e) => { udaFilter = e.target.checked; applyUdaColor(); });
+  document.getElementById('uda-color-off').addEventListener('click', () => { udaColorKey = null; udaFilter = false; restoreUdaColor(); syncUdaButton(); setHint('屬性著色：關（已還原原色）'); });
+  syncUdaButton();
+}
+
+function syncUdaButton() {
+  document.getElementById('btn-uda-color')?.classList.toggle('active', !!udaColorKey);
+}
+
+// 換場景/重建前呼叫：清空著色 override 記錄與旗標（舊 mesh 即將被移除，不需逐一還原）
+function resetUdaColor() {
+  udaColorKey = null;
+  udaFilter = false;
+  udaColorOverride.clear();
+  syncUdaButton();
+}
+
+document.getElementById('btn-uda-color').addEventListener('click', () => {
+  if (udaColorKey) { udaColorKey = null; udaFilter = false; restoreUdaColor(); syncUdaButton(); setHint('屬性著色：關（已還原原色）'); return; }
+  const keys = udaKeysInScene();
+  if (!keys.length) { setHint('場景中尚無任何 UDA 屬性；請先在設備/管線屬性面板新增屬性'); return; }
+  udaColorKey = keys[0];
+  applyUdaColor();   // 內部會重繪圖例面板並套色
+});
 
 // ------------------------------------------------------------ 審查工具：X-ray/線框＋截圖（e3d/feat-review）
 // 只作用於設備/管線實體 mesh；跳過已透明材質（保溫 insul、包絡、量測球/線等）與坡度箭頭標記。

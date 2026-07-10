@@ -11,7 +11,8 @@ import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight,
          buildPrim, buildPipeComponent, PIPE_COMPONENTS,
          PIPE_SPECS, PIPE_SERVICES, PIPE_BORES, PIPE_SCHEDULES, pipeWall,
          COMPONENT_FTF, pickComponent,
-         STEEL_SECTIONS, steelSection, sectionDesc, buildEnvelope } from './plant-builders.js';
+         STEEL_SECTIONS, steelSection, sectionDesc, buildEnvelope,
+         SUPPORT_TYPES, SUPPORT_TYPE_SET } from './plant-builders.js';
 import { initSprite } from './sprite.js';
 import { runClash, clashKey } from './clash.js';
 import { computeWeights } from './weight.js';
@@ -991,6 +992,13 @@ function renderPropPanel(def) {
       pgRow(nz.id, `<select data-nzdn="${i}" class="rsel" style="width:86px">${PIPE_BORES.map((b) =>
         `<option ${b.dn === nz.dn ? 'selected' : ''}>${b.dn}</option>`).join('')}</select>
         <button data-nzdel="${i}" style="margin-left:6px;border:none;background:none;color:#d03050;cursor:pointer;font-size:11.5px;font-family:inherit">刪除</button>`)).join('')}</div>` : ''}
+    ${def.type === 'psupport' ? (() => {
+      const st = SUPPORT_TYPE_SET.has(def.stype) ? def.stype : 'rest';
+      return `<div class="pg-section">支撐型式 Support Type</div><div class="pg-grid">
+        ${pgRow('型式', `<select data-k="stype" style="width:100%">${SUPPORT_TYPES.map((o) =>
+          `<option value="${o.code}" ${st === o.code ? 'selected' : ''}>${o.name}</option>`).join('')}</select>`)}
+        ${pgRow('依附鋼構', `<span>${def.sup_on ? def.sup_on : '（落地 y=0）'}</span>`)}</div>`;
+    })() : ''}
     ${def.type === 'piperack' ? `<div class="pg-section">儀電</div><button class="pbtn" id="prop-tray">沿此管架佈橋架</button><button class="pbtn" id="prop-tray-chain">串接共線管架佈線</button>` : ''}
     ${def.type === 'assembly' ? primsSection(def) : ''}
     ${infoRows ? `<div class="pg-section">Information</div><div class="pg-grid">${infoRows}</div>` : ''}
@@ -1051,6 +1059,12 @@ function renderPropPanel(def) {
   propBody.querySelector('[data-k="just"]')?.addEventListener('change', (e) => {
     pushUndo();
     def.just = e.target.value;
+    rebuildEquipment(def);
+    renderPropPanel(def);
+  });
+  propBody.querySelector('[data-k="stype"]')?.addEventListener('change', (e) => {   // 支撐型式切換：改 def.stype 重建幾何
+    pushUndo();
+    def.stype = e.target.value;
     rebuildEquipment(def);
     renderPropPanel(def);
   });
@@ -1246,6 +1260,11 @@ function renderPipeProps(index) {
         const ratio = `1:${Math.round(1000 / Math.abs(s))}`;
         return pgRow('總落差 Fall', `<span>${fmtLen(fall)}（${ratio}／水平 ${fmtLen(hLen)}）</span>`);
       })()}
+      ${isDuct ? '' : (() => {
+        const st = SUPPORT_TYPE_SET.has(pipe.sup_type) ? pipe.sup_type : 'rest';
+        return pgRow('支撐型式（預設）', `<select data-k="suptype" style="width:100%">${SUPPORT_TYPES.map((o) =>
+          `<option value="${o.code}" ${st === o.code ? 'selected' : ''}>${o.name}</option>`).join('')}</select>`);
+      })()}
       ${pgRow('節點數', `<span>${pipe.pts.length}</span>`)}
       ${pgRow('總長', `<span>${fmtLen(pipeLength(pipe))}</span>`)}
     </div>
@@ -1299,6 +1318,14 @@ function renderPipeProps(index) {
     const v = Math.round(parseFloat(e.target.value) || 0);   // 收斂為整數 ‰
     pipe.slope = v || undefined;   // 0 存 undefined，維持水平預設乾淨（不污染存檔）
     rebuildAllPipes();   // 重建以套用/移除坡度視覺落差與標記
+    selectPipe(index);
+  });
+  propBody.querySelector('[data-k="suptype"]')?.addEventListener('change', (e) => {   // 管線預設支撐型式（風管不渲染此欄→null-safe）
+    pushUndo();
+    const v = e.target.value;
+    // rest 為預設→存 undefined 保存檔乾淨（讀取端一律回退 rest）；其餘存實值。
+    pipe.sup_type = (SUPPORT_TYPE_SET.has(v) && v !== 'rest') ? v : undefined;
+    if (hasSupports(pipe.uid)) { regenSupportsForPipe(pipe); rebuildTree(); }   // 已有支撐→依新型式重生
     selectPipe(index);
   });
   // 風管斷面形狀：切換 rect/circ/oval，改變後重繪面板（切換 W/H↔⌀ 欄位）並重建
@@ -4032,6 +4059,40 @@ function removeSupportsOf(uid) {
   return n;
 }
 
+// 依附鋼構：於支撐落點 (x,z) 下方，找承載面（scolumn 柱頂／sbeam 樑頂／splat 樓板頂）。
+// 回傳 { y, tag }＝承載面標高（公尺 canonical）與其結構 tag；找不到回 null（呼叫端落地 y=0）。
+// 只採「頂面標高 ≤ 管底、且落在該構件水平投影內、且與管底淨距 ≤ MAX_REACH」的最高承載面。
+const SUP_MAX_REACH = 3.0;                        // 支撐可延伸的最大高度（公尺）；超過視為無承載面→落地
+function bearingSurfaceAt(x, z, pipeBottomY) {
+  let best = null;                               // { y, tag }：取最高（最貼近管底）者
+  for (const eq of allEquipment()) {
+    if (!STRUCT_TYPES.has(eq.type) || eq.type === 'psupport') continue;   // 只依附主結構鋼，不疊在支撐上
+    const [ex, ey, ez] = eq.pos ?? [0, 0, 0];
+    const rot = eq.rot_y ?? 0, c = Math.cos(rot), s = Math.sin(rot);
+    // 落點相對構件的本地平面座標（反旋轉；本地 X/Z）
+    const dx = x - ex, dz = z - ez;
+    const lx = dx * c + dz * s, lz = -dx * s + dz * c;
+    let topY, halfX, halfZ;
+    if (eq.type === 'scolumn') {                 // 柱：頂面 y=pos.y+h，footprint 用底板外框近似
+      const bp = Math.max(0.42, 0.3) / 2 + 0.06; // 底板半寬近似（含裕度）
+      topY = ey + (eq.dims?.h ?? 0); halfX = bp; halfZ = bp;
+    } else if (eq.type === 'sbeam') {            // 樑：沿本地 X 長 len，頂面 y=pos.y+elev+depth/2
+      const sec = steelSection(eq.section);
+      const depth = (sec.depth ?? sec.side ?? sec.od ?? 300) / 1000;
+      topY = ey + (eq.dims?.elev ?? 3) + depth / 2;
+      halfX = (eq.dims?.len ?? 4) / 2; halfZ = Math.max((sec.flange ?? sec.side ?? sec.od ?? 200) / 1000, 0.1) / 2 + 0.05;
+    } else if (eq.type === 'splat') {            // 樓板：頂面 y=pos.y+elev+0.03，footprint w×d
+      topY = ey + (eq.dims?.elev ?? 0) + 0.03;
+      halfX = (eq.dims?.w ?? 2) / 2; halfZ = (eq.dims?.d ?? 2) / 2;
+    } else continue;                             // stairs/srail/cageladder 不作承載面
+    if (Math.abs(lx) > halfX || Math.abs(lz) > halfZ) continue;           // 落點不在水平投影內
+    if (topY > pipeBottomY + 0.02) continue;                             // 承載面高於管底→無法承載
+    if (pipeBottomY - topY > SUP_MAX_REACH) continue;                    // 太遠→不依附
+    if (!best || topY > best.y) best = { y: topY, tag: eq.tag };
+  }
+  return best;
+}
+
 function regenSupportsForPipe(pipe) {
   const SPAN = 4, spots = [], pts = pipe.pts;
   for (let i = 0; i < pts.length - 1; i++) {
@@ -4049,13 +4110,19 @@ function regenSupportsForPipe(pipe) {
   pipe.uid = pipe.uid ?? `PL-${Math.random().toString(36).slice(2, 8)}`;
   let unit = sceneData.plant.units.find((u) => u.id === 'U-SUP');
   if (!unit) { unit = { id: 'U-SUP', name: '管線支撐', equipment: [] }; sceneData.plant.units.push(unit); }
+  const stype = SUPPORT_TYPE_SET.has(pipe.sup_type) ? pipe.sup_type : 'rest';   // 管線預設支撐型式
   for (const sp of spots) {
+    const pipeBottomY = sp.y - pipe.r;                                  // 管底標高（承載目標）
+    // 依附偵測：hanger 由上吊不落地，故不找承載面（底端＝吊點下淨距，維持貼管）。
+    const bear = stype === 'hanger' ? null : bearingSurfaceAt(sp.x, sp.z, pipeBottomY);
+    const baseY = bear ? bear.y : 0;                                    // 依附面標高，或落地 y=0
     const def = {
-      tag: nextTag('PS'), type: 'psupport', name: '管線支撐',
-      dims: { h: +(sp.y - pipe.r).toFixed(2), r: Math.max(pipe.r, 0.05) },
-      pos: [+sp.x.toFixed(2), 0, +sp.z.toFixed(2)], rot_y: +sp.yaw.toFixed(3),
+      tag: nextTag('PS'), type: 'psupport', stype, name: '管線支撐',
+      dims: { h: roundMM(pipeBottomY - baseY), r: Math.max(pipe.r, 0.05) },
+      pos: [roundMM(sp.x), roundMM(baseY), roundMM(sp.z)], rot_y: +sp.yaw.toFixed(3),
       sup_of: pipe.uid, design: {}, instruments: [], pid_ref: '',
     };
+    if (bear) def.sup_on = bear.tag;                                    // 記錄依附鋼構關聯（找不到才落地、不設此欄）
     unit.equipment.push(def);
     buildEquipment(def);
   }

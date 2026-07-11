@@ -194,7 +194,7 @@ function obbToAABB(obb) {
 // 本輪某筆碰撞的比對 key（與 clashStatus 命名一致：soft 前綴 S|；lifecycle 用）
 const lifeKey = (o) => (o.soft ? 'S|' : '') + clashKey(o.a, o.b);
 
-export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL, prevKeys = sceneData.lastClashKeys) {
+export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL, prevKeys = sceneData.lastClashKeys, persist = true) {
   const status = sceneData.clashStatus ?? {};
   // prevKeys 可能是 Set、陣列、或（經 JSON 序列化/還原後）非可迭代物件 → 安全轉 Set
   const prev = prevKeys instanceof Set ? prevKeys
@@ -331,10 +331,10 @@ export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL, prev
     }
   }
 
-  return finish(out, out.length >= MAX_RESULTS, prev, status, sceneData);
+  return finish(out, out.length >= MAX_RESULTS, prev, status, sceneData, persist);
 }
 
-function finish(list, capped, prev, status, sceneData) {
+function finish(list, capped, prev, status, sceneData, persist = true) {
   const order = { physical: 0, pipe: 1, touch: 2, clearance: 3 };
   // 未處理優先、Approved 沉底；同狀態內依嚴重度
   const sOrder = { new: 0, held: 1, approved: 2 };
@@ -345,6 +345,6 @@ function finish(list, capped, prev, status, sceneData) {
   const curKeys = new Set(clashes.map((o) => (o.soft ? 'S|' : '') + clashKey(o.a, o.b)));
   const cleared = [];
   if (prev) for (const k of prev) if (!curKeys.has(k)) cleared.push(k);
-  if (sceneData) sceneData.lastClashKeys = [...curKeys];   // 存回供下一輪比對（陣列，利於 JSON 序列化）
+  if (sceneData && persist) sceneData.lastClashKeys = [...curKeys];   // 僅「執行一次比對」時推進 baseline；被動重繪不寫回，避免 prev 被清成當前 keys 而誤判 NEW/Cleared
   return { clashes, capped, open, total: list.length, cleared, keys: [...curKeys] };
 }

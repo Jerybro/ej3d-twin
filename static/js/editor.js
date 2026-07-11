@@ -4577,10 +4577,12 @@ function clearClashMarks() {
 }
 
 let clashShowCleared = false;   // 面板是否展開「本輪已解決（Cleared）」清單
-function runClashDock() {
+function runClashDock(fresh = false) {
   const t0 = performance.now();
-  // prevKeys 取自上輪存於 sceneData.lastClashKeys；runClash 內部會把本輪 keys 存回
-  const { clashes, capped, open, total, cleared } = runClash(sceneData, eqObjects, hiddenTags);
+  // baseline 只在 fresh（執行一次比對）時推進；被動重繪（Cleared 展開、Hold/Approve）固定拿上輪 baseline 比對且不寫回，
+  // 否則首次 render 後 lastClashKeys 已等於當前 keys，一互動就會 prev===cur → NEW/Cleared 全歸零。
+  const prevKeys = sceneData.lastClashKeys;
+  const { clashes, capped, open, total, cleared } = runClash(sceneData, eqObjects, hiddenTags, undefined, prevKeys, fresh);
   const ms = Math.round(performance.now() - t0);
   const n = { physical: 0, touch: 0, clearance: 0 };
   let nNew = 0, nPersist = 0, nInsul = 0;
@@ -4654,7 +4656,7 @@ function runClashDock() {
     frameBox(box, camera.position.clone().sub(controls.target).normalize());
   }));
 }
-document.getElementById('btn-clash-run').addEventListener('click', runClashDock);
+document.getElementById('btn-clash-run').addEventListener('click', () => runClashDock(true));
 document.getElementById('clash-close').addEventListener('click', () => {
   clashDock.classList.remove('show');
   clearClashMarks();

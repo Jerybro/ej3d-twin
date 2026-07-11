@@ -30,6 +30,13 @@ const JUST_OPTIONS = [
   { v: 'RIGHT', t: 'RIGHT 右翼板邊' },
 ];
 
+// 連接節點型式（構件端）：none 無、baseplate 柱腳底板+錨栓、gusset 端板/節點板示意
+const NODE_OPTIONS = [
+  { v: 'none', t: '無' },
+  { v: 'baseplate', t: '柱腳底板 Base Plate' },
+  { v: 'gusset', t: '端板/節點板 Gusset' },
+];
+
 const viewport = document.getElementById('viewport');
 
 // ---------------------------------------------------------------- 圖示系統
@@ -287,7 +294,7 @@ const hiddenTags = new Set(); // 模型樹「隱藏」的設備（UI 狀態，�
 const LAYERS = { equip: true, pipe: true, struct: true, elec: true, hvac: true };
 // 維修/抽出包絡總開關（UI 檢視狀態，不入存檔；per-設備 on 存於 def.envelope.on）
 let envelopeVisible = true;
-const STRUCT_TYPES = new Set(['scolumn', 'sbeam', 'stairs', 'srail', 'splat', 'cageladder', 'psupport']);
+const STRUCT_TYPES = new Set(['scolumn', 'sbeam', 'stairs', 'srail', 'splat', 'cageladder', 'psupport', 'grating']);
 const ELEC_TYPES = new Set(['cabletray', 'traybend', 'trayriser', 'jbox', 'lightpole']);
 const HVAC_TYPES = new Set(['duct', 'ductbend', 'ductriser', 'ahu', 'rooffan']);
 function eqLayerOn(def) {
@@ -994,12 +1001,30 @@ function renderPropPanel(def) {
     ${['scolumn', 'sbeam'].includes(def.type) ? (() => {
       const s = steelSection(def.section);
       const jv = def.just ?? 'NA';
+      const e1 = def.end1 ?? {}, e2 = def.end2 ?? {};
+      const nodeV = def.node ?? (def.type === 'scolumn' ? 'baseplate' : 'none');
       return `<div class="pg-section">斷面 Section</div><div class="pg-grid">
         ${pgRow('型鋼', `<select data-k="section" style="width:100%">${STEEL_SECTIONS.map((x) =>
           `<option value="${x.code}" ${s.code === x.code ? 'selected' : ''}>${x.code}</option>`).join('')}</select>`)}
         ${pgRow('斷面 (mm)', `<span>${sectionDesc(s)}</span>`)}
         ${pgRow('定位線 Justification', `<select data-k="just" style="width:100%">${JUST_OPTIONS.map((o) =>
-          `<option value="${o.v}" ${jv === o.v ? 'selected' : ''}>${o.t}</option>`).join('')}</select>`)}</div>`;
+          `<option value="${o.v}" ${jv === o.v ? 'selected' : ''}>${o.t}</option>`).join('')}</select>`)}</div>
+        <div class="pg-section">端部處理 End Prep</div><div class="pg-grid">
+        ${pgRow(`起端退縮 (${unitLabel()})`, `<input data-end="1" data-ep="setback" type="number" step="${U().step}" min="0" value="${toDisp(e1.setback ?? 0)}">`)}
+        ${pgRow('起端斜接 (°)', `<input data-end="1" data-ep="miter" type="number" step="1" value="${e1.miter ?? 0}">`)}
+        ${pgRow(`末端退縮 (${unitLabel()})`, `<input data-end="2" data-ep="setback" type="number" step="${U().step}" min="0" value="${toDisp(e2.setback ?? 0)}">`)}
+        ${pgRow('末端斜接 (°)', `<input data-end="2" data-ep="miter" type="number" step="1" value="${e2.miter ?? 0}">`)}
+        ${pgRow('節點 Node', `<select data-k="node" style="width:100%">${NODE_OPTIONS.map((o) =>
+          `<option value="${o.v}" ${nodeV === o.v ? 'selected' : ''}>${o.t}</option>`).join('')}</select>`)}</div>`;
+    })() : ''}
+    ${def.type === 'grating' ? (() => {
+      const dir = (def.bar_dir ?? 'w') === 'd' ? 'd' : 'w';
+      const pitch = def.bar_pitch ?? 0.04;
+      return `<div class="pg-section">格柵 Grating</div><div class="pg-grid">
+        ${pgRow('橫檔方向', `<select data-k="bar_dir" style="width:100%">
+          <option value="w" ${dir === 'w' ? 'selected' : ''}>沿寬 W（東西）</option>
+          <option value="d" ${dir === 'd' ? 'selected' : ''}>沿深 D（南北）</option></select>`)}
+        ${pgRow(`橫檔間距 (${unitLabel()})`, `<input data-k="bar_pitch" type="number" step="${U().step}" min="0" value="${toDisp(pitch)}">`)}</div>`;
     })() : ''}
     ${def.nozzles?.length ? `<div class="pg-section">管嘴 Nozzles</div><div class="pg-grid">${def.nozzles.map((nz, i) =>
       pgRow(nz.id, `<select data-nzdn="${i}" class="rsel" style="width:86px">${PIPE_BORES.map((b) =>
@@ -1026,6 +1051,7 @@ function renderPropPanel(def) {
 
   propBody.querySelectorAll('input').forEach((inp) => {
     if (inp.dataset.env !== undefined) return;   // 維修包絡欄位另有專屬處理
+    if (inp.dataset.end !== undefined) return;   // 端部處理欄位另有專屬處理
     inp.addEventListener('change', () => {
       const k = inp.dataset.k;
       pushUndo();
@@ -1075,6 +1101,33 @@ function renderPropPanel(def) {
     def.just = e.target.value;
     rebuildEquipment(def);
     renderPropPanel(def);
+  });
+  propBody.querySelectorAll('[data-end]').forEach((inp) => {   // 端部處理：退縮(m)/斜接(°)
+    inp.addEventListener('change', () => {
+      pushUndo();
+      const key = inp.dataset.end === '2' ? 'end2' : 'end1';
+      const ep = inp.dataset.ep;   // 'setback' | 'miter'
+      const cur = def[key] ?? {};
+      // setback 為長度(公尺 canonical，量化用 roundMM)；miter 為角度(度)不量化。
+      const val = ep === 'setback' ? Math.max(0, fromDisp(inp.value)) : +inp.value;
+      def[key] = { ...cur, [ep]: val };
+      rebuildEquipment(def);
+    });
+  });
+  propBody.querySelector('[data-k="node"]')?.addEventListener('change', (e) => {   // 連接節點型式
+    pushUndo();
+    def.node = e.target.value;
+    rebuildEquipment(def);
+  });
+  propBody.querySelector('[data-k="bar_dir"]')?.addEventListener('change', (e) => {   // 格柵橫檔方向
+    pushUndo();
+    def.bar_dir = e.target.value;
+    rebuildEquipment(def);
+  });
+  propBody.querySelector('[data-k="bar_pitch"]')?.addEventListener('change', (e) => {   // 格柵橫檔間距(m)
+    pushUndo();
+    def.bar_pitch = roundMM(Math.max(0.02, fromDisp(e.target.value)));
+    rebuildEquipment(def);
   });
   propBody.querySelector('[data-k="stype"]')?.addEventListener('change', (e) => {   // 支撐型式切換：改 def.stype 重建幾何
     pushUndo();

@@ -8,7 +8,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight,
-         buildPrim, buildPipeComponent, PIPE_COMPONENTS,
+         buildPrim, buildPipeComponent, buildDuctTerminal, PIPE_COMPONENTS,
          PIPE_SPECS, PIPE_SERVICES, PIPE_BORES, PIPE_SCHEDULES, pipeWall,
          COMPONENT_FTF, pickComponent, buildTrayBody, trayMat,
          STEEL_SECTIONS, steelSection, sectionDesc, buildEnvelope,
@@ -610,7 +610,7 @@ function buildDuctBody(pipe, index, group, pts) {
   for (const c of pipe.components ?? []) {              // 三通/風門/漸縮 沿風管弧長定位
     const pose = arcToPose(pipe, c.at);
     if (!pose) continue;
-    const comp = buildDuctFitting(c.kind, w, h, pipe.duct);
+    const comp = buildDuctFitting(c.kind, w, h, pipe.duct, c.variant);
     comp.position.copy(pose.pos);
     comp.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), pose.dir);
     comp.traverse((o) => { o.userData.pipeIndex = index; });
@@ -618,10 +618,16 @@ function buildDuctBody(pipe, index, group, pts) {
   }
 }
 // duct：風管元件幾何。本地 X 軸＝流向（放置時 setFromUnitVectors(1,0,0)→pose.dir）。
-function buildDuctFitting(kind, w, h, duct) {
+// variant：transition/reducer 的 'conc'（同心，預設）/'ecc'（偏心，底邊齊平）。
+function buildDuctFitting(kind, w, h, duct, variant) {
+  // 終端裝置（送風口/回風格柵/百葉）：自成一體，交由 plant-builders 幾何 builder
+  if (kind === 'diffuser' || kind === 'grille' || kind === 'louvre') {
+    return buildDuctTerminal(kind, w, h, duct);
+  }
   const g = new THREE.Group();
   const shape = duct?.shape ?? 'rect';
   const d = duct?.d ?? w;
+  const ecc = variant === 'ecc';
   // 依斷面畫一片薄「端面套環」（本地 X 為流向厚度方向）
   const collarAt = (thick, scale = 1.12) => {
     if (shape === 'circ') {
@@ -654,26 +660,53 @@ function buildDuctFitting(kind, w, h, duct) {
     handle.position.y = h * 0.62;
     g.add(collar, flap, handle);
   } else if (kind === 'transition') {
-    // 漸縮：一段沿流向(X)的錐狀過渡，入口＝本管斷面、出口＝縮小約 0.6 倍
-    const L = Math.max(w, h) * 0.9;                     // 過渡段長
+    // 斷面轉換：矩形↔圓形。入口＝本管斷面，出口＝相反斷面（rect→circ 或 circ/oval→rect）。
+    // 以四稜台↔圓錐兩段各半段近似（示意）；ecc＝偏心（出口貼齊底邊），否則同心。
+    const L = Math.max(w, h, d) * 0.9;
     const half = L / 2;
-    const t = 0.02;                                    // 端面薄板厚
+    const t = 0.02;
+    const toCirc = shape === 'rect';                    // rect→圓，圓/橢圓→rect
+    const rIn = shape === 'circ' ? d / 2 : Math.max(w, h) / 2;
+    const rOut = rIn;                                   // 等效外接半徑（同尺寸換形）
+    const dyIn = ecc ? -rIn * 0.4 : 0;                  // 偏心：入/出中心 Y 位移（底齊示意）
+    const dyOut = ecc ? rIn * 0.4 : 0;
+    const inFace = collarAt(t, 1.0);  inFace.position.set(-half, dyIn, 0);
+    // 出口端面（相反斷面）
+    const outFace = toCirc
+      ? (() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(rOut, rOut, t, 20), ductMat); m.rotation.z = Math.PI / 2; return m; })()
+      : new THREE.Mesh(new THREE.BoxGeometry(t, h, w), ductMat);
+    outFace.position.set(half, dyOut, 0);
+    // 斜壁：入口段用入口斷面近似錐、出口段用出口斷面近似錐，於中點對接
+    const inSeg = new THREE.Mesh(new THREE.CylinderGeometry(rIn, rIn, half, shape === 'rect' ? 4 : 20), ductMat);
+    if (shape === 'oval') inSeg.scale.set(h / Math.max(w, h), 1, w / Math.max(w, h));
+    if (shape === 'rect') inSeg.rotation.y = Math.PI / 4;
+    const inWrap = new THREE.Group(); inWrap.rotation.z = Math.PI / 2; inWrap.position.set(-half / 2, dyIn / 2, 0); inWrap.add(inSeg);
+    const outSeg = new THREE.Mesh(new THREE.CylinderGeometry(rOut, rOut, half, toCirc ? 20 : 4), ductMat);
+    if (!toCirc) outSeg.rotation.y = Math.PI / 4;
+    const outWrap = new THREE.Group(); outWrap.rotation.z = Math.PI / 2; outWrap.position.set(half / 2, dyOut / 2, 0); outWrap.add(outSeg);
+    inSeg.userData.transCone = true; outSeg.userData.transCone = true;
+    g.add(inWrap, outWrap, inFace, outFace);
+  } else if (kind === 'reducer') {
+    // 變徑：同斷面形狀、大→小（出口約 0.62 倍）。ecc＝偏心（出口貼底），否則同心。
+    const L = Math.max(w, h, d) * 0.9;
+    const half = L / 2;
+    const t = 0.02;
+    const rIn = shape === 'circ' ? d / 2 : Math.max(w, h) / 2;
+    const rOut = rIn * 0.62;
+    const dy = ecc ? -(rIn - rOut) : 0;                 // 偏心：出口中心下移使底邊齊平
     const inFace = collarAt(t, 1.0);  inFace.position.x = -half;
     const outFace = shape === 'rect'
-      ? new THREE.Mesh(new THREE.BoxGeometry(t, h * 0.6, w * 0.6), ductMat)
+      ? new THREE.Mesh(new THREE.BoxGeometry(t, h * 0.62, w * 0.62), ductMat)
       : shape === 'circ'
-        ? (() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(d / 2 * 0.6, d / 2 * 0.6, t, 20), ductMat); m.rotation.z = Math.PI / 2; return m; })()
-        : (() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, t, 20), ductMat); m.scale.set(h * 0.6, 1, w * 0.6); m.rotation.z = Math.PI / 2; return m; })();
-    outFace.position.x = half;
-    // 斜壁：用一段沿 X 的方錐（BoxGeometry 兩端不同尺寸以 4 片斜板近似不易，改用四稜台 Cylinder 近似）
-    const rIn = (shape === 'circ' ? d / 2 : Math.max(w, h) / 2);
-    const rOut = rIn * 0.6;
+        ? (() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(rOut, rOut, t, 20), ductMat); m.rotation.z = Math.PI / 2; return m; })()
+        : (() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, t, 20), ductMat); m.scale.set(h * 0.62, 1, w * 0.62); m.rotation.z = Math.PI / 2; return m; })();
+    outFace.position.set(half, dy, 0);
     const cone = new THREE.Mesh(new THREE.CylinderGeometry(rOut, rIn, L, shape === 'rect' ? 4 : 20), ductMat);
-    if (shape === 'oval') cone.scale.set(h / Math.max(w, h), 1, w / Math.max(w, h)); // 本地X→高、本地Y→長(保持)、本地Z→寬
-    if (shape === 'rect') cone.rotation.y = Math.PI / 4; // 4-gon 錐頂點在 45°→繞自身軸轉正，使方形面對齊
-    // 用外層 group 承接「軸→流向」旋轉，避免和上面的自轉在同一 Euler 疊加出錯
+    if (shape === 'oval') cone.scale.set(h / Math.max(w, h), 1, w / Math.max(w, h));
+    if (shape === 'rect') cone.rotation.y = Math.PI / 4;
     const coneWrap = new THREE.Group();
     coneWrap.rotation.z = Math.PI / 2;                  // 錐 Y 軸→X（流向）
+    coneWrap.position.y = dy / 2;                       // 偏心：斜壁中心跟隨出口位移
     coneWrap.add(cone);
     cone.userData.transCone = true;
     g.add(coneWrap, inFace, outFace);
@@ -1269,7 +1302,10 @@ function renderPipeProps(index) {
   document.getElementById('prop-title').textContent = `${isTray ? '電纜橋架' : isDuct ? '風管' : '管線'} #${index + 1}`;
   const TRAY_WIDTHS = [0.15, 0.3, 0.45, 0.6];   // 標準托盤寬（公尺）：150/300/450/600mm
   const TRAY_TYPES = [{ v: 'ladder', name: '梯級（ladder）' }, { v: 'solid', name: '實底（solid）' }, { v: 'perforated', name: '沖孔（perforated）' }];
-  const DUCT_FITTINGS = [{ kind: 'tee', name: '風管三通' }, { kind: 'damper', name: '風門' }, { kind: 'transition', name: '漸縮' }];
+  const DUCT_FITTINGS = [{ kind: 'tee', name: '風管三通' }, { kind: 'damper', name: '風門' },
+    { kind: 'transition', name: '斷面轉換' }, { kind: 'reducer', name: '變徑' },
+    { kind: 'diffuser', name: '送風口' }, { kind: 'grille', name: '回風格柵' }, { kind: 'louvre', name: '百葉' }];
+  const DUCT_VARIANT_KINDS = new Set(['transition', 'reducer']);   // 支援同心/偏心選項的配件
   const DUCT_SHAPES = [{ v: 'rect', name: '矩形' }, { v: 'circ', name: '圓形' }, { v: 'oval', name: '橢圓' }];
   const compKinds = isTray ? [] : isDuct ? DUCT_FITTINGS : PIPE_COMPONENTS;   // 托盤暫不提供管中元件
   const compName = Object.fromEntries([...PIPE_COMPONENTS, ...DUCT_FITTINGS].map((c) => [c.kind, c.name]));
@@ -1277,6 +1313,10 @@ function renderPipeProps(index) {
     `<label>${compName[c.kind] ?? c.kind}</label>
      <div class="pg-v" style="display:flex;gap:4px;align-items:center">
        <input data-cat="${i}" type="number" step="${U().step}" value="${toDisp(c.at)}" title="距管頭弧長（${unitLabel()}）" style="flex:1">
+       ${(isDuct && DUCT_VARIANT_KINDS.has(c.kind)) ? `<select data-cvar="${i}" title="同心／偏心" style="width:64px">
+         <option value="conc" ${(c.variant ?? 'conc') === 'conc' ? 'selected' : ''}>同心</option>
+         <option value="ecc" ${c.variant === 'ecc' ? 'selected' : ''}>偏心</option>
+       </select>` : ''}
        <button class="pane-x" data-cdel="${i}" title="刪除">✕</button>
      </div>`).join('');
   const compOpts = compKinds.map((c) => `<option value="${c.kind}">${c.name}</option>`).join('');
@@ -1451,6 +1491,13 @@ function renderPipeProps(index) {
     pushUndo();
     pipe.components[+inp.dataset.cat].at =
       Math.max(0.2, Math.min(fromDisp(inp.value), pipeLength(pipe) - 0.2));
+    rebuildAllPipes();
+    selectPipe(index);
+  }));
+  propBody.querySelectorAll('[data-cvar]').forEach((sel) => sel.addEventListener('change', () => {
+    pushUndo();
+    // 同心存 undefined（保存檔乾淨、讀取端回退同心），偏心存 'ecc'
+    pipe.components[+sel.dataset.cvar].variant = sel.value === 'ecc' ? 'ecc' : undefined;
     rebuildAllPipes();
     selectPipe(index);
   }));
@@ -2264,7 +2311,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
     if (near.pos) {
       if (!compGhost) {
         compGhost = pipe.profile === 'duct'
-          ? buildDuctFitting(pendingComp.kind, pipe.duct?.w ?? 0.8, pipe.duct?.h ?? 0.5, pipe.duct)
+          ? buildDuctFitting(pendingComp.kind, pipe.duct?.w ?? 0.8, pipe.duct?.h ?? 0.5, pipe.duct, pendingComp.variant)
           : buildPipeComponent(pendingComp.kind, pipe.r, pickComponent(pipe.spec, pipe.dn, pendingComp.kind).ftf);
         compGhost.traverse((o) => {
           if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.55; }

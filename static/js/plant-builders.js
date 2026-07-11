@@ -1050,9 +1050,32 @@ function buildCHS(len, sec, g) {
   const rg2 = new THREE.RingGeometry(ri, ro, RS); rg2.rotateX(Math.PI / 2); rg2.translate(0, len / 2, 0);
   g.add(outer, inner, new THREE.Mesh(rg1, steelMat), new THREE.Mesh(rg2, steelMat));
 }
+// 端部處理（構件端面裁切）：對已置於本地 y∈[0,len] 的斷面幾何做端面變形。
+// end 物件：{ setback:退縮(m), miter:斜接角(度,繞本地Z depth 軸) }；y0End=true 表處理起端(y=0)，否則末端(y=len)。
+// 作法：斷面沿 Y 為等斷面，長度盒兩端頂點恰在 y=0 / y=len；把該端頂點沿 Y 位移即可近似裁切。
+//   setback → 該端整體內縮；miter → 端面頂點 y 依其斷面 depth 向(本地Z)線性偏移，形成斜切面。
+function applyEndCut(geo, len, end, y0End) {
+  const s = Math.max(0, end?.setback ?? 0);
+  const ang = ((end?.miter ?? 0) * Math.PI) / 180;
+  if (s === 0 && ang === 0) return;
+  const tanA = Math.tan(ang);
+  const pos = geo.attributes.position;
+  const yEnd = y0End ? 0 : len;
+  const inward = y0End ? 1 : -1;   // 內縮方向：起端往 +Y、末端往 -Y
+  const eps = 1e-4;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    if (Math.abs(y - yEnd) > eps) continue;   // 只動該端平面上的頂點
+    const z = pos.getZ(i);                     // 斷面 depth 向位置（本地 Z）
+    pos.setY(i, y + inward * (s + z * tanA));  // 退縮 + 斜接（依 depth 位置線性）
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+}
 // 依 shape 分派建立斷面實體；本地座標：長度沿 Y、depth 沿 Z、寬沿 X。
 // 各子件幾何最後平移 (dx, len/2, dz)：len/2 讓實體自 Y=0 往上長（沿用既有慣例），dx/dz 為定位線偏移。
-function sectionSolid(len, sec = STEEL_DEFAULT, just = 'NA') {
+// ends={ e1:{setback,miter}, e2:{...} } 為兩端（e1=y0起端、e2=y末端）端部處理參數。
+function sectionSolid(len, sec = STEEL_DEFAULT, just = 'NA', ends = null) {
   const { dx, dz } = justOffset(sec, just);
   const g = new THREE.Group();
   switch (sec.shape) {
@@ -1063,7 +1086,11 @@ function sectionSolid(len, sec = STEEL_DEFAULT, just = 'NA') {
     case 'CHS': buildCHS(len, sec, g); break;
     default: buildISolid(len, sec, g); break;   // I/H（含缺 shape 者）
   }
-  g.children.forEach((c) => c.geometry.translate(dx, len / 2, dz));
+  g.children.forEach((c) => {
+    c.geometry.translate(dx, len / 2, dz);
+    if (ends?.e1) applyEndCut(c.geometry, len, ends.e1, true);
+    if (ends?.e2) applyEndCut(c.geometry, len, ends.e2, false);
+  });
   return g;
 }
 // I 型相容包裝（保留舊名；一律走 sectionSolid 分派）
@@ -1071,14 +1098,59 @@ function hSection(len, sec = STEEL_DEFAULT, just = 'NA') {
   return sectionSolid(len, sec, just);
 }
 
+// 端部參數讀取：def.end1/def.end2 = { setback, miter }。回傳 sectionSolid 用的 ends 物件（無設定則 null）。
+function endParams(def) {
+  const norm = (e) => (e && ((e.setback ?? 0) !== 0 || (e.miter ?? 0) !== 0))
+    ? { setback: e.setback ?? 0, miter: e.miter ?? 0 } : null;
+  const e1 = norm(def?.end1), e2 = norm(def?.end2);
+  return (e1 || e2) ? { e1, e2 } : null;
+}
+// 柱腳底板節點：底板 + 四角錨栓孔示意（示意幾何，掛在構件端）。
+function basePlateNode(sec, y = 0) {
+  const grp = new THREE.Group();
+  const bp = Math.max(0.42, secBounds(sec).w + 0.12);
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(bp, 0.03, bp), steelMat);
+  plate.position.y = y + 0.015;
+  grp.add(plate);
+  const boltR = 0.018, inset = bp / 2 - 0.06;
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {   // 四角錨栓示意
+    const bolt = new THREE.Mesh(new THREE.CylinderGeometry(boltR, boltR, 0.09, 8), std(0x5a636d));
+    bolt.position.set(sx * inset, y + 0.045, sz * inset);
+    grp.add(bolt);
+  }
+  return grp;
+}
+// 樑柱節點板 gusset / 端板：掛在構件端的三角節點板 + 端板示意（本地 Y 沿長度）。
+function gussetNode(sec, atY, dir) {
+  const grp = new THREE.Group();
+  const { w: B, d: D } = secBounds(sec);
+  const t = 0.012;
+  // 端板（矩形，貼端面，法線沿 Y）
+  const ep = new THREE.Mesh(new THREE.BoxGeometry(B * 1.1, t, D * 1.15), steelMat);
+  ep.position.set(0, atY, 0);
+  grp.add(ep);
+  // 三角節點板（在端面外側，示意斜撐/樑柱連接），沿本地 Z depth 平面
+  const gl = Math.min(0.35, D * 0.9 + 0.1);
+  const tri = new THREE.Shape();
+  tri.moveTo(0, 0); tri.lineTo(gl, 0); tri.lineTo(0, gl); tri.closePath();
+  const gg = new THREE.ExtrudeGeometry(tri, { depth: t, bevelEnabled: false, steps: 1 });
+  gg.translate(-t / 2, 0, 0);          // 厚度沿 X 置中
+  gg.rotateY(Math.PI / 2);             // 板面落在 Y-Z（本地長度-depth）平面
+  const gusset = new THREE.Mesh(gg, steelMat);
+  gusset.position.set(0, atY + dir * 0.01, D / 2);
+  gusset.scale.y = dir;                // 依端方向朝構件內側展開
+  grp.add(gusset);
+  return grp;
+}
+
 builders.scolumn = function ({ h }, def) {
   const sec = steelSection(def?.section);
   const just = def?.just ?? 'NA';
   const g = new THREE.Group();
-  const bp = Math.max(0.42, secBounds(sec).w + 0.12);   // 底板隨斷面外框寬
-  const base = new THREE.Mesh(new THREE.BoxGeometry(bp, 0.03, bp), steelMat);
-  base.position.y = 0.015;                    // 底板留在定位線節點，僅斷面依 just 偏移
-  g.add(base, sectionSolid(h, sec, just));
+  const node = def?.node ?? 'baseplate';
+  if (node === 'baseplate') g.add(basePlateNode(sec, 0));        // 柱腳底板（預設，沿用原底板行為）
+  else if (node === 'gusset') g.add(gussetNode(sec, 0, 1));      // 節點板示意
+  g.add(sectionSolid(h, sec, just, endParams(def)));
   return g;
 };
 
@@ -1086,7 +1158,12 @@ builders.sbeam = function ({ len, elev }, def) {
   const sec = steelSection(def?.section);
   const just = def?.just ?? 'NA';
   const g = new THREE.Group();
-  const beam = sectionSolid(len, sec, just);
+  const beam = sectionSolid(len, sec, just, endParams(def));
+  const node = def?.node ?? 'none';
+  if (node === 'gusset') {   // 兩端掛節點板示意（本地 y=0 與 y=len）
+    beam.add(gussetNode(sec, 0, 1));
+    beam.add(gussetNode(sec, len, -1));
+  }
   // 樑姿態：長度(本地Y)→世界X、斷面高 depth(本地Z)→世界Y(垂直)、翼板寬(本地X)→世界Z(水平)。
   // 用 makeBasis 讓 depth 立起來，justOffset 的 TOS/BOS(本地Z→世界Y) 才是垂直對齊、LEFT/RIGHT 才是水平。
   beam.setRotationFromMatrix(new THREE.Matrix4().makeBasis(
@@ -2096,6 +2173,60 @@ builders.plate = function ({ w, d, t }, def) {
   return g;
 };
 
+// 格柵樓板 grating：以承重橫檔(bearing bar)陣列示意，區別於實心鋼板 PANE。
+// dims {w, d, t}；def.bar_dir='w'|'d' 橫檔方向、def.bar_pitch 間距(m,預設 0.04)。
+// 外框做細邊框 + 一組沿指定方向、依 pitch 排列的細長條，另加稀疏交叉扁鋼示意。
+builders.grating = function ({ w, d, t }, def) {
+  const g = new THREE.Group();
+  const W = w ?? 2, D = d ?? 1.5, T = t ?? 0.03;
+  const mat = std(0x808b96, { metalness: 0.55, roughness: 0.6 });
+  const along = (def?.bar_dir ?? 'w') === 'd' ? 'd' : 'w';   // 承重橫檔延伸方向
+  const pitch = Math.min(Math.max(def?.bar_pitch ?? 0.04, 0.02), 0.15);
+  const barT = 0.005;                                        // 扁鋼厚
+  // 邊框（四邊細框）
+  const fr = 0.02;
+  for (const [bw, bd, bx, bz] of [[W, fr, 0, D / 2 - fr / 2], [W, fr, 0, -(D / 2 - fr / 2)],
+    [fr, D, W / 2 - fr / 2, 0], [fr, D, -(W / 2 - fr / 2), 0]]) {
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(bw, T, bd), mat);
+    edge.position.set(bx, T / 2, bz);
+    g.add(edge);
+  }
+  // 承重橫檔（bearing bar）：沿 along 方向的細長扁鋼，依 pitch 於垂直方向排列
+  if (along === 'w') {
+    const n = Math.max(1, Math.floor(D / pitch));
+    for (let i = 0; i <= n; i++) {
+      const z = -D / 2 + (i / n) * D;
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(W, T, barT), mat);
+      bar.position.set(0, T / 2, z);
+      g.add(bar);
+    }
+    // 稀疏交叉桿（cross rod）示意
+    const m = Math.max(1, Math.floor(W / (pitch * 4)));
+    for (let j = 0; j <= m; j++) {
+      const x = -W / 2 + (j / m) * W;
+      const rod = new THREE.Mesh(new THREE.BoxGeometry(barT, T * 0.6, D), mat);
+      rod.position.set(x, T * 0.3, 0);
+      g.add(rod);
+    }
+  } else {
+    const n = Math.max(1, Math.floor(W / pitch));
+    for (let i = 0; i <= n; i++) {
+      const x = -W / 2 + (i / n) * W;
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(barT, T, D), mat);
+      bar.position.set(x, T / 2, 0);
+      g.add(bar);
+    }
+    const m = Math.max(1, Math.floor(D / (pitch * 4)));
+    for (let j = 0; j <= m; j++) {
+      const z = -D / 2 + (j / m) * D;
+      const rod = new THREE.Mesh(new THREE.BoxGeometry(W, T * 0.6, barT), mat);
+      rod.position.set(0, T * 0.3, z);
+      g.add(rod);
+    }
+  }
+  return g;
+};
+
 // -------------------------------------------------- 元件選型（spec-driven component sizing）
 // DN 名目 → 公稱直徑（mm，供 FTF 內插/查表）
 const DN_MM = { DN25: 25, DN40: 40, DN50: 50, DN80: 80, DN100: 100, DN150: 150,
@@ -2214,6 +2345,7 @@ export const ASSET_CATEGORIES = [
     { type: 'psupport', name: '管線支撐', dims: { h: 1.2, r: 0.12 }, prefix: 'PS' },
     { type: 'splat', name: '平台', dims: { w: 3, d: 2.4, elev: 3 }, prefix: 'PF' },
     { type: 'plate', name: '鋼板/樓板 PANE', dims: { w: 2, d: 1.5, t: 0.012 }, prefix: 'PL' },
+    { type: 'grating', name: '格柵樓板 GRATING', dims: { w: 2, d: 1.5, t: 0.03 }, prefix: 'GR' },
   ]},
   { name: '儀電橋架', discipline: 'elec', items: [
     { type: 'cabletray', name: '電纜橋架（直線）', dims: { w: 0.45, len: 6, elev: 3 }, prefix: 'CT' },

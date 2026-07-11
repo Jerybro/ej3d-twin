@@ -2001,6 +2001,51 @@ export function buildPipeComponent(kind, r, ftf) {
   return inner;
 }
 
+// -------------------------------------------------- 風管終端裝置（HVAC terminal：送風口/回風格柵/百葉）
+// 本地座標：X 為流向（掛在風管端/面時 setFromUnitVectors(1,0,0)→pose.dir），面板攤在 Y-Z 平面。
+// 幾何示意；尺寸由風管斷面 w/h（矩形）或 d（圓形）驅動，皆公尺 canonical。
+const ductTermMat = std(0xc4ccd4, { metalness: 0.4, roughness: 0.45 });
+const ductTermFrameMat = std(0x8a949e, { metalness: 0.5, roughness: 0.4 });
+export function buildDuctTerminal(kind, w, h, duct) {
+  const g = new THREE.Group();
+  const shape = duct?.shape ?? 'rect';
+  const d = duct?.d ?? w;
+  // 面板外框尺寸：矩形沿斷面 w×h；圓/橢圓外接方框，略放大 1.1 倍作面框
+  const fw = (shape === 'circ' ? d : w) * 1.1;      // 世界 Z（寬）
+  const fh = (shape === 'circ' ? d : h) * 1.1;      // 世界 Y（高）
+  const t = Math.max(Math.min(fw, fh) * 0.12, 0.03); // 面板厚（沿流向 X）
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(t, fh, fw), ductTermFrameMat);
+  g.add(frame);
+  if (kind === 'diffuser') {
+    // 送風口：方形擴散格柵，數層同心退縮方環（4 向擴散示意）
+    const rings = 3;
+    for (let i = 1; i <= rings; i++) {
+      const s = 1 - i / (rings + 1);
+      const ring = new THREE.Mesh(new THREE.BoxGeometry(t * (1 + i * 0.5), fh * s, fw * s), ductTermMat);
+      ring.position.x = t * 0.5 + t * i * 0.25;      // 逐層向流出側凸出
+      g.add(ring);
+    }
+  } else if (kind === 'grille') {
+    // 回風格柵：一排水平葉片
+    const n = 6;
+    for (let i = 0; i < n; i++) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(t * 0.6, fh / n * 0.55, fw * 0.86), ductTermMat);
+      bar.position.set(t * 0.55, fh * (-0.5 + (i + 0.5) / n), 0);
+      g.add(bar);
+    }
+  } else if (kind === 'louvre') {
+    // 百葉：一排傾斜葉片（擋雨/導流示意）
+    const n = 5;
+    for (let i = 0; i < n; i++) {
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(t * 0.9, fh / n * 0.7, fw * 0.86), ductTermMat);
+      blade.position.set(t * 0.55, fh * (-0.5 + (i + 0.5) / n), 0);
+      blade.rotation.z = -0.5;                        // 葉片傾斜
+      g.add(blade);
+    }
+  }
+  return g;
+}
+
 export const PIPE_COMPONENTS = [
   { kind: 'valve', name: '閘閥' },
   { kind: 'ball', name: '球閥' },

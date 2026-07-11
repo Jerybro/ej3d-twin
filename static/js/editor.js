@@ -4629,24 +4629,45 @@ function clearClashMarks() {
   clashMarks = [];
 }
 
-function runClashDock() {
+let clashShowCleared = false;   // 面板是否展開「本輪已解決（Cleared）」清單
+function runClashDock(fresh = false) {
   const t0 = performance.now();
-  const { clashes, capped, open, total } = runClash(sceneData, eqObjects, hiddenTags);
+  // baseline 只在 fresh（執行一次比對）時推進；被動重繪（Cleared 展開、Hold/Approve）固定拿上輪 baseline 比對且不寫回，
+  // 否則首次 render 後 lastClashKeys 已等於當前 keys，一互動就會 prev===cur → NEW/Cleared 全歸零。
+  const prevKeys = sceneData.lastClashKeys;
+  const { clashes, capped, open, total, cleared } = runClash(sceneData, eqObjects, hiddenTags, undefined, prevKeys, fresh);
   const ms = Math.round(performance.now() - t0);
   const n = { physical: 0, touch: 0, clearance: 0 };
-  for (const c of clashes) if (n[c.type] !== undefined) n[c.type]++;
+  let nNew = 0, nPersist = 0, nInsul = 0;
+  for (const c of clashes) {
+    if (n[c.type] !== undefined) n[c.type]++;
+    if (c.lifecycle === 'new') nNew++; else if (c.lifecycle === 'persistent') nPersist++;
+    if (c.insul) nInsul++;
+  }
+  const clearedList = cleared ?? [];
   document.getElementById('clash-summary').textContent =
-    `Physical ${n.physical}｜Touch ${n.touch}｜Clearance ${n.clearance}　未處理 ${open}/${total}（${ms}ms${capped ? '，已截斷' : ''}）`;
+    `Physical ${n.physical}｜Touch ${n.touch}｜Clearance ${n.clearance}　New ${nNew}／Persist ${nPersist}${nInsul ? `／保溫 ${nInsul}` : ''}${clearedList.length ? `／已解 ${clearedList.length}` : ''}　未處理 ${open}/${total}（${ms}ms${capped ? '，已截斷' : ''}）`;
   document.getElementById('clash-count').textContent = `　${clashes.length} 筆`;
   const list = document.getElementById('clash-list');
   const CB = { physical: ['#d9534f', 'Physical'], touch: ['#e0a800', 'Touch'], clearance: ['#4a90d9', 'Clearance'] };
   const SB = { held: ['#8e6bd6', 'HELD'], approved: ['#3fae6b', 'APPROVED'] };
+  const LB = { new: ['#c0392b', 'NEW'], persistent: ['#6b7785', 'PERSIST'] };   // lifecycle 小標籤
   const badge = (bg, txt) => `<span style="display:inline-block;padding:1px 6px;border-radius:4px;background:${bg};color:#fff;font-size:10px;font-weight:600">${txt}</span>`;
-  list.innerHTML = clashes.length ? clashes.map((c, i) => {
+  // 本輪已解決（Cleared）：上輪有、本輪消失者。以可折疊區塊列於清單頂。
+  const clearedHead = clearedList.length
+    ? `<div id="clash-cleared-toggle" style="padding:4px 8px;cursor:pointer;color:var(--dim);font-size:11px;border-bottom:1px solid var(--line)">${clashShowCleared ? '▾' : '▸'} 本輪已解決 ${clearedList.length} 筆（Cleared）</div>`
+      + (clashShowCleared ? clearedList.map((k) => {
+          const disp = k.startsWith('S|') ? k.slice(2) + '（軟）' : k;
+          return `<div class="clash-row" style="opacity:0.6">${badge('#3fae6b', 'CLEARED')}<span style="color:var(--dim)">${disp}</span></div>`;
+        }).join('') : '')
+    : '';
+  list.innerHTML = clearedHead + (clashes.length ? clashes.map((c, i) => {
     const cb = CB[c.type] ?? ['#888', c.type];
+    const lb = LB[c.lifecycle];
     return `<div class="clash-row" data-ci="${i}" style="opacity:${c.status === 'approved' ? 0.5 : 1}">
       ${badge(cb[0], cb[1])}
-      <span style="color:var(--dim);font-family:monospace;font-size:11px" title="遮蔽碼 Hard/Soft">${c.code}</span>
+      ${lb ? badge(lb[0], lb[1]) : ''}
+      <span style="color:var(--dim);font-family:monospace;font-size:11px" title="遮蔽碼 Hard/Soft/Insul(I=保溫)">${c.code}</span>
       <span>${c.a}</span><span>${c.b}</span>
       <span style="color:var(--dim)">(${fmtLen(c.point.x, false)}, ${fmtLen(c.point.z, false)}) ${unitLabel()}</span>
       ${SB[c.status] ? badge(SB[c.status][0], SB[c.status][1]) : ''}
@@ -4655,7 +4676,8 @@ function runClashDock() {
         <button data-appr="${i}" class="pane-x" title="Approve（核可 by-design，抑制）">✓</button>
       </span>
     </div>`;
-  }).join('') : '<div style="padding:14px;color:var(--dim)">無碰撞——場景乾淨</div>';
+  }).join('') : (clearedHead ? '' : '<div style="padding:14px;color:var(--dim)">無碰撞——場景乾淨</div>'));
+  document.getElementById('clash-cleared-toggle')?.addEventListener('click', () => { clashShowCleared = !clashShowCleared; runClashDock(); });
   clashDock.classList.add('show');
   const setStatus = (i, st) => {
     const c = clashes[i];
@@ -4668,8 +4690,8 @@ function runClashDock() {
   };
   list.querySelectorAll('[data-hold]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); setStatus(+b.dataset.hold, 'held'); }));
   list.querySelectorAll('[data-appr]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); setStatus(+b.dataset.appr, 'approved'); }));
-  list.querySelectorAll('.clash-row').forEach((row) => row.addEventListener('click', () => {
-    list.querySelectorAll('.clash-row').forEach((r) => r.classList.toggle('selected', r === row));
+  list.querySelectorAll('.clash-row[data-ci]').forEach((row) => row.addEventListener('click', () => {
+    list.querySelectorAll('.clash-row[data-ci]').forEach((r) => r.classList.toggle('selected', r === row));
     const c = clashes[+row.dataset.ci];
     clearClashMarks();
     for (const tag of [c.a, c.b]) {
@@ -4687,7 +4709,7 @@ function runClashDock() {
     frameBox(box, camera.position.clone().sub(controls.target).normalize());
   }));
 }
-document.getElementById('btn-clash-run').addEventListener('click', runClashDock);
+document.getElementById('btn-clash-run').addEventListener('click', () => runClashDock(true));
 document.getElementById('clash-close').addEventListener('click', () => {
   clashDock.classList.remove('show');
   clearClashMarks();

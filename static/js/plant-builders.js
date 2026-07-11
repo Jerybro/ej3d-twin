@@ -865,11 +865,46 @@ export function buildPrim(p) {
   } else if (p.kind === 'ctor') {
     // CTOR 圓環／彎頭：環中心半徑 r、管半徑 rt、弧角 ang（度）
     mesh = new THREE.Mesh(new THREE.TorusGeometry(d.r ?? 0.9, d.rt ?? 0.2, 16, 28, (d.ang ?? 90) * Math.PI / 180), std(0x9aa7b4));
+  } else if (p.kind === 'extr') {
+    // EXTR 擠出：沿 Y 擠出多邊形截面。dims.poly=[[x,z],...] 用之，否則以正 sides 邊形（半徑 r）
+    const shape = new THREE.Shape();
+    let poly = d.poly;
+    if (!Array.isArray(poly) || poly.length < 3) {
+      const sides = Math.max(3, Math.round(d.sides ?? 6));
+      const r = d.r ?? 0.8;
+      poly = [];
+      for (let i = 0; i < sides; i++) {
+        const a = Math.PI / 2 + (i * 2 * Math.PI) / sides;   // 頂點朝上起點
+        poly.push([Math.cos(a) * r, Math.sin(a) * r]);
+      }
+    }
+    shape.moveTo(poly[0][0], poly[0][1]);
+    for (let i = 1; i < poly.length; i++) shape.lineTo(poly[i][0], poly[i][1]);
+    shape.closePath();
+    const h = d.h ?? 2;
+    const g = new THREE.ExtrudeGeometry(shape, { depth: h, bevelEnabled: false });
+    // ExtrudeGeometry 在 XY 平面擠向 +Z；轉成沿 +Y 由 y=0 往上長
+    g.rotateX(-Math.PI / 2);
+    mesh = new THREE.Mesh(g, std(0x9aa7b4));
+  } else if (p.kind === 'revo') {
+    // REVO 迴轉：側輪廓繞 Y 迴轉。dims.prof=[[x,y],...] 用之；否則生 (r,0)→(0,h) 之 1/4 橢圓（碟形封頭）
+    let prof = d.prof;
+    if (!Array.isArray(prof) || prof.length < 2) {
+      const r = d.r ?? 1, h = d.h ?? 1, n = 12;
+      prof = [];
+      for (let i = 0; i <= n; i++) {
+        const t = (i / n) * (Math.PI / 2);
+        prof.push([Math.cos(t) * r, Math.sin(t) * h]);   // x=半徑, y=高
+      }
+    }
+    const pts = prof.map(([x, y]) => new THREE.Vector2(x, y));
+    const g = new THREE.LatheGeometry(pts, Math.max(3, Math.round(d.seg ?? 24)));
+    mesh = new THREE.Mesh(g, std(0x9aa7b4));
   } else {
     mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), std(0x8a97a5));
   }
   mesh.position.set(...(p.pos ?? [0, 0, 0]));
-  mesh.rotation.y = p.rot_y ?? 0;
+  mesh.rotation.set(p.rot_x ?? 0, p.rot_y ?? 0, p.rot_z ?? 0);
   return mesh;
 }
 
@@ -886,91 +921,372 @@ builders.assembly = function (_dims, def) {
 const steelMat = std(0x9aa4ad, { metalness: 0.5, roughness: 0.55 });
 // 標準鋼構斷面目錄（對標 E3D Structural section catalogue）——真實 mm 尺寸(EN/UK)
 // depth=斷面高 D，flange=翼板寬 B，web=腹板厚 tw，tf=翼板厚（單位 mm，用時 /1000）
+// shape 欄位（向後相容：I/H 型皆標 shape:'I'，缺 shape 者一律視為 'I'）：
+//   I  → I/H 型鋼：{depth,flange,web(tw),tf}
+//   L  → 角鋼：    {shape:'L',depth,flange,t}（等/不等邊，depth=長邊、flange=短邊、t=肢厚）
+//   C  → 槽鋼PFC： {shape:'C',depth,flange,web(tw),tf}（腹板+同側上下翼板）
+//   RHS→ 矩形中空： {shape:'RHS',depth,flange,t}（depth 沿 Z、flange 沿 X、t=壁厚）
+//   SHS→ 方形中空： {shape:'SHS',side,t}
+//   CHS→ 圓形中空： {shape:'CHS',od,t}（od=外徑）
 export const STEEL_SECTIONS = [
-  { code: 'IPE200', depth: 200, flange: 100, web: 5.6, tf: 8.5 },
-  { code: 'IPE300', depth: 300, flange: 150, web: 7.1, tf: 10.7 },
-  { code: 'IPE400', depth: 400, flange: 180, web: 8.6, tf: 13.5 },
-  { code: 'IPE500', depth: 500, flange: 200, web: 10.2, tf: 16 },
-  { code: 'HEA300', depth: 290, flange: 300, web: 8.5, tf: 14 },
-  { code: 'HEB200', depth: 200, flange: 200, web: 9, tf: 15 },
-  { code: 'HEB300', depth: 300, flange: 300, web: 11, tf: 19 },
-  { code: 'HEB400', depth: 400, flange: 300, web: 13.5, tf: 24 },
-  { code: 'UB305x165x40', depth: 303.4, flange: 165, web: 6, tf: 10.2 },
-  { code: 'UC254x254x73', depth: 254.1, flange: 254.6, web: 8.6, tf: 14.2 },
+  { code: 'IPE200', shape: 'I', depth: 200, flange: 100, web: 5.6, tf: 8.5 },
+  { code: 'IPE300', shape: 'I', depth: 300, flange: 150, web: 7.1, tf: 10.7 },
+  { code: 'IPE400', shape: 'I', depth: 400, flange: 180, web: 8.6, tf: 13.5 },
+  { code: 'IPE500', shape: 'I', depth: 500, flange: 200, web: 10.2, tf: 16 },
+  { code: 'HEA300', shape: 'I', depth: 290, flange: 300, web: 8.5, tf: 14 },
+  { code: 'HEB200', shape: 'I', depth: 200, flange: 200, web: 9, tf: 15 },
+  { code: 'HEB300', shape: 'I', depth: 300, flange: 300, web: 11, tf: 19 },
+  { code: 'HEB400', shape: 'I', depth: 400, flange: 300, web: 13.5, tf: 24 },
+  { code: 'UB305x165x40', shape: 'I', depth: 303.4, flange: 165, web: 6, tf: 10.2 },
+  { code: 'UC254x254x73', shape: 'I', depth: 254.1, flange: 254.6, web: 8.6, tf: 14.2 },
+  // 角鋼 L（等邊）
+  { code: 'L100x100x10', shape: 'L', depth: 100, flange: 100, t: 10 },
+  { code: 'L150x150x15', shape: 'L', depth: 150, flange: 150, t: 15 },
+  // 槽鋼 PFC（歐規 channel）
+  { code: 'PFC200x90', shape: 'C', depth: 200, flange: 90, web: 7, tf: 12.5 },
+  { code: 'PFC300x100', shape: 'C', depth: 300, flange: 100, web: 9, tf: 16.5 },
+  // 矩形中空 RHS
+  { code: 'RHS200x100x8', shape: 'RHS', depth: 200, flange: 100, t: 8 },
+  // 方形中空 SHS
+  { code: 'SHS150x150x8', shape: 'SHS', side: 150, t: 8 },
+  // 圓形中空 CHS
+  { code: 'CHS168x8', shape: 'CHS', od: 168.3, t: 8 },
 ];
 const STEEL_DEFAULT = STEEL_SECTIONS[6];   // HEB300 為預設（近似原本寫死斷面）
 export function steelSection(code) {
   return STEEL_SECTIONS.find((s) => s.code === code) ?? STEEL_DEFAULT;
 }
-function hSection(len, sec = STEEL_DEFAULT) {
-  // 沿 Y 軸的 I/H 型鋼（柱姿態），樑用旋轉擺放；斷面尺寸 mm→m
+// 依 shape 產生人類可讀的斷面尺寸描述（mm）。各 shape 只用自己有的欄位，
+// 避免對 I/H-only 的 depth/flange/web/tf 一律內插造成 undefined（QA major）。
+export function sectionDesc(sec) {
+  const s = sec ?? STEEL_DEFAULT;
+  switch (s.shape) {
+    case 'CHS': return `⌀${s.od}×t${s.t}`;
+    case 'SHS': return `${s.side}×${s.side}×t${s.t}`;
+    case 'RHS': return `${s.depth}×${s.flange}×t${s.t}`;
+    case 'L': return `L${s.depth}×${s.flange}×${s.t}`;
+    case 'C': return `C D${s.depth}×B${s.flange}｜tw${s.web}／tf${s.tf}`;
+    default: return `D${s.depth}×B${s.flange}｜tw${s.web}／tf${s.tf}`;  // I/H
+  }
+}
+// 定位線 Justification（對標 E3D P-line）：斷面在其斷面平面內偏移，使指定基準貼定位線。
+// hSection 本地座標：長度沿 Y，斷面高 depth 沿 Z（頂面 +Z），翼板寬 flange 沿 X。
+// NA=形心（不偏移）；CTOP/TOS=頂面貼線（往 -Z 移 D/2）；CBOT/BOS=底面貼線（往 +Z 移 D/2）；
+// LEFT/RIGHT=翼板邊貼線（沿 X ±B/2）。柱直接用此本地偏移；樑旋轉後偏移隨之轉向，方向自動正確。
+// 斷面外框 bounding（本地斷面平面：width 沿 X、height/depth 沿 Z），單位 m。
+// 各 shape 以其外框而非翼板寬決定定位偏移，L/C/hollow 才會貼對邊。
+function secBounds(sec) {
+  switch (sec.shape) {
+    case 'L': return { w: sec.flange / 1000, d: sec.depth / 1000 };
+    case 'C': return { w: sec.flange / 1000, d: sec.depth / 1000 };
+    case 'RHS': return { w: sec.flange / 1000, d: sec.depth / 1000 };
+    case 'SHS': return { w: sec.side / 1000, d: sec.side / 1000 };
+    case 'CHS': return { w: sec.od / 1000, d: sec.od / 1000 };
+    default: return { w: sec.flange / 1000, d: sec.depth / 1000 };  // I/H
+  }
+}
+function justOffset(sec, just = 'NA') {
+  const { w: B, d: D } = secBounds(sec);
+  switch (just) {
+    case 'CTOP': case 'TOS': return { dx: 0, dz: -D / 2 };  // 頂面對齊：斷面下移
+    case 'CBOT': case 'BOS': return { dx: 0, dz: D / 2 };   // 底面對齊：斷面上移
+    case 'LEFT': return { dx: B / 2, dz: 0 };               // 左緣對齊
+    case 'RIGHT': return { dx: -B / 2, dz: 0 };             // 右緣對齊
+    default: return { dx: 0, dz: 0 };                       // NA：形心
+  }
+}
+// I/H 型：腹板 + 上下兩翼板（本地：長度沿 Y、depth 沿 Z、翼板寬沿 X）
+function buildISolid(len, sec, g) {
   const D = sec.depth / 1000, B = sec.flange / 1000, tw = sec.web / 1000, tf = sec.tf / 1000;
-  const g = new THREE.Group();
   const web = new THREE.Mesh(new THREE.BoxGeometry(tw, len, D - 2 * tf), steelMat);
   const f1 = new THREE.Mesh(new THREE.BoxGeometry(B, len, tf), steelMat);
   f1.position.z = (D - tf) / 2;
   const f2 = f1.clone();
   f2.position.z = -(D - tf) / 2;
   g.add(web, f1, f2);
-  g.children.forEach((c) => c.geometry.translate(0, len / 2, 0));
+}
+// 角鋼 L：兩片板成 L（水平肢在底 -Z、垂直肢在左 -X）；形心近似置中處理，外框以 bounding 為準
+function buildLSolid(len, sec, g) {
+  const D = sec.depth / 1000, B = sec.flange / 1000, t = sec.t / 1000;
+  // 垂直肢（沿 Z，厚度沿 X）
+  const legV = new THREE.Mesh(new THREE.BoxGeometry(t, len, D), steelMat);
+  legV.position.set(-B / 2 + t / 2, 0, 0);
+  // 水平肢（沿 X，厚度沿 Z）——扣掉與垂直肢重疊段
+  const legH = new THREE.Mesh(new THREE.BoxGeometry(B - t, len, t), steelMat);
+  legH.position.set(t / 2, 0, -D / 2 + t / 2);
+  g.add(legV, legH);
+}
+// 槽鋼 C(PFC)：腹板（在一側 -X）+ 同側上下兩翼板（往 +X 伸出）
+function buildCSolid(len, sec, g) {
+  const D = sec.depth / 1000, B = sec.flange / 1000, tw = sec.web / 1000, tf = sec.tf / 1000;
+  const web = new THREE.Mesh(new THREE.BoxGeometry(tw, len, D), steelMat);
+  web.position.set(-B / 2 + tw / 2, 0, 0);
+  const f1 = new THREE.Mesh(new THREE.BoxGeometry(B - tw, len, tf), steelMat);
+  f1.position.set(tw / 2, 0, (D - tf) / 2);
+  const f2 = f1.clone();
+  f2.position.z = -(D - tf) / 2;
+  g.add(web, f1, f2);
+}
+// 矩形/方形中空 RHS/SHS：四片薄板拼成殼（中空看得出來）
+function buildHollowRect(len, W, D, t, g) {
+  const top = new THREE.Mesh(new THREE.BoxGeometry(W, len, t), steelMat);
+  top.position.z = D / 2 - t / 2;
+  const bot = top.clone(); bot.position.z = -(D / 2 - t / 2);
+  const left = new THREE.Mesh(new THREE.BoxGeometry(t, len, D - 2 * t), steelMat);
+  left.position.x = -(W / 2 - t / 2);
+  const right = left.clone(); right.position.x = W / 2 - t / 2;
+  g.add(top, bot, left, right);
+}
+// 圓形中空 CHS：外/內兩同心圓柱（沿 Y），兩端加環形蓋，示意中空管壁
+function buildCHS(len, sec, g) {
+  const ro = sec.od / 2000, t = sec.t / 1000, ri = Math.max(0.001, ro - t);
+  const RS = 24;
+  const outer = new THREE.Mesh(new THREE.CylinderGeometry(ro, ro, len, RS, 1, true), steelMat);
+  const inner = new THREE.Mesh(new THREE.CylinderGeometry(ri, ri, len, RS, 1, true), steelMat);
+  // 端環用「純幾何」變換：躺平(法線沿Y)＋各自移到本地 ∓len/2，之後由 sectionSolid 的
+  // 統一 geometry.translate(dx,len/2,dz) 帶到兩端（y=0 與 y=len）。不可用 mesh.rotation/position，
+  // 否則會被那一輪 geometry.translate 的 len/2 旋轉污染而飄離管軸；分開建 geometry 也避免共用被重複平移。
+  const rg1 = new THREE.RingGeometry(ri, ro, RS); rg1.rotateX(-Math.PI / 2); rg1.translate(0, -len / 2, 0);
+  const rg2 = new THREE.RingGeometry(ri, ro, RS); rg2.rotateX(Math.PI / 2); rg2.translate(0, len / 2, 0);
+  g.add(outer, inner, new THREE.Mesh(rg1, steelMat), new THREE.Mesh(rg2, steelMat));
+}
+// 端部處理（構件端面裁切）：對已置於本地 y∈[0,len] 的斷面幾何做端面變形。
+// end 物件：{ setback:退縮(m), miter:斜接角(度,繞本地Z depth 軸) }；y0End=true 表處理起端(y=0)，否則末端(y=len)。
+// 作法：斷面沿 Y 為等斷面，長度盒兩端頂點恰在 y=0 / y=len；把該端頂點沿 Y 位移即可近似裁切。
+//   setback → 該端整體內縮；miter → 端面頂點 y 依其斷面 depth 向(本地Z)線性偏移，形成斜切面。
+function applyEndCut(geo, len, end, y0End) {
+  const s = Math.max(0, end?.setback ?? 0);
+  const ang = ((end?.miter ?? 0) * Math.PI) / 180;
+  if (s === 0 && ang === 0) return;
+  const tanA = Math.tan(ang);
+  const pos = geo.attributes.position;
+  const yEnd = y0End ? 0 : len;
+  const inward = y0End ? 1 : -1;   // 內縮方向：起端往 +Y、末端往 -Y
+  const eps = 1e-4;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    if (Math.abs(y - yEnd) > eps) continue;   // 只動該端平面上的頂點
+    const z = pos.getZ(i);                     // 斷面 depth 向位置（本地 Z）
+    pos.setY(i, y + inward * (s + z * tanA));  // 退縮 + 斜接（依 depth 位置線性）
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+}
+// 依 shape 分派建立斷面實體；本地座標：長度沿 Y、depth 沿 Z、寬沿 X。
+// 各子件幾何最後平移 (dx, len/2, dz)：len/2 讓實體自 Y=0 往上長（沿用既有慣例），dx/dz 為定位線偏移。
+// ends={ e1:{setback,miter}, e2:{...} } 為兩端（e1=y0起端、e2=y末端）端部處理參數。
+function sectionSolid(len, sec = STEEL_DEFAULT, just = 'NA', ends = null) {
+  const { dx, dz } = justOffset(sec, just);
+  const g = new THREE.Group();
+  switch (sec.shape) {
+    case 'L': buildLSolid(len, sec, g); break;
+    case 'C': buildCSolid(len, sec, g); break;
+    case 'RHS': buildHollowRect(len, sec.flange / 1000, sec.depth / 1000, sec.t / 1000, g); break;
+    case 'SHS': buildHollowRect(len, sec.side / 1000, sec.side / 1000, sec.t / 1000, g); break;
+    case 'CHS': buildCHS(len, sec, g); break;
+    default: buildISolid(len, sec, g); break;   // I/H（含缺 shape 者）
+  }
+  g.children.forEach((c) => {
+    c.geometry.translate(dx, len / 2, dz);
+    if (ends?.e1) applyEndCut(c.geometry, len, ends.e1, true);
+    if (ends?.e2) applyEndCut(c.geometry, len, ends.e2, false);
+  });
   return g;
+}
+// I 型相容包裝（保留舊名；一律走 sectionSolid 分派）
+function hSection(len, sec = STEEL_DEFAULT, just = 'NA') {
+  return sectionSolid(len, sec, just);
+}
+
+// 端部參數讀取：def.end1/def.end2 = { setback, miter }。回傳 sectionSolid 用的 ends 物件（無設定則 null）。
+function endParams(def) {
+  const norm = (e) => (e && ((e.setback ?? 0) !== 0 || (e.miter ?? 0) !== 0))
+    ? { setback: e.setback ?? 0, miter: e.miter ?? 0 } : null;
+  const e1 = norm(def?.end1), e2 = norm(def?.end2);
+  return (e1 || e2) ? { e1, e2 } : null;
+}
+// 柱腳底板節點：底板 + 四角錨栓孔示意（示意幾何，掛在構件端）。
+function basePlateNode(sec, y = 0) {
+  const grp = new THREE.Group();
+  const bp = Math.max(0.42, secBounds(sec).w + 0.12);
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(bp, 0.03, bp), steelMat);
+  plate.position.y = y + 0.015;
+  grp.add(plate);
+  const boltR = 0.018, inset = bp / 2 - 0.06;
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {   // 四角錨栓示意
+    const bolt = new THREE.Mesh(new THREE.CylinderGeometry(boltR, boltR, 0.09, 8), std(0x5a636d));
+    bolt.position.set(sx * inset, y + 0.045, sz * inset);
+    grp.add(bolt);
+  }
+  return grp;
+}
+// 樑柱節點板 gusset / 端板：掛在構件端的三角節點板 + 端板示意（本地 Y 沿長度）。
+function gussetNode(sec, atY, dir) {
+  const grp = new THREE.Group();
+  const { w: B, d: D } = secBounds(sec);
+  const t = 0.012;
+  // 端板（矩形，貼端面，法線沿 Y）
+  const ep = new THREE.Mesh(new THREE.BoxGeometry(B * 1.1, t, D * 1.15), steelMat);
+  ep.position.set(0, atY, 0);
+  grp.add(ep);
+  // 三角節點板（在端面外側，示意斜撐/樑柱連接），沿本地 Z depth 平面
+  const gl = Math.min(0.35, D * 0.9 + 0.1);
+  const tri = new THREE.Shape();
+  tri.moveTo(0, 0); tri.lineTo(gl, 0); tri.lineTo(0, gl); tri.closePath();
+  const gg = new THREE.ExtrudeGeometry(tri, { depth: t, bevelEnabled: false, steps: 1 });
+  gg.translate(-t / 2, 0, 0);          // 厚度沿 X 置中
+  gg.rotateY(Math.PI / 2);             // 板面落在 Y-Z（本地長度-depth）平面
+  const gusset = new THREE.Mesh(gg, steelMat);
+  gusset.position.set(0, atY + dir * 0.01, D / 2);
+  gusset.scale.y = dir;                // 依端方向朝構件內側展開
+  grp.add(gusset);
+  return grp;
 }
 
 builders.scolumn = function ({ h }, def) {
   const sec = steelSection(def?.section);
+  const just = def?.just ?? 'NA';
   const g = new THREE.Group();
-  const bp = Math.max(0.42, sec.flange / 1000 + 0.12);   // 底板隨翼板寬
-  const base = new THREE.Mesh(new THREE.BoxGeometry(bp, 0.03, bp), steelMat);
-  base.position.y = 0.015;
-  g.add(base, hSection(h, sec));
+  const node = def?.node ?? 'baseplate';
+  if (node === 'baseplate') g.add(basePlateNode(sec, 0));        // 柱腳底板（預設，沿用原底板行為）
+  else if (node === 'gusset') g.add(gussetNode(sec, 0, 1));      // 節點板示意
+  g.add(sectionSolid(h, sec, just, endParams(def)));
   return g;
 };
 
 builders.sbeam = function ({ len, elev }, def) {
   const sec = steelSection(def?.section);
+  const just = def?.just ?? 'NA';
   const g = new THREE.Group();
-  const beam = hSection(len, sec);
-  beam.rotation.z = -Math.PI / 2;             // 轉水平（沿 +X）
+  const beam = sectionSolid(len, sec, just, endParams(def));
+  const node = def?.node ?? 'none';
+  if (node === 'gusset') {   // 兩端掛節點板示意（本地 y=0 與 y=len）
+    beam.add(gussetNode(sec, 0, 1));
+    beam.add(gussetNode(sec, len, -1));
+  }
+  // 樑姿態：長度(本地Y)→世界X、斷面高 depth(本地Z)→世界Y(垂直)、翼板寬(本地X)→世界Z(水平)。
+  // 用 makeBasis 讓 depth 立起來，justOffset 的 TOS/BOS(本地Z→世界Y) 才是垂直對齊、LEFT/RIGHT 才是水平。
+  beam.setRotationFromMatrix(new THREE.Matrix4().makeBasis(
+    new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0)));
   beam.position.set(-len / 2, elev ?? 3, 0);
   g.add(beam);
   return g;
 };
 
-builders.stairs = function ({ w, h, run }) {
+// 樓梯：依總高與踏步 going 自動算級數(工安 rise≈0.18m)，畫踏板(格柵)+斜梁(stringer)
+// +兩側斜扶手(頂桿1.0m/中桿+立柱)+頂端承接平台+踢腳板。
+// dims {w:梯寬, h:總高, run:水平投影}(沿用既有 key)，可另給 {going:單階水平, rise:單階高}。
+builders.stairs = function ({ w, h, run, going, rise }) {
   const g = new THREE.Group();
-  const n = Math.max(3, Math.round(h / 0.2));
+  const W = Math.max(0.6, w ?? 1.0);
+  const H = Math.max(0.4, h ?? 3);
+  // 級數：優先用給定 rise，否則以 ~0.18m/級 推算（工安 165~190mm）
+  const stepRise = rise && rise > 0.05 ? rise : 0.18;
+  const n = Math.max(2, Math.round(H / stepRise));
+  const r = H / n;                              // 實際每級升高
+  const RUN = Math.max(0.8, run ?? n * (going && going > 0.15 ? going : 0.28));
+  const gRun = going && going > 0.15 ? going : RUN / n;   // 每級水平投影(踏面深)
+  const railH = 1.0;                            // 扶手頂桿高（斜面法向約1.0~1.1m）
+  const stringerH = 0.22, stringerT = 0.04;     // 斜梁斷面
+  const treadTh = 0.045, tnose = 0.03;          // 踏板厚、突沿
+  const x0 = -RUN / 2;                          // 底階前緣 x
+
+  // --- 踏板（格柵條紋示意：主板+兩道防滑條）
+  const treadDepth = gRun + tnose;
   for (let i = 0; i < n; i++) {
-    const step = new THREE.Mesh(new THREE.BoxGeometry(run / n, 0.05, w), steelMat);
-    step.position.set(-run / 2 + (i + 0.5) * (run / n), (i + 1) * (h / n), 0);
-    g.add(step);
+    const cx = x0 + i * gRun + treadDepth / 2 - tnose;
+    const cy = (i + 1) * r - treadTh / 2;
+    const tread = new THREE.Mesh(new THREE.BoxGeometry(treadDepth, treadTh, W), steelMat);
+    tread.position.set(cx, cy, 0);
+    g.add(tread);
+    for (const gz of [-W * 0.28, W * 0.28]) {   // 防滑條
+      const grip = new THREE.Mesh(new THREE.BoxGeometry(treadDepth * 0.9, treadTh + 0.012, 0.03), steelMat);
+      grip.position.set(cx, cy + 0.004, gz);
+      g.add(grip);
+    }
   }
-  for (const side of [-1, 1]) {  // 斜樑
-    const s = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(run, h), 0.16, 0.05), steelMat);
-    s.position.set(0, h / 2, side * (w / 2 + 0.03));
-    s.rotation.z = Math.atan2(h, run);
+
+  // --- 兩側斜梁 stringer（沿斜線）
+  const slopeLen = Math.hypot(RUN, H);
+  const ang = Math.atan2(H, RUN);
+  const sideZ = W / 2 + stringerT / 2;
+  for (const side of [-1, 1]) {
+    const s = new THREE.Mesh(new THREE.BoxGeometry(slopeLen + 0.12, stringerH, stringerT), steelMat);
+    s.position.set(0, H / 2 - stringerH * 0.15, side * sideZ);
+    s.rotation.z = ang;
     g.add(s);
-    const rail = s.clone();
-    rail.position.y = h / 2 + 0.95;
-    rail.scale.set(1, 0.25, 1);
-    g.add(rail);
+  }
+
+  // --- 斜向扶手（兩側）：立柱 + 頂桿 + 中桿
+  const nPost = Math.max(2, Math.round(RUN / 1.4) + 1);
+  const railTopGeo = new THREE.CylinderGeometry(0.022, 0.022, slopeLen, 8);
+  const railMidGeo = new THREE.CylinderGeometry(0.018, 0.018, slopeLen, 8);
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < nPost; i++) {
+      const t = i / (nPost - 1);
+      const px = x0 + t * RUN;
+      const py = t * H + 0.02;                  // 沿斜面踏緣高度
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, railH + 0.02, 8), steelMat);
+      post.position.set(px, py + railH / 2, side * sideZ);
+      g.add(post);
+    }
+    for (const [geo, off] of [[railTopGeo, railH], [railMidGeo, railH * 0.52]]) {
+      const rail = new THREE.Mesh(geo, steelMat);
+      rail.position.set(0, H / 2 + off, side * sideZ);
+      rail.rotation.z = ang + Math.PI / 2;      // 圓柱本地Y沿斜線
+      g.add(rail);
+    }
+  }
+
+  // --- 頂端承接平台（格柵）+ 踢腳板 + 平台護欄立柱
+  const platD = Math.max(0.9, gRun + 0.6);
+  const platX = RUN / 2 + platD / 2 - tnose;
+  const platY = H;
+  const plat = new THREE.Mesh(new THREE.BoxGeometry(platD, treadTh + 0.01, W), std(0x77828d, { roughness: 0.9 }));
+  plat.position.set(platX, platY - treadTh / 2, 0);
+  g.add(plat);
+  for (const side of [-1, 1]) {                 // 平台踢腳板
+    const toe = new THREE.Mesh(new THREE.BoxGeometry(platD, 0.1, 0.02), steelMat);
+    toe.position.set(platX, platY + 0.05, side * (W / 2));
+    g.add(toe);
+    // 平台段扶手（頂桿+中桿+立柱，接續斜扶手）
+    for (const px of [RUN / 2 + 0.03, platX + platD / 2 - 0.03]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, railH, 8), steelMat);
+      post.position.set(px, platY + railH / 2, side * sideZ);
+      g.add(post);
+    }
+    for (const off of [railH, railH * 0.52]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(platD, 0.036, 0.036), steelMat);
+      rail.position.set(platX, platY + off, side * sideZ);
+      g.add(rail);
+    }
   }
   return g;
 };
 
-builders.srail = function ({ len }) {
+// 欄杆/扶手：立柱(每~1.5m)+頂桿(預設1.1m)+中桿(~0.52×高)+踢腳板 toe board(100mm)。
+// dims {len:總長}(沿用既有 key)，可另給 {h:欄杆高}。工安：頂桿1.1m、中桿約其半、踢腳板100mm。
+builders.srail = function ({ len, h }) {
   const g = new THREE.Group();
-  const n = Math.max(2, Math.round(len / 1.5) + 1);
+  const L = Math.max(0.5, len ?? 4);
+  const railH = Math.max(0.7, h ?? 1.1);        // 頂桿高
+  const midH = railH * 0.52;
+  const n = Math.max(2, Math.round(L / 1.5) + 1);   // 立柱數（間距≤1.5m）
+  const postGeo = new THREE.CylinderGeometry(0.024, 0.024, railH, 8);
   for (let i = 0; i < n; i++) {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1.1, 8), steelMat);
-    post.position.set(-len / 2 + (i / (n - 1)) * len, 0.55, 0);
+    const post = new THREE.Mesh(postGeo, steelMat);
+    post.position.set(-L / 2 + (i / (n - 1)) * L, railH / 2, 0);
     g.add(post);
   }
-  for (const y of [1.1, 0.6]) {
-    const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, len, 8), steelMat);
+  for (const [y, rr] of [[railH, 0.022], [midH, 0.018]]) {   // 頂桿+中桿
+    const rail = new THREE.Mesh(new THREE.CylinderGeometry(rr, rr, L, 8), steelMat);
     rail.rotation.z = Math.PI / 2;
     rail.position.y = y;
     g.add(rail);
   }
+  const toe = new THREE.Mesh(new THREE.BoxGeometry(L, 0.1, 0.025), steelMat);   // 踢腳板
+  toe.position.set(0, 0.06, 0);
+  g.add(toe);
   return g;
 };
 
@@ -1307,42 +1623,148 @@ builders.safetyshower = function ({ h }) {
   return g;
 };
 
+// 直爬梯(含安全護籠)：兩立桿+橫踏桿(間距~0.3m)+2.2m以上護籠環箍(每~1.4m一環)
+// +連接環箍的縱條(cage stays)+頂端出口延伸扶手。dims {h:總高}。
+// 工安：踏桿間距≤300mm、護籠自2.2m起、環箍半徑約350~400mm。
 builders.cageladder = function ({ h }) {
   const g = new THREE.Group();
+  const H = Math.max(0.6, h ?? 6);
   const railMat = std(0x8d99a6);
-  for (const sx of [-0.22, 0.22]) {
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.05, h, 0.05), railMat);
-    rail.position.set(sx, h / 2, 0);
+  const cageMat = std(0xe8b83a, { metalness: 0.3, roughness: 0.6 });   // 護籠安全黃
+  const halfW = 0.22;                             // 立桿半間距
+  // 立桿（兩側，方鋼）
+  const stileTop = H + (H > 2.2 ? 1.1 : 0);       // 出口段立桿延伸（登頂護欄）
+  for (const sx of [-halfW, halfW]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.05, stileTop, 0.05), railMat);
+    rail.position.set(sx, stileTop / 2, 0);
     g.add(rail);
   }
-  const rungs = Math.floor(h / 0.3);
+  // 橫踏桿（~0.3m 間距）
+  const step = 0.3;
+  const rungs = Math.floor(H / step);
+  const rungGeo = new THREE.CylinderGeometry(0.016, 0.016, halfW * 2 + 0.04, 8);
   for (let i = 1; i <= rungs; i++) {
-    const rung = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.44, 6), railMat);
+    const rung = new THREE.Mesh(rungGeo, railMat);
     rung.rotation.z = Math.PI / 2;
-    rung.position.y = i * 0.3;
+    rung.position.y = i * step;
     g.add(rung);
   }
-  for (let y = 2.2; y < h - 0.2; y += 0.6) {      // 2.2m 以上護籠圈
-    const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.02, 6, 16, Math.PI), railMat);
-    hoop.rotation.x = -Math.PI / 2;
-    hoop.position.set(0, y, 0.05);
-    g.add(hoop);
+  // 安全護籠：2.2m 以上，全環(370半徑)偏爬梯背面，每~1.4m 一環
+  const cageR = 0.37, cageStart = 2.2;
+  const hoopYs = [];
+  if (H > cageStart + 0.3) {
+    for (let y = cageStart; y <= H - 0.1; y += 1.4) hoopYs.push(y);
+    const hoopGeo = new THREE.TorusGeometry(cageR, 0.02, 6, 24);
+    for (const y of hoopYs) {
+      const hoop = new THREE.Mesh(hoopGeo, cageMat);
+      hoop.rotation.x = Math.PI / 2;             // 環面水平
+      hoop.position.set(0, y, cageR - halfW);    // 圓心偏爬梯背側，環繞人員
+      g.add(hoop);
+    }
+    // 縱條（cage stays）：連接各環箍，繞背側半圈布置 5 條
+    if (hoopYs.length >= 2) {
+      const yLo = hoopYs[0], yHi = hoopYs[hoopYs.length - 1];
+      const stayLen = yHi - yLo;
+      const stayGeo = new THREE.CylinderGeometry(0.012, 0.012, stayLen, 6);
+      const cz = cageR - halfW;                  // 環心 z
+      for (let k = 0; k < 5; k++) {
+        const a = Math.PI * (0.15 + 0.7 * (k / 4));   // 背側半圈分布
+        const stay = new THREE.Mesh(stayGeo, cageMat);
+        stay.position.set(Math.cos(a) * cageR, (yLo + yHi) / 2, cz + Math.sin(a) * cageR);
+        g.add(stay);
+      }
+    }
+    // 頂端出口延伸扶手（登頂抓握）
+    const exitTopGeo = new THREE.CylinderGeometry(0.02, 0.02, halfW * 2 + 0.04, 8);
+    const exitTop = new THREE.Mesh(exitTopGeo, railMat);
+    exitTop.rotation.z = Math.PI / 2;
+    exitTop.position.y = stileTop;
+    g.add(exitTop);
   }
   return g;
 };
 
-// -------------------------------------------------- 管線支撐＋儀電橋架（elec discipline）
-builders.psupport = function ({ h, r }) {
+// -------------------------------------------------- 管線支撐（型式庫）＋儀電橋架（elec discipline）
+// 型式庫（對標 E3D 管支撐族）：rest 鞍座承載／guide 導向含側擋／anchor 固定含底板全抱箍／
+// hanger 由上吊桿＋抱箍／trunnion 焊接凸緣支墩。psupport 的 def.stype 決定幾何，預設 rest（維持既有場景）。
+// 幾何契約：管軸沿本地 Z 通過（放置時 rot_y 對齊管向），承管中心在 y=h；底端在 y=0（editor 已依附面調好 h）。
+export const SUPPORT_TYPES = [
+  { code: 'rest', name: '鞍座 Rest（承載）' },
+  { code: 'guide', name: '導向 Guide（側擋）' },
+  { code: 'anchor', name: '固定 Anchor（底板抱箍）' },
+  { code: 'hanger', name: '吊架 Hanger（由上吊）' },
+  { code: 'trunnion', name: '凸緣 Trunnion（焊接支墩）' },
+];
+export const SUPPORT_TYPE_SET = new Set(SUPPORT_TYPES.map((s) => s.code));
+const supMat = { base: 0x55606c, post: 0x6b7683, saddle: 0x8d99a6, attach: 0x9aa5b1 };
+// U-bolt 示意：跨管半圓＋兩支腳，管軸沿 Z，故半圓落在 XY 平面、開口朝下扣住管。
+function uBolt(r, yc, g) {
+  const rad = Math.max(r * 1.15, 0.075);
+  const arc = new THREE.Mesh(new THREE.TorusGeometry(rad, 0.012, 5, 12, Math.PI), std(supMat.attach, { metalness: 0.5 }));
+  arc.position.y = yc;                            // 半環開口朝下（+Y 側為環頂）扣住管頂
+  g.add(arc);
+  for (const sx of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, rad, 8), std(supMat.attach, { metalness: 0.5 }));
+    leg.position.set(sx * rad, yc - rad / 2, 0);
+    g.add(leg);
+  }
+}
+// clamp 抱箍示意：繞管一圈的環（管軸沿 Z → 環面在 XY，繞 Z）。
+function pipeClamp(r, yc, g, color = supMat.attach) {
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(Math.max(r * 1.12, 0.07), 0.02, 6, 16), std(color, { metalness: 0.5 }));
+  ring.position.y = yc;                            // 環面預設在 XY 平面、法線沿 Z＝繞管一圈
+  g.add(ring);
+}
+builders.psupport = function ({ h, r }, def) {
   const g = new THREE.Group();
-  const base = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.06, 0.36), std(0x55606c));
+  const stype = def?.stype ?? 'rest';
+  const saddleR = Math.max(r * 1.1, 0.07);
+  const yc = h + 0.01;                             // 承管中心高
+  if (stype === 'hanger') {
+    // 吊架：由上方鋼構垂下吊桿＋抱箍夾住管（無落地支柱）。頂端在承載面（editor 令 h＝吊點下方淨距）。
+    const rodH = Math.max(h, 0.1);
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, rodH, 8), std(supMat.post));
+    rod.position.y = yc + rodH / 2;               // 從承管中心往上吊到承載面
+    const clevis = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, 0.06), std(supMat.post));
+    clevis.position.y = yc + rodH;                // 頂端吊耳
+    g.add(rod, clevis);
+    pipeClamp(r, yc, g);                           // 抱箍承管
+    return g;
+  }
+  // 落地族（rest/guide/anchor/trunnion）共用底板＋立柱
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.06, 0.36), std(supMat.base));
   base.position.y = 0.03;
   const postH = Math.max(h - 0.05, 0.1);
-  const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, postH, 0.12), std(0x6b7683));
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, postH, 0.12), std(supMat.post));
   post.position.y = postH / 2 + 0.06;
-  const saddle = new THREE.Mesh(new THREE.TorusGeometry(Math.max(r * 1.1, 0.07), 0.035, 6, 14, Math.PI), std(0x8d99a6));
-  saddle.rotation.z = Math.PI;                    // 開口朝上承管；管沿 Z 通過（放置時 rot_y 對齊管向）
-  saddle.position.y = h + 0.01;
-  g.add(base, post, saddle);
+  g.add(base, post);
+  const saddle = new THREE.Mesh(new THREE.TorusGeometry(saddleR, 0.035, 6, 14, Math.PI), std(supMat.saddle));
+  saddle.rotation.z = Math.PI;                    // 開口朝上承管
+  saddle.position.y = yc;
+  if (stype === 'trunnion') {
+    // 凸緣：短圓柱支墩由管底焊出、頂承鞍座；示意為立於柱頂的粗凸緣。
+    const stub = new THREE.Mesh(new THREE.CylinderGeometry(Math.max(r * 0.5, 0.05), Math.max(r * 0.5, 0.05), 0.18, 12), std(supMat.saddle, { metalness: 0.5 }));
+    stub.position.y = yc - 0.12;
+    g.add(stub, saddle);
+    return g;
+  }
+  g.add(saddle);
+  if (stype === 'guide') {
+    // 導向：鞍座兩側加擋板限制側向位移（管沿 Z，故擋板在 ±X）。
+    for (const sx of [-1, 1]) {
+      const guide = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.14, saddleR * 2.4), std(supMat.attach, { metalness: 0.5 }));
+      guide.position.set(sx * (saddleR + 0.02), yc + 0.02, 0);
+      g.add(guide);
+    }
+    uBolt(r, yc, g);                               // 導向常配 U-bolt 壓管
+  } else if (stype === 'anchor') {
+    // 固定：頂加銲接底座塊＋整圈抱箍鎖死三向位移。
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.22), std(supMat.base));
+    shoe.position.y = yc - 0.05;
+    g.add(shoe);
+    pipeClamp(r, yc, g, supMat.base);              // 全抱箍（深色示錨定）
+  }
+  // rest：純鞍座承載，無附件（維持既有外觀）
   return g;
 };
 
@@ -1500,8 +1922,86 @@ builders.rooffan = function ({ r, h }) {
 
 // -------------------------------------------------- 管線元件（Piping Components）
 // E3D Component Editor：閥/法蘭對/異徑管/止回閥，沿管線弧長定位
-export function buildPipeComponent(kind, r) {
+// ftf（公尺，選填）：spec/bore 選型的 face-to-face 長度。給定時把元件沿管向（本地 X）
+// 縮放到該長度取代寫死幾何長，維持徑向（Y/Z）依 r 的比例。
+// ------------------------------------------------------------ 電纜橋架自由佈線斷面渲染（profile:'tray'）
+// 沿路徑各段建 U 型槽（實底/沖孔）或梯型托盤（ladder，側牆＋橫檔），轉角以短接續盒填角。
+// 幾何一律公尺 canonical；材質走「儀電」灰藍，type 差異：ladder=橫檔、solid=實底板、perforated=實底近似＋淺色。
+// 本地座標：段沿 +Z（與矩形風管一致），quaternion 對齊流向；托盤「側牆向上」＝本地 +Y。
+const TRAY_MATS = {
+  solid: std(0x6f7b88, { metalness: 0.45, roughness: 0.5 }),
+  perforated: std(0x8794a2, { metalness: 0.4, roughness: 0.6 }),   // 沖孔近似＝實底＋淺色
+  ladder: std(0x6f7b88, { metalness: 0.45, roughness: 0.5 }),
+};
+export function trayMat(type) { return TRAY_MATS[type] ?? TRAY_MATS.solid; }
+// 側牆高與板厚：隨寬度略縮放，維持工程比例（150mm 寬→約 50mm 牆；600mm→約 75mm）。
+function trayDims(w) {
+  const sideH = Math.min(0.075, Math.max(0.045, w * 0.12));   // 側牆高（公尺）
+  const th = 0.006;                                            // 板/牆厚（公尺）
+  return { sideH, th };
+}
+// 建一段托盤（本地：長度沿 Z、寬沿 X、側牆向上 +Y）。回傳 Group。
+function buildTraySeg(w, len, type, mat) {
   const g = new THREE.Group();
+  const { sideH, th } = trayDims(w);
+  // 兩側牆（沿 Z 的長條）
+  for (const sx of [-1, 1]) {
+    const side = new THREE.Mesh(new THREE.BoxGeometry(th, sideH, len), mat);
+    side.position.set(sx * (w / 2 - th / 2), sideH / 2, 0);
+    g.add(side);
+  }
+  if (type === 'ladder') {
+    // 梯型：無底板，等距橫檔（沿 X 的短棒）連接兩側牆
+    const n = Math.max(2, Math.round(len / 0.3));
+    for (let i = 0; i <= n; i++) {
+      const rung = new THREE.Mesh(new THREE.BoxGeometry(w - th, th * 1.4, 0.03), mat);
+      rung.position.set(0, th * 0.7, -len / 2 + (len * i) / n);
+      g.add(rung);
+    }
+  } else {
+    // solid / perforated：實底板（沖孔以淺色材質近似，不逐孔建幾何以控面數）
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(w, th, len), mat);
+    floor.position.set(0, th / 2, 0);
+    g.add(floor);
+  }
+  return g;
+}
+// 建整條托盤佈線 body：沿 pts 逐段建托盤＋內角接續盒。掛進傳入的 group（由 editor 端持有 dispose）。
+export function buildTrayBody(pipe, index, group, pts) {
+  const w = pipe.tray?.w ?? 0.3;
+  const type = pipe.tray?.type ?? 'solid';
+  const mat = trayMat(type);
+  const { sideH, th } = trayDims(w);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const dir = b.clone().sub(a), len = dir.length();
+    if (len < 1e-4) continue;
+    const seg = buildTraySeg(w, len, type, mat);
+    seg.position.copy(a).addScaledVector(dir, 0.5);
+    seg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().normalize());
+    seg.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.userData.pipeIndex = index; } });
+    group.add(seg);
+    if (i < pts.length - 2) {   // 內角：自動水平彎接續盒（U 型槽轉角，含側牆與底）
+      const el = new THREE.Group();
+      const box = new THREE.Mesh(new THREE.BoxGeometry(w, th, w), mat);   // 轉角底板
+      box.position.y = th / 2;
+      el.add(box);
+      for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {         // 四邊短側牆填角
+        const wall = new THREE.Mesh(
+          dx ? new THREE.BoxGeometry(th, sideH, w) : new THREE.BoxGeometry(w, sideH, th), mat);
+        wall.position.set(dx * (w / 2 - th / 2), sideH / 2, dz * (w / 2 - th / 2));
+        el.add(wall);
+      }
+      el.position.copy(pts[i + 1]);
+      el.traverse((o) => { if (o.isMesh) o.userData.pipeIndex = index; });
+      group.add(el);
+    }
+  }
+}
+
+export function buildPipeComponent(kind, r, ftf) {
+  const inner = new THREE.Group();
+  const g = inner;
   const m = std(0xb8c2cc, { metalness: 0.35, roughness: 0.5 });
   const R = Math.max(r * 2.2, 0.16);
   if (kind === 'valve') {
@@ -1566,6 +2066,60 @@ export function buildPipeComponent(kind, r) {
     disp.position.set(0, R * 0.45, R * 0.6);
     g.add(body, disp);
   }
+  if (ftf && ftf > 1e-4) {
+    // 量目前沿管向（本地 X）幾何範圍，縮放到 ftf；徑向不變。用外層 group 包裹以套 scale.x。
+    const box = new THREE.Box3().setFromObject(inner);
+    const spanX = Math.max(box.max.x - box.min.x, 1e-4);
+    inner.scale.x = ftf / spanX;
+    const outer = new THREE.Group();
+    outer.add(inner);
+    return outer;
+  }
+  return inner;
+}
+
+// -------------------------------------------------- 風管終端裝置（HVAC terminal：送風口/回風格柵/百葉）
+// 本地座標：X 為流向（掛在風管端/面時 setFromUnitVectors(1,0,0)→pose.dir），面板攤在 Y-Z 平面。
+// 幾何示意；尺寸由風管斷面 w/h（矩形）或 d（圓形）驅動，皆公尺 canonical。
+const ductTermMat = std(0xc4ccd4, { metalness: 0.4, roughness: 0.45 });
+const ductTermFrameMat = std(0x8a949e, { metalness: 0.5, roughness: 0.4 });
+export function buildDuctTerminal(kind, w, h, duct) {
+  const g = new THREE.Group();
+  const shape = duct?.shape ?? 'rect';
+  const d = duct?.d ?? w;
+  // 面板外框尺寸：矩形沿斷面 w×h；圓/橢圓外接方框，略放大 1.1 倍作面框
+  const fw = (shape === 'circ' ? d : w) * 1.1;      // 世界 Z（寬）
+  const fh = (shape === 'circ' ? d : h) * 1.1;      // 世界 Y（高）
+  const t = Math.max(Math.min(fw, fh) * 0.12, 0.03); // 面板厚（沿流向 X）
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(t, fh, fw), ductTermFrameMat);
+  g.add(frame);
+  if (kind === 'diffuser') {
+    // 送風口：方形擴散格柵，數層同心退縮方環（4 向擴散示意）
+    const rings = 3;
+    for (let i = 1; i <= rings; i++) {
+      const s = 1 - i / (rings + 1);
+      const ring = new THREE.Mesh(new THREE.BoxGeometry(t * (1 + i * 0.5), fh * s, fw * s), ductTermMat);
+      ring.position.x = t * 0.5 + t * i * 0.25;      // 逐層向流出側凸出
+      g.add(ring);
+    }
+  } else if (kind === 'grille') {
+    // 回風格柵：一排水平葉片
+    const n = 6;
+    for (let i = 0; i < n; i++) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(t * 0.6, fh / n * 0.55, fw * 0.86), ductTermMat);
+      bar.position.set(t * 0.55, fh * (-0.5 + (i + 0.5) / n), 0);
+      g.add(bar);
+    }
+  } else if (kind === 'louvre') {
+    // 百葉：一排傾斜葉片（擋雨/導流示意）
+    const n = 5;
+    for (let i = 0; i < n; i++) {
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(t * 0.9, fh / n * 0.7, fw * 0.86), ductTermMat);
+      blade.position.set(t * 0.55, fh * (-0.5 + (i + 0.5) / n), 0);
+      blade.rotation.z = -0.5;                        // 葉片傾斜
+      g.add(blade);
+    }
+  }
   return g;
 }
 
@@ -1589,6 +2143,17 @@ export const PIPE_SPECS = [
   { code: 'B4B', name: '合金鋼 600#', color: 0x7d6a55 },
   { code: 'PVC', name: 'PVC 化工', color: 0x9a8fb0 },
 ];
+// 管線服務別 / 流體別（對標 E3D 依 service 著色）：工業慣用色（近似 ANSI/ISO 流體識別）
+// code 存於 pipe.service（純中繼屬性，不影響幾何/存檔 canonical）；無 service 時沿用 spec 灰預設色。
+export const PIPE_SERVICES = [
+  { code: 'process', name: '製程 Process', color: 0xb0862b },  // 製程流體：赭黃
+  { code: 'steam',   name: '蒸汽 Steam',   color: 0xe07b1a },  // 蒸汽：橙
+  { code: 'water',   name: '冷卻水 Water', color: 0x2f7fd1 },  // 水：藍
+  { code: 'air',     name: '儀錶空氣 Air', color: 0x3fa64a },  // 空氣：綠
+  { code: 'gas',     name: '燃氣 Gas',     color: 0xc9a227 },  // 燃氣：黃
+  { code: 'drain',   name: '排水 Drain',   color: 0x6b7a45 },  // 排水/汙水：橄欖
+  { code: 'flare',   name: '放空 Flare',   color: 0xd23b2e },  // 放空/火炬：紅
+];
 export const PIPE_BORES = [
   { dn: 'DN25', r: 0.017 }, { dn: 'DN40', r: 0.024 }, { dn: 'DN50', r: 0.03 },
   { dn: 'DN80', r: 0.045 }, { dn: 'DN100', r: 0.057 }, { dn: 'DN150', r: 0.084 },
@@ -1607,6 +2172,151 @@ export function pipeWall(dn, sched) {
   if (!dn) return null;
   const t = (sched === '80' || sched === 'XS') ? PIPE_WALL_80 : PIPE_WALL_40;
   return t[dn] != null ? t[dn] / 1000 : null;
+}
+
+// 鋼板 / 樓板 PANE：THREE.Shape 矩形板 + ExtrudeGeometry 擠出厚度 t（免 CSG）；
+// dims 皆公尺：w=X 寬、d=Z 深、t=Y 厚。預設水平（法線朝上，樓板姿態），底面貼 y=0。
+// def.holes（可選）：圓孔 {x,z,r} 或方孔 {x,z,w,d}，座標相對板中心（公尺），以 THREE.Path 挖孔。
+builders.plate = function ({ w, d, t }, def) {
+  const g = new THREE.Group();
+  const W = w ?? 2, D = d ?? 1.5, T = t ?? 0.012;
+  // Shape 於 XZ 平面繪製（本地用 X-Y），擠出後繞 X 轉平放：擠出方向(+Z)→Y。
+  const shape = new THREE.Shape();
+  shape.moveTo(-W / 2, -D / 2);
+  shape.lineTo(W / 2, -D / 2);
+  shape.lineTo(W / 2, D / 2);
+  shape.lineTo(-W / 2, D / 2);
+  shape.closePath();
+  const holes = def?.holes;
+  if (Array.isArray(holes)) {
+    for (const hole of holes) {
+      if (!hole) continue;
+      const cx = hole.x ?? 0, cz = hole.z ?? 0;
+      const path = new THREE.Path();
+      if (hole.r != null) { // 圓孔
+        path.absarc(cx, cz, hole.r, 0, Math.PI * 2, true);
+      } else if (hole.w != null && hole.d != null) { // 方孔
+        const hw = hole.w / 2, hd = hole.d / 2;
+        path.moveTo(cx - hw, cz - hd);
+        path.lineTo(cx - hw, cz + hd);
+        path.lineTo(cx + hw, cz + hd);
+        path.lineTo(cx + hw, cz - hd);
+        path.closePath();
+      } else {
+        continue;
+      }
+      shape.holes.push(path);
+    }
+  }
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: T, bevelEnabled: false, steps: 1 });
+  // 擠出沿本地 +Z（0→T）；繞 X 轉 -90° 使厚度沿世界 Y，且深 D 落在世界 Z。
+  geo.rotateX(-Math.PI / 2);
+  // 旋轉後板佔 y∈[-T,0]（原 z∈[0,T]→y∈[-T,0]），上移 T 使底面貼 y=0。
+  geo.translate(0, T, 0);
+  const mesh = new THREE.Mesh(geo, std(0x9aa4ad, { metalness: 0.5, roughness: 0.55 }));
+  g.add(mesh);
+  return g;
+};
+
+// 格柵樓板 grating：以承重橫檔(bearing bar)陣列示意，區別於實心鋼板 PANE。
+// dims {w, d, t}；def.bar_dir='w'|'d' 橫檔方向、def.bar_pitch 間距(m,預設 0.04)。
+// 外框做細邊框 + 一組沿指定方向、依 pitch 排列的細長條，另加稀疏交叉扁鋼示意。
+builders.grating = function ({ w, d, t }, def) {
+  const g = new THREE.Group();
+  const W = w ?? 2, D = d ?? 1.5, T = t ?? 0.03;
+  const mat = std(0x808b96, { metalness: 0.55, roughness: 0.6 });
+  const along = (def?.bar_dir ?? 'w') === 'd' ? 'd' : 'w';   // 承重橫檔延伸方向
+  const pitch = Math.min(Math.max(def?.bar_pitch ?? 0.04, 0.02), 0.15);
+  const barT = 0.005;                                        // 扁鋼厚
+  // 邊框（四邊細框）
+  const fr = 0.02;
+  for (const [bw, bd, bx, bz] of [[W, fr, 0, D / 2 - fr / 2], [W, fr, 0, -(D / 2 - fr / 2)],
+    [fr, D, W / 2 - fr / 2, 0], [fr, D, -(W / 2 - fr / 2), 0]]) {
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(bw, T, bd), mat);
+    edge.position.set(bx, T / 2, bz);
+    g.add(edge);
+  }
+  // 承重橫檔（bearing bar）：沿 along 方向的細長扁鋼，依 pitch 於垂直方向排列
+  if (along === 'w') {
+    const n = Math.max(1, Math.floor(D / pitch));
+    for (let i = 0; i <= n; i++) {
+      const z = -D / 2 + (i / n) * D;
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(W, T, barT), mat);
+      bar.position.set(0, T / 2, z);
+      g.add(bar);
+    }
+    // 稀疏交叉桿（cross rod）示意
+    const m = Math.max(1, Math.floor(W / (pitch * 4)));
+    for (let j = 0; j <= m; j++) {
+      const x = -W / 2 + (j / m) * W;
+      const rod = new THREE.Mesh(new THREE.BoxGeometry(barT, T * 0.6, D), mat);
+      rod.position.set(x, T * 0.3, 0);
+      g.add(rod);
+    }
+  } else {
+    const n = Math.max(1, Math.floor(W / pitch));
+    for (let i = 0; i <= n; i++) {
+      const x = -W / 2 + (i / n) * W;
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(barT, T, D), mat);
+      bar.position.set(x, T / 2, 0);
+      g.add(bar);
+    }
+    const m = Math.max(1, Math.floor(D / (pitch * 4)));
+    for (let j = 0; j <= m; j++) {
+      const z = -D / 2 + (j / m) * D;
+      const rod = new THREE.Mesh(new THREE.BoxGeometry(W, T * 0.6, barT), mat);
+      rod.position.set(0, T * 0.3, z);
+      g.add(rod);
+    }
+  }
+  return g;
+};
+
+// -------------------------------------------------- 元件選型（spec-driven component sizing）
+// DN 名目 → 公稱直徑（mm，供 FTF 內插/查表）
+const DN_MM = { DN25: 25, DN40: 40, DN50: 50, DN80: 80, DN100: 100, DN150: 150,
+  DN200: 200, DN250: 250, DN300: 300, DN400: 400, DN500: 500 };
+// 元件 face-to-face 長度（公尺 canonical）——近似 ASME B16.10 flanged/lug 端面距。
+// 每 kind 給 { DNxxx: 公尺 }；缺該 DN 時由 ftfFor 依最近 DN 線性內插近似。
+// 值來源：B16.10 Class150 RF flanged 常見值（DN50~DN300），兩端外插為工程近似。
+export const COMPONENT_FTF = {
+  valve:      { DN25: 0.184, DN40: 0.222, DN50: 0.254, DN80: 0.298, DN100: 0.352, DN150: 0.451, DN200: 0.543, DN250: 0.673, DN300: 0.737, DN400: 0.914, DN500: 1.067 },
+  ball:       { DN25: 0.127, DN40: 0.165, DN50: 0.178, DN80: 0.203, DN100: 0.229, DN150: 0.394, DN200: 0.457, DN250: 0.533, DN300: 0.610, DN400: 0.762, DN500: 0.914 },
+  bfly:       { DN50: 0.043, DN80: 0.046, DN100: 0.052, DN150: 0.056, DN200: 0.060, DN250: 0.068, DN300: 0.078, DN400: 0.102, DN500: 0.114 },
+  check:      { DN25: 0.184, DN40: 0.222, DN50: 0.254, DN80: 0.298, DN100: 0.352, DN150: 0.451, DN200: 0.543, DN250: 0.673, DN300: 0.737, DN400: 0.914, DN500: 1.067 },
+  flangepair: { DN25: 0.050, DN40: 0.055, DN50: 0.060, DN80: 0.070, DN100: 0.075, DN150: 0.085, DN200: 0.095, DN250: 0.105, DN300: 0.115, DN400: 0.135, DN500: 0.155 },
+  reducer:    { DN25: 0.089, DN40: 0.089, DN50: 0.102, DN80: 0.114, DN100: 0.127, DN150: 0.140, DN200: 0.152, DN250: 0.178, DN300: 0.203, DN400: 0.254, DN500: 0.305 },
+  psv:        { DN25: 0.20, DN40: 0.24, DN50: 0.28, DN80: 0.34, DN100: 0.40, DN150: 0.52 },
+  fm:         { DN25: 0.20, DN40: 0.24, DN50: 0.30, DN80: 0.36, DN100: 0.42, DN150: 0.52, DN200: 0.62, DN250: 0.72, DN300: 0.82 },
+};
+// 回傳某 kind 在指定 DN 的 face-to-face 長度（公尺）；缺表時依最近兩 DN 線性內插/外插。
+function ftfFor(kind, dn) {
+  const tbl = COMPONENT_FTF[kind];
+  if (!tbl) return null;
+  if (dn && tbl[dn] != null) return tbl[dn];
+  const target = DN_MM[dn];
+  const keys = Object.keys(tbl).filter((k) => DN_MM[k] != null).sort((a, b) => DN_MM[a] - DN_MM[b]);
+  if (!keys.length) return null;
+  if (target == null) return tbl[keys[0]];                                     // 未知 DN → 取最小 DN 值
+  if (target <= DN_MM[keys[0]]) return tbl[keys[0]];
+  if (target >= DN_MM[keys[keys.length - 1]]) return tbl[keys[keys.length - 1]];
+  for (let i = 0; i < keys.length - 1; i++) {                                   // 落在兩已知 DN 間 → 線性內插
+    const lo = DN_MM[keys[i]], hi = DN_MM[keys[i + 1]];
+    if (target >= lo && target <= hi) {
+      const t = (target - lo) / (hi - lo);
+      return tbl[keys[i]] + t * (tbl[keys[i + 1]] - tbl[keys[i]]);
+    }
+  }
+  return tbl[keys[0]];
+}
+// 依 spec+dn 選 kind 元件，回選型結果（ftf 公尺；endType 由 spec 語境近似）。
+export function pickComponent(spec, dn, kind) {
+  const ftf = ftfFor(kind, dn);
+  // 端接型式：低壓/PVC 多對焊或承插，其餘依 spec 等級近似法蘭（僅中繼屬性，不影響 canonical 幾何）
+  const endType = (spec === 'PVC') ? 'socket'
+    : (spec === 'B4B') ? 'flanged-RTJ'
+    : 'flanged-RF';
+  return { kind, dn: dn ?? null, spec: spec ?? null, ftf, endType };
 }
 
 // 素材目錄（編輯器面板用）
@@ -1679,6 +2389,8 @@ export const ASSET_CATEGORIES = [
     { type: 'cageladder', name: '籠式直爬梯', dims: { h: 6 }, prefix: 'LD' },
     { type: 'psupport', name: '管線支撐', dims: { h: 1.2, r: 0.12 }, prefix: 'PS' },
     { type: 'splat', name: '平台', dims: { w: 3, d: 2.4, elev: 3 }, prefix: 'PF' },
+    { type: 'plate', name: '鋼板/樓板 PANE', dims: { w: 2, d: 1.5, t: 0.012 }, prefix: 'PL' },
+    { type: 'grating', name: '格柵樓板 GRATING', dims: { w: 2, d: 1.5, t: 0.03 }, prefix: 'GR' },
   ]},
   { name: '儀電橋架', discipline: 'elec', items: [
     { type: 'cabletray', name: '電纜橋架（直線）', dims: { w: 0.45, len: 6, elev: 3 }, prefix: 'CT' },
@@ -1697,8 +2409,46 @@ export const ASSET_CATEGORIES = [
   { name: '基元（自建設備）', items: [
     { type: 'assembly', name: '自建設備', dims: {},
       prims: [{ kind: 'cyli', dims: { r: 1.0, h: 2.5 }, pos: [0, 0, 0] }], prefix: 'EQ' },
+    { type: 'assembly', name: '六角柱體 EXTR', dims: {},
+      prims: [{ kind: 'extr', dims: { sides: 6, r: 0.8, h: 2 }, pos: [0, 0, 0] }], prefix: 'EQ' },
+    { type: 'assembly', name: '碟形封頭 REVO', dims: {},
+      prims: [{ kind: 'revo', dims: { r: 1, h: 1, seg: 24 }, pos: [0, 0, 0] }], prefix: 'EQ' },
   ]},
 ];
 export const ASSET_CATALOG = ASSET_CATEGORIES.flatMap((c) => c.items);
 
-export { std, markShadow, builders, dm, dPad, dFlange, dNozzle, dLadder, dHandrailRing, detailedBuilders, mergeByMaterial, labelHeight };
+// ---------------------------------------------------------------- 維修/抽出包絡（access envelope）
+// 對標 E3D「保留空間淨空」：依設備本體 local AABB 各方向外擴 pad（公尺），
+// 建半透明淡色盒＋線框，標 userData.envelope=true 供上層排除點選/圖層/dispose。
+// pad = { x, y, z }（單邊外擴公尺；x→E-W、z→N-S、y→上下）。回傳 null 表示無可量幾何。
+const ENVELOPE_COLOR = 0x2fa8ff;
+function buildEnvelope(body, pad = {}) {
+  const box = new THREE.Box3().setFromObject(body);
+  if (box.isEmpty()) return null;
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const px = Math.max(0, +pad.x || 0), py = Math.max(0, +pad.y || 0), pz = Math.max(0, +pad.z || 0);
+  const w = Math.max(0.001, size.x + px * 2);
+  const h = Math.max(0.001, size.y + py * 2);
+  const d = Math.max(0.001, size.z + pz * 2);
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const mat = new THREE.MeshBasicMaterial({
+    color: ENVELOPE_COLOR, transparent: true, opacity: 0.10,
+    depthWrite: false, side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(center);
+  mesh.renderOrder = 2;
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(geo),
+    new THREE.LineBasicMaterial({ color: ENVELOPE_COLOR, transparent: true, opacity: 0.55 }));
+  mesh.add(edges);
+  // 標記整棵子樹：不可點選（無 eqTag）、可被上層辨識為包絡（非實體幾何）
+  mesh.userData.envelope = true;
+  edges.userData.envelope = true;
+  mesh.castShadow = false; mesh.receiveShadow = false;
+  return mesh;
+}
+
+export { std, markShadow, builders, dm, dPad, dFlange, dNozzle, dLadder, dHandrailRing, detailedBuilders, mergeByMaterial, labelHeight, buildEnvelope };
+// buildTrayBody / trayMat 已於定義處 export（電纜橋架自由佈線）

@@ -215,6 +215,9 @@
     /* 量測持久標註 */
     .m-note { padding: 2px 9px; border-radius: 10px; background: rgba(255, 170, 60, 0.92);
       color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; pointer-events: none; }
+    /* 3D 尺寸標註文字（藍，與量測橘做區隔） */
+    .dim-note { padding: 2px 9px; border-radius: 10px; background: rgba(47, 111, 216, 0.94);
+      color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; pointer-events: none; }
 
     /* 剖切盒面手柄（CSS2D） */
     .clip-handle { width: 14px; height: 14px; border-radius: 3px; background: rgba(4,106,251,.8);
@@ -342,6 +345,10 @@
               <a class="rbtn" id="btn-view-twin" href="#" target="_blank" style="display:none"><span class="ric" data-ic="eye"></span>孿生檢視</a>
               <button class="rbtn" id="btn-ga" title="輸出俯視配置圖（GA Plot Plan，SVG 可列印）"><span class="ric" data-ic="ga"></span>出圖 GA</button>
               <button class="rbtn" id="btn-mto" title="輸出材料表（MTO，CSV）——管線長度統計＋元件＋設備清單"><span class="ric" data-ic="mto"></span>材料表</button>
+              <button class="rbtn" id="btn-weight" title="重量與重心（Weight & CoG）：逐設備估質量＋全場總重＋重心座標，可匯出 CSV"><span class="ric" data-ic="mto"></span>重量表</button>
+              <button class="rbtn" id="btn-eq-schedule" title="設備排程表（Equipment Schedule，CSV）：逐設備一列——Tag／型別／所屬 ZONE／關鍵尺寸(mm)／鋼構斷面／材質／P&ID"><span class="ric" data-ic="mto"></span>設備排程</button>
+              <button class="rbtn" id="btn-nz-schedule" title="管嘴排程表（Nozzle Schedule，CSV）：遍歷所有設備管嘴——母設備 Tag／管嘴 id／口徑 DN(bore mm)／標高 U(mm)／方向"><span class="ric" data-ic="mto"></span>管嘴排程</button>
+              <button class="rbtn" id="btn-query" title="通用條件查詢：選範圍＋型別／service／DN／spec／UDA 鍵值（AND），篩出符合元素成清單，點選定位、匯出 CSV、可存為集合"><span class="ric" data-ic="scan"></span>查詢</button>
               <button class="rbtn" id="btn-batch" title="出圖批次：全場景 GA＋每條管線 ISO＋MTO 打包成 ZIP 下載"><span class="ric" data-ic="batch"></span>批次出圖</button>
             </div>
             <div class="rgroup-label">交付</div>
@@ -368,6 +375,7 @@
             <div class="rgroup-tools">
               <button class="rbtn warn" id="btn-measure" title="點兩點量距離（可連續；空白鍵重複上次量測）；Esc 結束"><span class="ric" data-ic="measure"></span>距離</button>
               <button class="rbtn warn" id="btn-measure-angle" title="點三點量角度（第一點＝頂點）；Esc 結束"><span class="ric" data-ic="angle"></span>角度</button>
+              <button class="rbtn" id="btn-dim3d" title="點兩點建立持久 3D 尺寸標註（隨場景存檔；右鍵標註可刪除）；Esc 結束"><span class="ric" data-ic="measure"></span>3D 標註</button>
             </div>
             <div class="rgroup-label">量測</div>
           </div>
@@ -399,12 +407,24 @@
               <button class="rbtn warn" id="pipe-btn" title="依序點擊路徑點；Enter 完成、Shift 正交鎖定"><span class="ric" data-ic="pipe"></span>繪製管線</button>
               <select class="rsel" id="pipe-spec" title="管線規格（Specification）：材質/壓力等級" style="width:104px"></select>
               <select class="rsel" id="pipe-bore" title="公稱管徑（Bore）" style="width:82px"></select>
-              <button class="rbtn warn" id="duct-btn" title="繪製風管：點路徑點 Enter 完成；轉角自動放方形彎頭，可沿風管放三通/風門"><span class="ric" data-ic="duct"></span>繪製風管</button>
+              <button class="rbtn warn" id="duct-btn" title="繪製風管：點路徑點 Enter 完成；轉角自動放方形彎頭。選取風管後於屬性面板沿管放三通/風門/斷面轉換/變徑/送風口/回風格柵/百葉"><span class="ric" data-ic="duct"></span>繪製風管</button>
               <select class="rsel" id="duct-size" title="風管斷面 寬×高（mm）" style="width:100px">
                 <option value="0.8,0.5">800×500</option>
                 <option value="1.0,0.63">1000×630</option>
                 <option value="1.25,0.8">1250×800</option>
                 <option value="0.5,0.3">500×300</option>
+              </select>
+              <button class="rbtn warn" id="tray-btn" title="電纜橋架自由佈線：點路徑點 Enter 完成、Shift 正交鎖定；轉角自動生水平彎，走儀電圖層"><span class="ric" data-ic="tray"></span>繪製橋架</button>
+              <select class="rsel" id="tray-width" title="電纜橋架寬（mm）" style="width:82px">
+                <option value="0.15">150 mm</option>
+                <option value="0.3" selected>300 mm</option>
+                <option value="0.45">450 mm</option>
+                <option value="0.6">600 mm</option>
+              </select>
+              <select class="rsel" id="tray-type" title="電纜橋架型式" style="width:96px">
+                <option value="ladder">梯級</option>
+                <option value="solid" selected>實底</option>
+                <option value="perforated">沖孔</option>
               </select>
             </div>
             <div class="rgroup-label">建立（Spec 驅動）</div>
@@ -419,6 +439,7 @@
           <div class="rgroup">
             <div class="rgroup-tools">
               <button class="rbtn" id="btn-pipelist" title="管線清單（Pipe List）：全場景管線 Spec/DN/Sch/總長一覽，點選定位"><span class="ric" data-ic="pipe"></span>管線清單</button>
+              <button class="rbtn" id="btn-service-legend" title="服務別圖例（依 Service 著色）：各流體服務色塊＋管線數量，點列切換顯示/隱藏"><span class="ric" data-ic="label"></span>服務圖例</button>
               <button class="rbtn" id="btn-iso" title="輸出選中管線的等角 ISO 單管圖（含尺寸標註與元件表）"><span class="ric" data-ic="iso"></span>出 ISO</button>
             </div>
             <div class="rgroup-label">交付</div>
@@ -434,6 +455,18 @@
               <button class="rbtn" id="btn-elev" title="標高基準面：顯示 EL 網格＋管理標高清單（屬性面板）"><span class="ric" data-ic="elev"></span>標高</button>
             </div>
             <div class="rgroup-label">內容</div>
+          </div>
+          <!-- 點雲 as-built（brownfield）：載入雷射掃描 .ply 疊合現況 -->
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn warn" id="btn-pc-load" title="載入雷射掃描點雲 .ply（本機檔，不上傳）疊合既有廠現況"><span class="ric" data-ic="scan"></span>點雲</button>
+              <button class="rbtn" id="btn-pc-toggle" title="點雲顯示/隱藏切換" disabled><span class="ric" data-ic="eye"></span>顯示</button>
+              <button class="rbtn" id="btn-pc-size" title="循環切換點大小（3/10/20mm）" disabled><span class="ric" data-ic="grid"></span>點徑</button>
+              <button class="rbtn" id="btn-pc-opacity" title="循環切換不透明度（100/60/30%）" disabled><span class="ric" data-ic="cap"></span>透明</button>
+              <button class="rbtn" id="btn-pc-clear" title="移除點雲（釋放 GPU 資源）" disabled><span class="ric" data-ic="clear"></span>移除</button>
+              <input type="file" id="pc-file" accept=".ply" style="display:none">
+            </div>
+            <div class="rgroup-label">點雲 as-built</div>
           </div>
           <div class="rgroup">
             <div class="rgroup-tools">
@@ -474,12 +507,36 @@
             </div>
             <div class="rgroup-label">剖切</div>
           </div>
+          <!-- 出圖：正交立面（N/S/E/W）＋剖面（沿剖切面），沿用 GA 出圖樣式（e3d/feat-draw2） -->
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" data-elev="n" title="立面圖：看向北（水平=東西，垂直=標高U，深度Z壓平），輸出 SVG"><span class="ric" data-ic="elev"></span>立面北</button>
+              <button class="rbtn" data-elev="s" title="立面圖：看向南，輸出 SVG"><span class="ric" data-ic="elev"></span>立面南</button>
+              <button class="rbtn" data-elev="e" title="立面圖：看向東（水平=南北，深度X壓平），輸出 SVG"><span class="ric" data-ic="elev"></span>立面東</button>
+              <button class="rbtn" data-elev="w" title="立面圖：看向西，輸出 SVG"><span class="ric" data-ic="elev"></span>立面西</button>
+              <button class="rbtn" id="btn-section" title="剖面圖：沿目前剖切盒的垂直面（±X／±Z）取斷面，投影跨面設備/管線；須先開剖切"><span class="ric" data-ic="clipsix"></span>剖面</button>
+            </div>
+            <div class="rgroup-label">出圖 立面/剖面</div>
+          </div>
+          <!-- 審查工具：X-ray/線框＋截圖＋淨空量測（e3d/feat-review） -->
+          <div class="rgroup">
+            <div class="rgroup-tools">
+              <button class="rbtn" id="btn-xray" title="透視 X-ray：把實體設備/管線設半透明（再按恢復）"><span class="ric" data-ic="eye"></span>X-ray</button>
+              <button class="rbtn" id="btn-wireframe" title="線框顯示切換（再按恢復）"><span class="ric" data-ic="grid"></span>線框</button>
+              <button class="rbtn" id="btn-shot" title="截圖：輸出目前視圖為 PNG（檔名含場景名）"><span class="ric" data-ic="pin"></span>截圖</button>
+              <button class="rbtn" id="btn-uda-color" title="依使用者自訂屬性(UDA)著色：選一個屬性鍵，依不同值指派區分色；可過濾聚焦（再按恢復）"><span class="ric" data-ic="grid"></span>屬性著色</button>
+              <button class="rbtn warn" id="btn-measure-clear" title="淨空量測：點兩個物件，顯示兩者包圍盒最短間距；Esc 結束"><span class="ric" data-ic="measure"></span>淨空</button>
+            </div>
+            <div class="rgroup-label">審查</div>
+          </div>
         </div>
         <!-- 工具 TOOLS -->
         <div class="rpage" data-page="tools">
           <div class="rgroup">
             <div class="rgroup-tools">
               <button class="rbtn warn" id="btn-clash-run" title="全場景碰撞檢查：設備硬碰撞/淨距不足/管線干涉"><span class="ric" data-ic="alert"></span>檢查全部</button>
+              <button class="rbtn" id="btn-connect-check" title="連通性檢查：管線自由端（未接管嘴）與 bore 不一致（管徑≠管嘴口徑）"><span class="ric" data-ic="alert"></span>🔗連通檢查</button>
+              <button class="rbtn" id="btn-model-lint" title="模型完整性健檢（對標 E3D Data Integrity Checker）：孤兒參考／重複位號／缺必要欄位／斷開自由端"><span class="ric" data-ic="alert"></span>🩺模型健檢</button>
               <span id="clash-summary" style="font-size:11.5px;color:var(--dim);align-self:center"></span>
             </div>
             <div class="rgroup-label">碰撞</div>

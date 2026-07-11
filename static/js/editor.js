@@ -8,11 +8,34 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { std, markShadow, builders, ASSET_CATEGORIES, labelHeight,
-         buildPrim, buildPipeComponent, PIPE_COMPONENTS,
-         PIPE_SPECS, PIPE_BORES, PIPE_SCHEDULES, pipeWall,
-         STEEL_SECTIONS, steelSection } from './plant-builders.js';
+         buildPrim, buildPipeComponent, buildDuctTerminal, PIPE_COMPONENTS,
+         PIPE_SPECS, PIPE_SERVICES, PIPE_BORES, PIPE_SCHEDULES, pipeWall,
+         COMPONENT_FTF, pickComponent, buildTrayBody, trayMat,
+         STEEL_SECTIONS, steelSection, sectionDesc, buildEnvelope,
+         SUPPORT_TYPES, SUPPORT_TYPE_SET } from './plant-builders.js';
 import { initSprite } from './sprite.js';
 import { runClash, clashKey } from './clash.js';
+import { computeWeights } from './weight.js';
+import { buildDimensions } from './dimensions.js';
+import { loadPointCloud } from './pointcloud.js';
+
+// 結構鋼構定位線 Justification 選項（對標 E3D P-line）：柱常用 NA，梁常用 CTOP/TOS
+const JUST_OPTIONS = [
+  { v: 'NA', t: 'NA 中性軸（形心）' },
+  { v: 'CTOP', t: 'CTOP 頂面中心' },
+  { v: 'CBOT', t: 'CBOT 底面中心' },
+  { v: 'TOS', t: 'TOS 頂面' },
+  { v: 'BOS', t: 'BOS 底面' },
+  { v: 'LEFT', t: 'LEFT 左翼板邊' },
+  { v: 'RIGHT', t: 'RIGHT 右翼板邊' },
+];
+
+// 連接節點型式（構件端）：none 無、baseplate 柱腳底板+錨栓、gusset 端板/節點板示意
+const NODE_OPTIONS = [
+  { v: 'none', t: '無' },
+  { v: 'baseplate', t: '柱腳底板 Base Plate' },
+  { v: 'gusset', t: '端板/節點板 Gusset' },
+];
 
 const viewport = document.getElementById('viewport');
 
@@ -55,6 +78,7 @@ const ICONS = {
   mto: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M3 14h18M9 4v16"/>',
   batch: '<rect x="3" y="3" width="9" height="9" rx="1"/><path d="M8 14v6h12V8h-6"/><path d="M6 6h3M6 8.5h3"/>',
   duct: '<rect x="3" y="8" width="18" height="8" rx="1"/><path d="M7 8V5M17 8V5"/>',
+  tray: '<path d="M3 8v8M21 8v8"/><path d="M3 8h18M3 16h18"/><path d="M7 8v8M11 8v8M15 8v8"/>',
   laycube: '<path d="M12 3l7 4v10l-7 4-7-4V7l7-4z"/><path d="M12 11l7-4M12 11L5 7M12 11v10"/>',
   laypipe: '<path d="M4 6h7a7 7 0 0 1 7 7v5"/><path d="M4 11h7a2 2 0 0 1 2 2v5"/>',
   laybeam: '<path d="M6 4h12M6 20h12M12 4v16"/>',
@@ -65,6 +89,7 @@ const ICONS = {
   layelec: '<path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/>',
   elev: '<path d="M3 19h18M3 13h12M3 7h12"/><path d="M19 16V6M16 9l3-3 3 3"/>',
   layhvac: '<rect x="3" y="9" width="12" height="7" rx="1"/><path d="M15 10.5h6M15 14.5h6M7 9V5h8"/>',
+  scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="8" cy="9" r=".9"/><circle cx="13" cy="12" r=".9"/><circle cx="16" cy="8" r=".9"/><circle cx="10" cy="15" r=".9"/><circle cx="15" cy="16" r=".9"/>',
 };
 document.querySelectorAll('.ric[data-ic]').forEach((el) => {
   const d = ICONS[el.dataset.ic];
@@ -267,7 +292,9 @@ const hiddenTags = new Set(); // 模型樹「隱藏」的設備（UI 狀態，�
 
 // ---------------------------------------------------------------- 圖層顯示（設備/管線/結構）
 const LAYERS = { equip: true, pipe: true, struct: true, elec: true, hvac: true };
-const STRUCT_TYPES = new Set(['scolumn', 'sbeam', 'stairs', 'srail', 'splat', 'cageladder', 'psupport']);
+// 維修/抽出包絡總開關（UI 檢視狀態，不入存檔；per-設備 on 存於 def.envelope.on）
+let envelopeVisible = true;
+const STRUCT_TYPES = new Set(['scolumn', 'sbeam', 'stairs', 'srail', 'splat', 'cageladder', 'psupport', 'grating']);
 const ELEC_TYPES = new Set(['cabletray', 'traybend', 'trayriser', 'jbox', 'lightpole']);
 const HVAC_TYPES = new Set(['duct', 'ductbend', 'ductriser', 'ahu', 'rooffan']);
 function eqLayerOn(def) {
@@ -279,8 +306,17 @@ function eqLayerOn(def) {
 function applyLayers() {
   for (const entry of eqObjects.values()) {
     entry.group.visible = !hiddenTags.has(entry.def.tag) && eqLayerOn(entry.def);
+    if (entry.group.userData.envelopeMesh) entry.group.userData.envelopeMesh.visible = envelopeVisible;
   }
-  pipeObjects.forEach((p, i) => { if (p) p.group.visible = sceneData.pipes[i]?.profile === 'duct' ? LAYERS.hvac : LAYERS.pipe; });
+  pipeObjects.forEach((p, i) => {
+    if (!p) return;
+    const pipe = sceneData.pipes[i];
+    const layerOn = pipe?.profile === 'duct' ? LAYERS.hvac
+      : pipe?.profile === 'tray' ? LAYERS.elec   // 電纜橋架走儀電圖層
+      : LAYERS.pipe;
+    const svcKey = pipeServiceKey(pipe);   // 風管→null（不受服務篩選）；管線→service code 或 '__none__'
+    p.group.visible = layerOn && !(svcKey && hiddenServices.has(svcKey));   // 服務圖例篩選：隱藏該服務別
+  });
 }
 
 function emptyScene(name) {
@@ -301,15 +337,36 @@ function nextTag(prefix) {
 }
 
 // ------------------------------------------------------------ 設備渲染
+// 維修/抽出包絡（access envelope）：依 def.envelope 建半透明保留空間盒；掛在群組供 clash 用。
+// 標 userData.envelope=true 使其不可點選（無 eqTag）、切圖層/隱藏合理、dispose 妥當。
+function disposeEnvelope(group) {
+  const old = group.userData.envelopeMesh;
+  if (!old) return;
+  old.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+  group.remove(old);
+  group.userData.envelopeMesh = null;
+}
+function applyEnvelope(group, def, body) {
+  disposeEnvelope(group);
+  const env = def.envelope;
+  if (!env?.on) return;
+  const mesh = buildEnvelope(body, env.pad ?? {});
+  if (!mesh) return;
+  mesh.visible = envelopeVisible;   // 圖層/檢視開關
+  group.add(mesh);
+  group.userData.envelopeMesh = mesh;
+}
+
 function buildEquipment(def) {
   const group = new THREE.Group();
   const body = builders[def.type](def.dims, def);   // assembly 讀 def.prims
   markShadow(body);
   body.traverse((o) => { if (o.isMesh) { o.userData.eqTag = def.tag; } });
   group.add(body);
+  applyEnvelope(group, def, body);
   renderNozzles(group, def);
   group.position.set(...def.pos);
-  group.rotation.y = def.rot_y ?? 0;
+  group.rotation.set(def.rot_x ?? 0, def.rot_y ?? 0, def.rot_z ?? 0);
 
   const el = document.createElement('div');
   el.style.cssText = 'padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.92);border:1px solid #c6d0da;color:#046AFB;font-size:11px;font-weight:700;white-space:nowrap;';
@@ -328,6 +385,7 @@ function rebuildEquipment(def) {
   const entry = eqObjects.get(def.tag);
   if (!entry) return;
   // 移除 body＋管嘴群組全重繪（只換 body 會留下嘴殘影）
+  disposeEnvelope(entry.group);   // 包絡另行 dispose（含線框子物件）
   for (const c of entry.group.children.filter((x) => !x.isCSS2DObject)) {
     c.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); });   // 清巢狀管嘴標籤 DOM，防孤兒鬼標籤
     entry.group.remove(c);
@@ -335,9 +393,11 @@ function rebuildEquipment(def) {
   const body = builders[def.type](def.dims, def);
   markShadow(body);
   body.traverse((o) => { if (o.isMesh) o.userData.eqTag = def.tag; });
+  applyEnvelope(entry.group, def, body);   // 依 def.envelope 重建保留空間盒（須在 body 仍 detached 時算，避免雙重套用群組變換）
   entry.group.add(body);
   renderNozzles(entry.group, def);
   entry.group.children.find((c) => c.isCSS2DObject)?.position.set(0, labelHeight(def), 0);
+  if (udaColorKey || xrayOn || wireframeOn) refreshRenderLayers(true);   // 重建後統一重組兩層 override（UDA 著色＋X-ray/線框），不搶屬性面板
 }
 
 // ------------------------------------------------------------ 管線渲染
@@ -345,11 +405,53 @@ const pipeMat = std(0x646f7b);
 const insulMat = new THREE.MeshStandardMaterial({ color: 0xcdd6df, transparent: true, opacity: 0.26, roughness: 1 });
 const pipeHi = std(0xffaa3c, { emissive: 0x442a00, emissiveIntensity: 0.6 });
 
+// 服務別著色：每個 service code 一個共用材質快取（避免每段 new）。無 service→回傳預設 pipeMat（維持現況灰）。
+const SERVICE_BY_CODE = Object.fromEntries(PIPE_SERVICES.map((s) => [s.code, s]));
+const serviceMats = new Map();
+function serviceMat(code) {
+  const svc = SERVICE_BY_CODE[code];
+  if (!svc) return pipeMat;                                 // 無此服務別→沿用預設灰
+  if (!serviceMats.has(code)) serviceMats.set(code, std(svc.color));
+  return serviceMats.get(code);
+}
+// 管段「基底材質」（非選取狀態的還原目標）：風管用 ductMat；管線有 service 用服務色，否則 pipeMat。
+function pipeBaseMat(pipe) {
+  if (pipe?.profile === 'duct') return ductMat;
+  if (pipe?.profile === 'tray') return trayMat(pipe.tray?.type ?? 'solid');   // 儀電托盤色（依 type）
+  return pipe?.service ? serviceMat(pipe.service) : pipeMat;
+}
+// UI 狀態：被圖例隱藏的服務別（不入存檔）。'__none__' 代表「無服務別」的管線群。
+const hiddenServices = new Set();
+const pipeServiceKey = (pipe) => ((pipe?.profile === 'duct' || pipe?.profile === 'tray') ? null   // 風管/電纜橋架不受服務別篩選
+  : ((pipe?.service && SERVICE_BY_CODE[pipe.service]) ? pipe.service : '__none__'));   // 未知/舊 code 也歸 __none__（與計數/著色一致）
+
+// 坡度：slope 存「‰（每公尺水平落差 mm）」canonical，預設 0（水平）。
+// 落差只在渲染層套用——pts 仍為水平公尺 canonical，twin/USD 讀 pts 不受污染。
+// dpts[i].y = pts[i].y − (slope/1000)×(至第 i 節點的水平弧長)。
+const pipeSlopePermille = (pipe) => ((pipe.profile === 'duct' || pipe.profile === 'tray') ? 0 : (+pipe.slope || 0));
+// 產生「已套坡度」的顯示節點陣列（不改 pipe.pts）；坡度 0 時回傳原始節點。
+function slopedDisplayPts(pipe, pts) {
+  const s = pipeSlopePermille(pipe);
+  if (!s) return pts;
+  const out = [];
+  let hArc = 0;                                            // 累積水平弧長（XZ 平面）
+  for (let i = 0; i < pts.length; i++) {
+    if (i > 0) hArc += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+    out.push(new THREE.Vector3(pts[i].x, pts[i].y - (s / 1000) * hArc, pts[i].z));
+  }
+  return out;
+}
+
 function buildPipe(pipe, index) {
   const group = new THREE.Group();
   group.userData.pipeIndex = index;
-  const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
-  if (pipe.profile === 'duct') { buildDuctBody(pipe, index, group, pts); scene.add(group); pipeObjects[index] = { group }; return; }
+  const ptsRaw = pipe.pts.map((p) => new THREE.Vector3(...p));   // canonical 水平節點（勿改）
+  if (pipe.profile === 'duct') { buildDuctBody(pipe, index, group, ptsRaw); scene.add(group); pipeObjects[index] = { group }; return; }
+  if (pipe.profile === 'tray') { buildTrayBody(pipe, index, group, ptsRaw); scene.add(group); pipeObjects[index] = { group }; return; }
+  // 坡度：僅渲染層下降 Y（pts 不變）。pts 供 arcToPose/報表使用仍是水平 canonical。
+  const pts = slopedDisplayPts(pipe, ptsRaw);
+  const slopePM = pipeSlopePermille(pipe);
+  const baseMat = pipeBaseMat(pipe);   // 服務別著色：有 pipe.service 用服務色，否則沿用預設 pipeMat（現況灰）
   // P&ID 自動抽取場景管線量大：降面數/關陰影，維持可選取
   const lite = sceneData.pipes.length > 60;
   // 異徑管後段變徑：依元件弧長位置建立管徑分段表
@@ -367,7 +469,7 @@ function buildPipe(pipe, index) {
     const segR = radiusAt(arcAcc + len / 2);
     arcAcc += len;
     if (len < 1e-4) continue;
-    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(segR, segR, len, lite ? 6 : 12), pipeMat);
+    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(segR, segR, len, lite ? 6 : 12), baseMat);
     cyl.position.copy(a).addScaledVector(dir, 0.5);
     cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
     cyl.castShadow = !lite;
@@ -389,13 +491,13 @@ function buildPipe(pipe, index) {
       let joint;
       if (angle > 82 && angle < 98) {
         const R = pipe.r * 1.8;
-        joint = new THREE.Mesh(new THREE.TorusGeometry(R, pipe.r, 8, 10, Math.PI / 2), pipeMat);
+        joint = new THREE.Mesh(new THREE.TorusGeometry(R, pipe.r, 8, 10, Math.PI / 2), baseMat);
         const X = u.clone().negate(), Y = v.clone().negate();
         const Z = new THREE.Vector3().crossVectors(X, Y).normalize();
         joint.setRotationFromMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
         joint.position.copy(pts[i + 1]).addScaledVector(u, R).addScaledVector(v, R);
       } else {
-        joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
+        joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), baseMat);
         joint.position.copy(pts[i + 1]);
       }
       joint.userData.pipeIndex = index;
@@ -406,91 +508,303 @@ function buildPipe(pipe, index) {
   for (const c of pipe.components ?? []) {
     const pose = arcToPose(pipe, c.at);
     if (!pose) continue;
-    const comp = buildPipeComponent(c.kind, radiusAt(c.at - 0.01));
+    const comp = buildPipeComponent(c.kind, radiusAt(c.at - 0.01), c.ftf);   // c.ftf＝spec/bore 選型面距
     comp.position.copy(pose.pos);
+    if (slopePM) comp.position.y -= (slopePM / 1000) * horizArcTo(ptsRaw, c.at);   // 坡度：元件跟著渲染層下降
     comp.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), pose.dir);
     comp.traverse((o) => { o.userData.pipeIndex = index; });
     group.add(comp);
   }
+  // 坡度標註：於管頭放小箭頭＋‰ 標籤（僅坡度非 0 時），純視覺、可跟隨 layer 隱藏
+  if (slopePM && pts.length >= 2) addSlopeMarker(group, pipe, pts, slopePM, index);
   scene.add(group);
   pipeObjects[index] = { group };
+}
+
+// 至弧長 at（沿 pts 3D 弧長）對應的「水平弧長」（XZ 平面），供坡度落差計算。
+// 坡度落差以水平長度為基準；3D 弧長與水平弧長在水平管段相等，故直接沿段累積水平投影。
+function horizArcTo(pts, at) {
+  let arc = 0, hArc = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const seg = pts[i + 1].distanceTo(pts[i]);
+    const hSeg = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].z - pts[i].z);
+    if (arc + seg >= at) {                                   // at 落在本段：線性插值水平弧長
+      const t = seg > 1e-9 ? (at - arc) / seg : 0;
+      return hArc + hSeg * Math.max(0, Math.min(1, t));
+    }
+    arc += seg; hArc += hSeg;
+  }
+  return hArc;
+}
+
+// 管頭坡度標記：一個朝下坡方向的小箭頭 + 顯示 ‰ 與 1:N 的 CSS2D 標籤。
+function addSlopeMarker(group, pipe, dpts, slopePM, index) {
+  const a = dpts[0], b = dpts[1];
+  const seg = b.clone().sub(a);
+  const r = Math.max(pipe.r ?? 0.05, 0.05);
+  // 小箭頭：沿第一段走向，長度約 6×半徑（有上限），顏色橙色標示流向/下坡
+  const arrowLen = Math.min(Math.max(r * 6, 0.3), seg.length() || 0.3);
+  const arrow = new THREE.ArrowHelper(seg.clone().normalize(), a.clone(), arrowLen, 0xff8a1e, arrowLen * 0.4, r * 1.6);
+  arrow.traverse((o) => { o.userData.pipeIndex = index; o.userData.slopeMarker = true; });   // 標記：選取上/下色不改坡度箭頭材質
+  group.add(arrow);
+  const el = document.createElement('div');
+  el.className = 'pipe-slope-label';
+  el.style.cssText = 'padding:1px 6px;border-radius:4px;background:rgba(255,138,30,.92);color:#fff;font-size:10px;font-weight:700;white-space:nowrap;pointer-events:none;';
+  el.textContent = slopeLabelText(slopePM);
+  const lbl = new CSS2DObject(el);
+  lbl.position.copy(a).add(new THREE.Vector3(0, r * 2.2 + 0.15, 0));
+  lbl.userData.pipeIndex = index;
+  group.add(lbl);
+}
+
+// 坡度字串：以 ‰ 與 1:N 併陳（N=1000/‰，四捨五入）。下坡以負號/DN 語意保留數值原樣。
+function slopeLabelText(slopePM) {
+  const abs = Math.abs(slopePM);
+  const ratio = abs > 1e-6 ? `1:${Math.round(1000 / abs)}` : '—';
+  return `坡度 ${slopePM}‰（${ratio}）`;
 }
 
 // ------------------------------------------------------------ 風管路由（profile:'duct' 復用管線子系統）
 const ductMat = std(0xaeb6bf, { metalness: 0.5, roughness: 0.35 });
 function buildDuctBody(pipe, index, group, pts) {
   const w = pipe.duct?.w ?? 0.8, h = pipe.duct?.h ?? 0.5;
+  const shape = pipe.duct?.shape ?? 'rect';          // 'rect'（矩形）/'circ'（圓，直徑 w）/'oval'（橢圓 w×h）
+  const d = pipe.duct?.d ?? w;                        // 圓形直徑（公尺）；沿用 w 作為預設避免舊資料破圖
+  // 依斷面形狀建立一段直管幾何（本地座標：矩形沿 Z、圓/橢圓沿 Y 對齊流向）
+  const buildSeg = (len) => {
+    if (shape === 'circ') {                            // 圓：等徑圓柱
+      const r = d / 2;
+      return { mesh: new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 20), ductMat), axis: new THREE.Vector3(0, 1, 0) };
+    }
+    if (shape === 'oval') {                            // 橢圓：圓柱非等比縮放 X=w、Y=h
+      const cyl = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, len, 20), ductMat);
+      cyl.scale.set(w, 1, h);
+      return { mesh: cyl, axis: new THREE.Vector3(0, 1, 0) };
+    }
+    return { mesh: new THREE.Mesh(new THREE.BoxGeometry(w, h, len), ductMat), axis: new THREE.Vector3(0, 0, 1) };
+  };
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i], b = pts[i + 1];
     const dir = b.clone().sub(a), len = dir.length();
     if (len < 1e-4) continue;
-    const seg = new THREE.Mesh(new THREE.BoxGeometry(w, h, len), ductMat);
+    const { mesh: seg, axis } = buildSeg(len);
     seg.position.copy(a).addScaledVector(dir, 0.5);
-    seg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().normalize());
+    seg.quaternion.setFromUnitVectors(axis, dir.clone().normalize());
     seg.castShadow = true;
     seg.userData.pipeIndex = index;
     group.add(seg);
-    if (i < pts.length - 2) {                          // 內角：方形彎頭盒（elbow 自動）
-      const el = new THREE.Mesh(new THREE.BoxGeometry(w * 1.06, h * 1.06, Math.max(w, h) * 1.06), ductMat);
+    if (i < pts.length - 2) {                          // 內角：彎頭（矩形→方盒；圓/橢圓→球）
+      let el;
+      if (shape === 'rect') {
+        el = new THREE.Mesh(new THREE.BoxGeometry(w * 1.06, h * 1.06, Math.max(w, h) * 1.06), ductMat);
+      } else {
+        const r = shape === 'circ' ? d / 2 : Math.max(w, h) / 2;
+        el = new THREE.Mesh(new THREE.SphereGeometry(r * 1.06, 14, 12), ductMat);
+        if (shape === 'oval') el.scale.set(w / Math.max(w, h), 1, h / Math.max(w, h));
+      }
       el.position.copy(pts[i + 1]);
       el.userData.pipeIndex = index;
       group.add(el);
     }
   }
-  for (const c of pipe.components ?? []) {              // 三通/風門 沿風管弧長定位
+  for (const c of pipe.components ?? []) {              // 三通/風門/漸縮 沿風管弧長定位
     const pose = arcToPose(pipe, c.at);
     if (!pose) continue;
-    const comp = buildDuctFitting(c.kind, w, h);
+    const comp = buildDuctFitting(c.kind, w, h, pipe.duct, c.variant);
     comp.position.copy(pose.pos);
     comp.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), pose.dir);
     comp.traverse((o) => { o.userData.pipeIndex = index; });
     group.add(comp);
   }
 }
-function buildDuctFitting(kind, w, h) {
+// duct：風管元件幾何。本地 X 軸＝流向（放置時 setFromUnitVectors(1,0,0)→pose.dir）。
+// variant：transition/reducer 的 'conc'（同心，預設）/'ecc'（偏心，底邊齊平）。
+function buildDuctFitting(kind, w, h, duct, variant) {
+  // 終端裝置（送風口/回風格柵/百葉）：自成一體，交由 plant-builders 幾何 builder
+  if (kind === 'diffuser' || kind === 'grille' || kind === 'louvre') {
+    return buildDuctTerminal(kind, w, h, duct);
+  }
   const g = new THREE.Group();
+  const shape = duct?.shape ?? 'rect';
+  const d = duct?.d ?? w;
+  const ecc = variant === 'ecc';
+  // 依斷面畫一片薄「端面套環」（本地 X 為流向厚度方向）
+  const collarAt = (thick, scale = 1.12) => {
+    if (shape === 'circ') {
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(d / 2 * scale, d / 2 * scale, thick, 20), ductMat);
+      c.rotation.z = Math.PI / 2;                       // 圓柱 Y 軸→轉到 X（流向）
+      return c;
+    }
+    if (shape === 'oval') {
+      // 單位圓柱（直徑1，軸沿本地 Y）先縮放再旋轉：Three 合成序為 T·R·S，故 scale 作用於旋轉前的本地軸。
+      // 目標：世界 X(厚度)=thick、世界 Y(高)=h、世界 Z(寬)=w。旋轉 z=π/2 後 本地Y→世界X、本地X→世界Y、本地Z→世界Z。
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, thick, 20), ductMat);
+      c.scale.set(h * scale, 1, w * scale);            // 本地X→高(世界Y)=h、本地Y→厚(世界X)=thick、本地Z→寬(世界Z)=w
+      c.rotation.z = Math.PI / 2;
+      return c;
+    }
+    return new THREE.Mesh(new THREE.BoxGeometry(thick, h * scale, w * scale), ductMat);
+  };
   if (kind === 'tee') {
-    const collar = new THREE.Mesh(new THREE.BoxGeometry(w * 0.36, h * 1.14, w * 1.14), ductMat);
+    const collar = collarAt(w * 0.36, 1.14);
     const neck = new THREE.Mesh(new THREE.BoxGeometry(w * 0.5, h * 0.4, w * 0.5), ductMat);
     neck.position.y = h * 0.34;
     const branch = new THREE.Mesh(new THREE.BoxGeometry(w * 0.7, h * 0.7, w * 0.7), ductMat);
     branch.position.y = h * 0.68;
     g.add(collar, neck, branch);
   } else if (kind === 'damper') {
-    const collar = new THREE.Mesh(new THREE.BoxGeometry(w * 0.22, h * 1.12, w * 1.12), ductMat);
+    const collar = collarAt(w * 0.22, 1.12);
     const flap = new THREE.Mesh(new THREE.BoxGeometry(0.02, h * 0.88, w * 0.88), std(0x3a4a5a));
     flap.rotation.x = 0.5;
     const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.26, 6), std(0x9aa4ad));
     handle.position.y = h * 0.62;
     g.add(collar, flap, handle);
+  } else if (kind === 'transition') {
+    // 斷面轉換：矩形↔圓形。入口＝本管斷面，出口＝相反斷面（rect→circ 或 circ/oval→rect）。
+    // 以四稜台↔圓錐兩段各半段近似（示意）；ecc＝偏心（出口貼齊底邊），否則同心。
+    const L = Math.max(w, h, d) * 0.9;
+    const half = L / 2;
+    const t = 0.02;
+    const toCirc = shape === 'rect';                    // rect→圓，圓/橢圓→rect
+    const rIn = shape === 'circ' ? d / 2 : Math.max(w, h) / 2;
+    const rOut = rIn;                                   // 等效外接半徑（同尺寸換形）
+    const dyIn = ecc ? -rIn * 0.4 : 0;                  // 偏心：入/出中心 Y 位移（底齊示意）
+    const dyOut = ecc ? rIn * 0.4 : 0;
+    const inFace = collarAt(t, 1.0);  inFace.position.set(-half, dyIn, 0);
+    // 出口端面（相反斷面）
+    const outFace = toCirc
+      ? (() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(rOut, rOut, t, 20), ductMat); m.rotation.z = Math.PI / 2; return m; })()
+      : new THREE.Mesh(new THREE.BoxGeometry(t, h, w), ductMat);
+    outFace.position.set(half, dyOut, 0);
+    // 斜壁：入口段用入口斷面近似錐、出口段用出口斷面近似錐，於中點對接
+    const inSeg = new THREE.Mesh(new THREE.CylinderGeometry(rIn, rIn, half, shape === 'rect' ? 4 : 20), ductMat);
+    if (shape === 'oval') inSeg.scale.set(h / Math.max(w, h), 1, w / Math.max(w, h));
+    if (shape === 'rect') inSeg.rotation.y = Math.PI / 4;
+    const inWrap = new THREE.Group(); inWrap.rotation.z = Math.PI / 2; inWrap.position.set(-half / 2, dyIn / 2, 0); inWrap.add(inSeg);
+    const outSeg = new THREE.Mesh(new THREE.CylinderGeometry(rOut, rOut, half, toCirc ? 20 : 4), ductMat);
+    if (!toCirc) outSeg.rotation.y = Math.PI / 4;
+    const outWrap = new THREE.Group(); outWrap.rotation.z = Math.PI / 2; outWrap.position.set(half / 2, dyOut / 2, 0); outWrap.add(outSeg);
+    inSeg.userData.transCone = true; outSeg.userData.transCone = true;
+    g.add(inWrap, outWrap, inFace, outFace);
+  } else if (kind === 'reducer') {
+    // 變徑：同斷面形狀、大→小（出口約 0.62 倍）。ecc＝偏心（出口貼底），否則同心。
+    const L = Math.max(w, h, d) * 0.9;
+    const half = L / 2;
+    const t = 0.02;
+    const rIn = shape === 'circ' ? d / 2 : Math.max(w, h) / 2;
+    const rOut = rIn * 0.62;
+    const dy = ecc ? -(rIn - rOut) : 0;                 // 偏心：出口中心下移使底邊齊平
+    const inFace = collarAt(t, 1.0);  inFace.position.x = -half;
+    const outFace = shape === 'rect'
+      ? new THREE.Mesh(new THREE.BoxGeometry(t, h * 0.62, w * 0.62), ductMat)
+      : shape === 'circ'
+        ? (() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(rOut, rOut, t, 20), ductMat); m.rotation.z = Math.PI / 2; return m; })()
+        : (() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, t, 20), ductMat); m.scale.set(h * 0.62, 1, w * 0.62); m.rotation.z = Math.PI / 2; return m; })();
+    outFace.position.set(half, dy, 0);
+    const cone = new THREE.Mesh(new THREE.CylinderGeometry(rOut, rIn, L, shape === 'rect' ? 4 : 20), ductMat);
+    if (shape === 'oval') cone.scale.set(h / Math.max(w, h), 1, w / Math.max(w, h));
+    if (shape === 'rect') cone.rotation.y = Math.PI / 4;
+    const coneWrap = new THREE.Group();
+    coneWrap.rotation.z = Math.PI / 2;                  // 錐 Y 軸→X（流向）
+    coneWrap.position.y = dy / 2;                       // 偏心：斜壁中心跟隨出口位移
+    coneWrap.add(cone);
+    cone.userData.transCone = true;
+    g.add(coneWrap, inFace, outFace);
   } else {
-    g.add(new THREE.Mesh(new THREE.BoxGeometry(w * 0.3, h * 1.12, w * 1.12), ductMat));
+    g.add(collarAt(w * 0.3, 1.12));
   }
   return g;
 }
 
 function rebuildAllPipes() {
-  for (const p of pipeObjects) if (p) scene.remove(p.group);
+  for (const p of pipeObjects) if (p) {
+    p.group.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); });   // 清坡度標籤 DOM，防孤兒鬼標籤
+    scene.remove(p.group);
+  }
   pipeObjects.length = 0;
   sceneData.pipes.forEach((pipe, i) => buildPipe(pipe, i));
   applyLayers();
+  if (udaColorKey || xrayOn || wireframeOn) refreshRenderLayers(true);   // 管線重建後重套 UDA 著色/X-ray，避免掉色/不一致
+}
+
+// 單條管重建：dispose 舊 group 幾何後重繪，index 對齊不變。
+// 注意：管身 cylinder/joint/insul 用的是模組層共用單例材質（pipeMat/insulMat/serviceMats 快取），
+// 絕不可在此 dispose material，否則會釋放掉場上其他管線仍引用的共用材質（比照 rebuildAllPipes 只清幾何/DOM）。
+function rebuildPipe(index) {
+  const old = pipeObjects[index];
+  if (old) {
+    old.group.traverse((o) => {
+      if (o.isCSS2DObject) { o.element.remove(); return; }   // 清坡度標籤 DOM
+      o.geometry?.dispose();
+    });
+    scene.remove(old.group);
+    pipeObjects[index] = null;
+  }
+  buildPipe(sceneData.pipes[index], index);
+  applyLayers();
+  if (udaColorKey || xrayOn || wireframeOn) refreshRenderLayers(true);   // 管線重建後重套 UDA 著色/X-ray
+}
+
+// 設備移動/旋轉後，帶 head/tail 參考該設備的管線端點跟動（沿用 nozzle 現在世界座標）。
+// 每軸 roundMM 量化、寫回 canonical 公尺；只重建受影響管，逐條 dispose 舊幾何。
+function updateConnectedPipes(eqTag) {
+  if (!eqTag) return;
+  sceneData.pipes.forEach((pipe, i) => {
+    if (!pipe.pts || pipe.pts.length < 2) return;
+    let touched = false;
+    if (pipe.head?.eq === eqTag) {
+      const w = resolveEnd(pipe.head);
+      if (w) { pipe.pts[0] = [roundMM(w.x), roundMM(w.y), roundMM(w.z)]; touched = true; }
+    }
+    if (pipe.tail?.eq === eqTag) {
+      const w = resolveEnd(pipe.tail);
+      if (w) { pipe.pts[pipe.pts.length - 1] = [roundMM(w.x), roundMM(w.y), roundMM(w.z)]; touched = true; }
+    }
+    if (touched) rebuildPipe(i);
+  });
+  updateBranchPipes();   // 母管端點可能已移動 → branch 端跟隨
+}
+
+// branch 跟隨：凡 head/tail 為 {pipe,at} 母管參考者，端點對齊母管該弧長現在世界座標。
+// 不遞迴（branch 不作為他人母管的追蹤源，避免循環）；每軸 roundMM，只重建受影響管。
+function updateBranchPipes() {
+  sceneData.pipes.forEach((pipe, i) => {
+    if (!pipe.pts || pipe.pts.length < 2) return;
+    let touched = false;
+    if (pipe.head?.pipe !== undefined) {
+      const w = resolveEnd(pipe.head);
+      if (w) { pipe.pts[0] = [roundMM(w.x), roundMM(w.y), roundMM(w.z)]; touched = true; }
+    }
+    if (pipe.tail?.pipe !== undefined) {
+      const w = resolveEnd(pipe.tail);
+      if (w) { pipe.pts[pipe.pts.length - 1] = [roundMM(w.x), roundMM(w.y), roundMM(w.z)]; touched = true; }
+    }
+    if (touched) rebuildPipe(i);
+  });
 }
 
 // ------------------------------------------------------------ 載入場景
 function loadSceneData(data, id) {
   transform.detach();
   clearNodeHandles();
-  for (const { group } of eqObjects.values()) scene.remove(group);
+  resetReviewRender();   // 換場景前清掉 X-ray/線框 override 記錄，避免持有舊 mesh 參照
+  resetUdaColor();       // 同上：清掉屬性著色 override 記錄與旗標，避免持有舊 mesh 參照
+  // 移除群組前先清 CSS2D 標籤 DOM（設備/管嘴/坡度 ‰ 標籤掛在 overlay，scene.remove 不回收 → undo/redo 會殘留孤兒）
+  for (const { group } of eqObjects.values()) { group.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); }); scene.remove(group); }
   eqObjects.clear();
-  for (const p of pipeObjects) if (p) scene.remove(p.group);
+  for (const p of pipeObjects) if (p) { p.group.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); }); scene.remove(p.group); }
   pipeObjects.length = 0;
 
+  // 載入新場景前先卸下現有點雲（實體不隨場景持久化；保留 data.scan_models metadata）
+  clearPointCloud(true);
   sceneData = data;
   sceneId = id;
+  pcButtons();   // 依新場景重置點雲按鈕禁用狀態
   for (const eq of allEquipment()) buildEquipment(eq);
   sceneData.pipes.forEach((pipe, i) => buildPipe(pipe, i));
   rebuildUnderlays(sceneData.underlays);
   rebuildElevs();
+  rebuildDims();
   fitGround([...allEquipment()], sceneData.underlays);
   updateTopbar();
   rebuildTree();
@@ -514,10 +828,14 @@ let mode = 'idle'; // idle | placing | pipe | measure | pipenode | nozzle
 let placingAsset = null;  // ASSET_CATALOG 項
 let ductDraw = false;     // 繪製模式：true=下一條管線為風管
 let ductSize = [0.8, 0.5];
+let trayDraw = false;     // 繪製模式：true=下一條為電纜橋架（profile:'tray'，比照 duct 復用管線折線子系統）
+let trayWidth = 0.3;      // 托盤寬（公尺 canonical）
+let trayType = 'solid';   // ladder | solid | perforated
 let ghost = null;
 let selected = null;      // { kind: 'eq', def } | { kind: 'pipe', index }
 let repaintPanel = null;  // 目前右側面板的重繪閉包（切換單位時即時刷新 value/step/單位標籤）
 let pipeDraft = [];       // Vector3[]
+let pipeDraftRefs = [];   // (ref|null)[] 對齊 pipeDraft：各點吸附到的 nozzle 身分（供 head/tail 連接）
 let pipePreview = null;
 let snapOn = true;
 
@@ -532,9 +850,14 @@ function setMode(m) {
   document.querySelectorAll('.asset-btn').forEach((b) => b.classList.remove('active'));
   document.getElementById('pipe-btn').classList.remove('active');
   document.getElementById('duct-btn').classList.remove('active');
+  document.getElementById('tray-btn').classList.remove('active');
   ductDraw = false;
+  trayDraw = false;
   document.getElementById('btn-measure').classList.remove('active');
   document.getElementById('btn-measure-angle').classList.remove('active');
+  document.getElementById('btn-measure-clear').classList.remove('active');
+  document.getElementById('btn-dim3d').classList.remove('active');
+  dimPts = [];
   document.getElementById('pipe-node-btn').classList.remove('active');
   document.getElementById('btn-nozzle').classList.remove('active');
   if (ghost) { scene.remove(ghost); ghost = null; }
@@ -549,6 +872,7 @@ function setMode(m) {
 
 function clearPipeDraft() {
   pipeDraft = [];
+  pipeDraftRefs = [];
   if (pipePreview) { scene.remove(pipePreview); pipePreview = null; }
 }
 
@@ -557,7 +881,7 @@ function selectNone() {
   repaintPanel = null;
   transform.detach();
   clearNodeHandles();
-  pipeObjects.forEach((p, i) => { if (!p) return; const m = sceneData.pipes[i]?.profile === 'duct' ? ductMat : pipeMat; p.group.traverse((o) => { if (o.isMesh && !o.userData.insul) o.material = m; }); });
+  pipeObjects.forEach((p, i) => { if (!p) return; const m = pipeBaseMat(sceneData.pipes[i]); p.group.traverse((o) => { if (o.isMesh && !o.userData.insul && !o.userData.slopeMarker) o.material = m; }); });
   renderPropEmpty();
   syncTreeSelection();
   document.getElementById('st-sel').textContent = '選取：無';
@@ -581,7 +905,7 @@ function selectPipe(index) {
   selectNone();
   selected = { kind: 'pipe', index };
   const p = pipeObjects[index];
-  if (p) p.group.traverse((o) => { if (o.isMesh && !o.userData.insul) o.material = pipeHi; });
+  if (p) p.group.traverse((o) => { if (o.isMesh && !o.userData.insul && !o.userData.slopeMarker) o.material = pipeHi; });
   renderPipeProps(index);
   document.getElementById('st-sel').textContent = `選取：管線 #${index + 1}`;
   if (mode === 'pipenode') buildNodeHandles(index);
@@ -690,23 +1014,65 @@ function renderPropPanel(def) {
       ${pgRow(`東 E (${unitLabel()})`, `<input data-k="pos.0" type="number" step="${U().step}" value="${toDisp(def.pos[0])}">`)}
       ${pgRow(`北 N (${unitLabel()})`, `<input data-k="pos.2" type="number" step="${U().step}" value="${toDisp(def.pos[2])}">`)}
       ${pgRow(`上 U (${unitLabel()})`, `<span>${toDisp(def.pos[1] ?? 0)}</span>`)}
-      ${pgRow('旋轉（度）', `<input data-k="rot" type="number" step="5" value="${Math.round((def.rot_y ?? 0) * 180 / Math.PI)}">`)}
+      ${pgRow('旋轉 X（度）', `<input data-k="rotx" type="number" step="5" value="${Math.round((def.rot_x ?? 0) * 180 / Math.PI)}">`)}
+      ${pgRow('旋轉 Y（度）', `<input data-k="rot" type="number" step="5" value="${Math.round((def.rot_y ?? 0) * 180 / Math.PI)}">`)}
+      ${pgRow('旋轉 Z（度）', `<input data-k="rotz" type="number" step="5" value="${Math.round((def.rot_z ?? 0) * 180 / Math.PI)}">`)}
       ${pgRow('WRT', `<span>/WORL</span>`)}
     </div>
     ${dimRows ? `<div class="pg-section">Design Parameters</div><div class="pg-grid">${dimRows}</div>` : ''}
+    ${(() => {
+      const env = def.envelope ?? { on: false, pad: { x: 0.8, y: 0, z: 0.8 } };
+      const pad = env.pad ?? { x: 0.8, y: 0, z: 0.8 };
+      const dis = env.on ? '' : ' disabled';
+      return `<div class="pg-section">維修包絡 Access Envelope</div><div class="pg-grid">
+        ${pgRow('保留空間', `<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" data-env="on"${env.on ? ' checked' : ''}>啟用（軟碰撞）</label>`)}
+        ${pgRow(`外擴 X 東西 (${unitLabel()})`, `<input data-env="x" type="number" step="${U().step}" min="0" value="${toDisp(pad.x ?? 0)}"${dis}>`)}
+        ${pgRow(`外擴 Z 南北 (${unitLabel()})`, `<input data-env="z" type="number" step="${U().step}" min="0" value="${toDisp(pad.z ?? 0)}"${dis}>`)}
+        ${pgRow(`外擴 Y 上下 (${unitLabel()})`, `<input data-env="y" type="number" step="${U().step}" min="0" value="${toDisp(pad.y ?? 0)}"${dis}>`)}
+      </div>`;
+    })()}
     ${['scolumn', 'sbeam'].includes(def.type) ? (() => {
       const s = steelSection(def.section);
+      const jv = def.just ?? 'NA';
+      const e1 = def.end1 ?? {}, e2 = def.end2 ?? {};
+      const nodeV = def.node ?? (def.type === 'scolumn' ? 'baseplate' : 'none');
       return `<div class="pg-section">斷面 Section</div><div class="pg-grid">
         ${pgRow('型鋼', `<select data-k="section" style="width:100%">${STEEL_SECTIONS.map((x) =>
           `<option value="${x.code}" ${s.code === x.code ? 'selected' : ''}>${x.code}</option>`).join('')}</select>`)}
-        ${pgRow('斷面 (mm)', `<span>D${s.depth}×B${s.flange}｜tw${s.web}／tf${s.tf}</span>`)}</div>`;
+        ${pgRow('斷面 (mm)', `<span>${sectionDesc(s)}</span>`)}
+        ${pgRow('定位線 Justification', `<select data-k="just" style="width:100%">${JUST_OPTIONS.map((o) =>
+          `<option value="${o.v}" ${jv === o.v ? 'selected' : ''}>${o.t}</option>`).join('')}</select>`)}</div>
+        <div class="pg-section">端部處理 End Prep</div><div class="pg-grid">
+        ${pgRow(`起端退縮 (${unitLabel()})`, `<input data-end="1" data-ep="setback" type="number" step="${U().step}" min="0" value="${toDisp(e1.setback ?? 0)}">`)}
+        ${pgRow('起端斜接 (°)', `<input data-end="1" data-ep="miter" type="number" step="1" value="${e1.miter ?? 0}">`)}
+        ${pgRow(`末端退縮 (${unitLabel()})`, `<input data-end="2" data-ep="setback" type="number" step="${U().step}" min="0" value="${toDisp(e2.setback ?? 0)}">`)}
+        ${pgRow('末端斜接 (°)', `<input data-end="2" data-ep="miter" type="number" step="1" value="${e2.miter ?? 0}">`)}
+        ${pgRow('節點 Node', `<select data-k="node" style="width:100%">${NODE_OPTIONS.map((o) =>
+          `<option value="${o.v}" ${nodeV === o.v ? 'selected' : ''}>${o.t}</option>`).join('')}</select>`)}</div>`;
+    })() : ''}
+    ${def.type === 'grating' ? (() => {
+      const dir = (def.bar_dir ?? 'w') === 'd' ? 'd' : 'w';
+      const pitch = def.bar_pitch ?? 0.04;
+      return `<div class="pg-section">格柵 Grating</div><div class="pg-grid">
+        ${pgRow('橫檔方向', `<select data-k="bar_dir" style="width:100%">
+          <option value="w" ${dir === 'w' ? 'selected' : ''}>沿寬 W（東西）</option>
+          <option value="d" ${dir === 'd' ? 'selected' : ''}>沿深 D（南北）</option></select>`)}
+        ${pgRow(`橫檔間距 (${unitLabel()})`, `<input data-k="bar_pitch" type="number" step="${U().step}" min="0" value="${toDisp(pitch)}">`)}</div>`;
     })() : ''}
     ${def.nozzles?.length ? `<div class="pg-section">管嘴 Nozzles</div><div class="pg-grid">${def.nozzles.map((nz, i) =>
       pgRow(nz.id, `<select data-nzdn="${i}" class="rsel" style="width:86px">${PIPE_BORES.map((b) =>
         `<option ${b.dn === nz.dn ? 'selected' : ''}>${b.dn}</option>`).join('')}</select>
         <button data-nzdel="${i}" style="margin-left:6px;border:none;background:none;color:#d03050;cursor:pointer;font-size:11.5px;font-family:inherit">刪除</button>`)).join('')}</div>` : ''}
+    ${def.type === 'psupport' ? (() => {
+      const st = SUPPORT_TYPE_SET.has(def.stype) ? def.stype : 'rest';
+      return `<div class="pg-section">支撐型式 Support Type</div><div class="pg-grid">
+        ${pgRow('型式', `<select data-k="stype" style="width:100%">${SUPPORT_TYPES.map((o) =>
+          `<option value="${o.code}" ${st === o.code ? 'selected' : ''}>${o.name}</option>`).join('')}</select>`)}
+        ${pgRow('依附鋼構', `<span>${def.sup_on ? def.sup_on : '（落地 y=0）'}</span>`)}</div>`;
+    })() : ''}
     ${def.type === 'piperack' ? `<div class="pg-section">儀電</div><button class="pbtn" id="prop-tray">沿此管架佈橋架</button><button class="pbtn" id="prop-tray-chain">串接共線管架佈線</button>` : ''}
     ${def.type === 'assembly' ? primsSection(def) : ''}
+    ${udaSection(def)}
     ${infoRows ? `<div class="pg-section">Information</div><div class="pg-grid">${infoRows}</div>` : ''}
     <button class="pbtn" id="prop-zoom">縮放至（F）</button>
     <button class="pbtn danger" id="prop-delete">刪除（Delete）</button>`;
@@ -717,12 +1083,18 @@ function renderPropPanel(def) {
   });
 
   propBody.querySelectorAll('input').forEach((inp) => {
+    if (inp.dataset.env !== undefined) return;   // 維修包絡欄位另有專屬處理
+    if (inp.dataset.end !== undefined) return;   // 端部處理欄位另有專屬處理
     inp.addEventListener('change', () => {
       const k = inp.dataset.k;
       pushUndo();
-      if (k === 'rot') {
-        def.rot_y = (+inp.value) * Math.PI / 180;
-        eqObjects.get(def.tag).group.rotation.y = def.rot_y;
+      if (k === 'rot' || k === 'rotx' || k === 'rotz') {
+        const rad = (+inp.value) * Math.PI / 180;
+        if (k === 'rotx') def.rot_x = rad;
+        else if (k === 'rotz') def.rot_z = rad;
+        else def.rot_y = rad;
+        eqObjects.get(def.tag).group.rotation.set(def.rot_x ?? 0, def.rot_y ?? 0, def.rot_z ?? 0);
+        updateConnectedPipes(def.tag);   // 旋轉改 nozzle 世界座標 → 管端跟走
       } else if (k === 'tag') {
         const nt = inp.value.trim();
         if (!nt || (eqObjects.has(nt) && nt !== def.tag)) { inp.value = def.tag; return; }
@@ -739,6 +1111,7 @@ function renderPropPanel(def) {
       } else if (k.startsWith('pos.')) {
         def.pos[+k.slice(4)] = fromDisp(inp.value);
         eqObjects.get(def.tag).group.position.set(...def.pos);
+        updateConnectedPipes(def.tag);   // 平移 → 管端跟走
       } else if (k.startsWith('dims.')) {
         const dk = k.slice(5);
         def.dims[dk] = COUNT_DIMS.has(dk) ? Math.max(1, Math.round(+inp.value))
@@ -755,6 +1128,64 @@ function renderPropPanel(def) {
     def.section = e.target.value;
     rebuildEquipment(def);
     renderPropPanel(def);
+  });
+  propBody.querySelector('[data-k="just"]')?.addEventListener('change', (e) => {
+    pushUndo();
+    def.just = e.target.value;
+    rebuildEquipment(def);
+    renderPropPanel(def);
+  });
+  propBody.querySelectorAll('[data-end]').forEach((inp) => {   // 端部處理：退縮(m)/斜接(°)
+    inp.addEventListener('change', () => {
+      pushUndo();
+      const key = inp.dataset.end === '2' ? 'end2' : 'end1';
+      const ep = inp.dataset.ep;   // 'setback' | 'miter'
+      const cur = def[key] ?? {};
+      // setback 為長度(公尺 canonical，量化用 roundMM)；miter 為角度(度)不量化。
+      const val = ep === 'setback' ? Math.max(0, fromDisp(inp.value)) : +inp.value;
+      def[key] = { ...cur, [ep]: val };
+      rebuildEquipment(def);
+    });
+  });
+  propBody.querySelector('[data-k="node"]')?.addEventListener('change', (e) => {   // 連接節點型式
+    pushUndo();
+    def.node = e.target.value;
+    rebuildEquipment(def);
+  });
+  propBody.querySelector('[data-k="bar_dir"]')?.addEventListener('change', (e) => {   // 格柵橫檔方向
+    pushUndo();
+    def.bar_dir = e.target.value;
+    rebuildEquipment(def);
+  });
+  propBody.querySelector('[data-k="bar_pitch"]')?.addEventListener('change', (e) => {   // 格柵橫檔間距(m)
+    pushUndo();
+    def.bar_pitch = roundMM(Math.max(0.02, fromDisp(e.target.value)));
+    rebuildEquipment(def);
+  });
+  propBody.querySelector('[data-k="stype"]')?.addEventListener('change', (e) => {   // 支撐型式切換：改 def.stype 重建幾何
+    pushUndo();
+    def.stype = e.target.value;
+    rebuildEquipment(def);
+    renderPropPanel(def);
+  });
+  // 維修/抽出包絡：開關＋X/Z/Y 外擴（mm 顯示 ↔ 公尺 canonical）
+  const ensureEnv = () => {
+    if (!def.envelope) def.envelope = { on: false, pad: { x: 0.8, y: 0, z: 0.8 } };
+    if (!def.envelope.pad) def.envelope.pad = { x: 0.8, y: 0, z: 0.8 };
+    return def.envelope;
+  };
+  propBody.querySelector('[data-env="on"]')?.addEventListener('change', (e) => {
+    pushUndo();
+    ensureEnv().on = e.target.checked;
+    rebuildEquipment(def);
+    renderPropPanel(def);
+  });
+  ['x', 'y', 'z'].forEach((ax) => {
+    propBody.querySelector(`[data-env="${ax}"]`)?.addEventListener('change', (e) => {
+      pushUndo();
+      ensureEnv().pad[ax] = Math.max(0, fromDisp(e.target.value));   // 存公尺 canonical
+      rebuildEquipment(def);
+    });
   });
   propBody.querySelectorAll('[data-nzdn]').forEach((sel) => sel.addEventListener('change', () => {
     pushUndo();
@@ -790,6 +1221,7 @@ function renderPropPanel(def) {
     rebuildTree(); updateTopbar();
     setHint(res.trays > 1 ? `已串接 ${res.racks} 座共線管架：${res.trays} 段橋架＋${res.bends} 轉角彎頭（儀電圖層）` : `僅此管架佈 1 段橋架（找不到共線相鄰管架）`);
   });
+  wireUda(def, () => renderPropPanel(def));
   document.getElementById('prop-zoom').addEventListener('click', () => zoomToSelection());
   document.getElementById('prop-delete').addEventListener('click', deleteSelected);
 }
@@ -803,9 +1235,11 @@ const PRIM_KINDS = {
   snou: { name: 'SNOU 偏心漸縮', dims: { r1: 0.9, r2: 0.45, h: 1.0, off: 0.3 } },
   pyra: { name: 'PYRA 角錐/漏斗', dims: { bx: 1.4, bz: 1.4, tx: 0.5, tz: 0.5, h: 1.2 } },
   ctor: { name: 'CTOR 圓環/彎頭', dims: { r: 0.9, rt: 0.2, ang: 90 } },
+  extr: { name: 'EXTR 擠出柱', dims: { sides: 6, r: 0.8, h: 2 } },
+  revo: { name: 'REVO 迴轉封頭', dims: { r: 1, h: 1, seg: 24 } },
 };
-// 基元中非長度型的參數（角度等），不做 mm 轉換
-const PRIM_NONLEN = new Set(['ang']);
+// 基元中非長度型的參數（角度、計數/段數），不做 mm 轉換
+const PRIM_NONLEN = new Set(['ang', 'sides', 'seg']);
 const primHeight = (p) => p.kind === 'dish' ? p.dims.r : (p.dims.h ?? 1);
 
 function primsSection(def) {
@@ -863,15 +1297,26 @@ function wirePrims(def) {
 function renderPipeProps(index) {
   repaintPanel = () => renderPipeProps(index);
   const pipe = sceneData.pipes[index];
-  document.getElementById('prop-title').textContent = `管線 #${index + 1}`;
   const isDuct = pipe.profile === 'duct';
-  const DUCT_FITTINGS = [{ kind: 'tee', name: '風管三通' }, { kind: 'damper', name: '風門' }];
-  const compKinds = isDuct ? DUCT_FITTINGS : PIPE_COMPONENTS;
-  const compName = Object.fromEntries([...PIPE_COMPONENTS, ...DUCT_FITTINGS].map((c) => [c.kind, c.name]));
+  const isTray = pipe.profile === 'tray';
+  document.getElementById('prop-title').textContent = `${isTray ? '電纜橋架' : isDuct ? '風管' : '管線'} #${index + 1}`;
+  const TRAY_WIDTHS = [0.15, 0.3, 0.45, 0.6];   // 標準托盤寬（公尺）：150/300/450/600mm
+  const TRAY_TYPES = [{ v: 'ladder', name: '梯級（ladder）' }, { v: 'solid', name: '實底（solid）' }, { v: 'perforated', name: '沖孔（perforated）' }];
+  const DUCT_FITTINGS = [{ kind: 'tee', name: '風管三通' }, { kind: 'damper', name: '風門' },
+    { kind: 'transition', name: '斷面轉換' }, { kind: 'reducer', name: '變徑' },
+    { kind: 'diffuser', name: '送風口' }, { kind: 'grille', name: '回風格柵' }, { kind: 'louvre', name: '百葉' }];
+  const DUCT_VARIANT_KINDS = new Set(['transition', 'reducer']);   // 支援同心/偏心選項的配件
+  const DUCT_SHAPES = [{ v: 'rect', name: '矩形' }, { v: 'circ', name: '圓形' }, { v: 'oval', name: '橢圓' }];
+  const compKinds = isTray ? [] : isDuct ? DUCT_FITTINGS : PIPE_COMPONENTS;   // 托盤暫不提供管中元件
+  const compName = Object.fromEntries((isDuct ? DUCT_FITTINGS : PIPE_COMPONENTS).map((c) => [c.kind, c.name]));   // 依當前 profile 解析標籤，避免管線 reducer 顯示成風管『變徑』
   const compRows = (pipe.components ?? []).map((c, i) =>
     `<label>${compName[c.kind] ?? c.kind}</label>
      <div class="pg-v" style="display:flex;gap:4px;align-items:center">
        <input data-cat="${i}" type="number" step="${U().step}" value="${toDisp(c.at)}" title="距管頭弧長（${unitLabel()}）" style="flex:1">
+       ${(isDuct && DUCT_VARIANT_KINDS.has(c.kind)) ? `<select data-cvar="${i}" title="同心／偏心" style="width:64px">
+         <option value="conc" ${(c.variant ?? 'conc') === 'conc' ? 'selected' : ''}>同心</option>
+         <option value="ecc" ${c.variant === 'ecc' ? 'selected' : ''}>偏心</option>
+       </select>` : ''}
        <button class="pane-x" data-cdel="${i}" title="刪除">✕</button>
      </div>`).join('');
   const compOpts = compKinds.map((c) => `<option value="${c.kind}">${c.name}</option>`).join('');
@@ -884,47 +1329,95 @@ function renderPipeProps(index) {
     </div>
     <div class="pg-section">Specification</div>
     <div class="pg-grid">
-      ${pgRow('Spec', `<select data-k="spec" style="width:100%">${PIPE_SPECS.map((sp) =>
+      ${isDuct ? (() => {
+        const duct = pipe.duct ?? {};
+        const shape = duct.shape ?? 'rect';
+        const w = duct.w ?? 0.8, h = duct.h ?? 0.5, dd = duct.d ?? w;
+        let rows = pgRow('斷面形狀', `<select data-duct="shape" style="width:100%">${DUCT_SHAPES.map((s) =>
+          `<option value="${s.v}" ${shape === s.v ? 'selected' : ''}>${s.name}</option>`).join('')}</select>`);
+        if (shape === 'circ') {
+          rows += pgRow(`直徑 ⌀ (${unitLabel()})`, `<input data-duct="d" type="number" step="${U().step}" value="${toDisp(dd)}">`);
+        } else {
+          rows += pgRow(`寬 W (${unitLabel()})`, `<input data-duct="w" type="number" step="${U().step}" value="${toDisp(w)}">`);
+          rows += pgRow(`高 H (${unitLabel()})`, `<input data-duct="h" type="number" step="${U().step}" value="${toDisp(h)}">`);
+        }
+        return rows;
+      })() : ''}
+      ${isTray ? (() => {
+        const tw = pipe.tray?.w ?? 0.3, tt = pipe.tray?.type ?? 'solid';
+        // 寬度：若非標準值也塞一個當前值選項，避免下拉選不到自訂寬
+        const widths = TRAY_WIDTHS.includes(tw) ? TRAY_WIDTHS : [...TRAY_WIDTHS, tw].sort((a, b) => a - b);
+        let rows = pgRow('托盤寬 W', `<select data-tray="w" style="width:100%">${widths.map((v) =>
+          `<option value="${v}" ${Math.abs(v - tw) < 1e-6 ? 'selected' : ''}>${(v * 1000) | 0} mm</option>`).join('')}</select>`);
+        rows += pgRow('托盤型式', `<select data-tray="type" style="width:100%">${TRAY_TYPES.map((t) =>
+          `<option value="${t.v}" ${tt === t.v ? 'selected' : ''}>${t.name}</option>`).join('')}</select>`);
+        return rows;
+      })() : ''}
+      ${(isDuct || isTray) ? '' : pgRow('Spec', `<select data-k="spec" style="width:100%">${PIPE_SPECS.map((sp) =>
         `<option value="${sp.code}" ${pipe.spec === sp.code ? 'selected' : ''}>${sp.code}｜${sp.name}</option>`).join('')}</select>`)}
-      ${pgRow('Bore', `<select data-k="dn" style="width:100%">${
+      ${(isDuct || isTray) ? '' : pgRow('服務別 Service', `<select data-k="service" style="width:100%"><option value="" ${!pipe.service ? 'selected' : ''}>（無）＝用 Spec 色</option>${PIPE_SERVICES.map((sv) =>
+        `<option value="${sv.code}" ${pipe.service === sv.code ? 'selected' : ''}>${sv.name}</option>`).join('')}</select>`)}
+      ${(isDuct || isTray) ? '' : pgRow('Bore', `<select data-k="dn" style="width:100%">${
         (!pipe.dn && !PIPE_BORES.some((b) => Math.abs(b.r - pipe.r) < 0.01))
           ? '<option value="" selected disabled>（自訂 bore）</option>' : ''}${PIPE_BORES.map((b) =>
         `<option value="${b.dn}" ${pipe.dn === b.dn || (!pipe.dn && Math.abs(b.r - pipe.r) < 0.01) ? 'selected' : ''}>${b.dn}（⌀${Math.round(b.r * 2000)}mm）</option>`).join('')}</select>`)}
-      ${pgRow(`外徑 ⌀ (${unitLabel()})`, `<input data-k="od" type="number" step="${U().step}" value="${toDisp(pipe.r * 2)}">`)}
-      ${isDuct ? '' : pgRow('Schedule', `<select data-k="sched" style="width:100%">${PIPE_SCHEDULES.map((s) =>
+      ${(isDuct || isTray) ? '' : pgRow(`外徑 ⌀ (${unitLabel()})`, `<input data-k="od" type="number" step="${U().step}" value="${toDisp(pipe.r * 2)}">`)}
+      ${(isDuct || isTray) ? '' : pgRow('Schedule', `<select data-k="sched" style="width:100%">${PIPE_SCHEDULES.map((s) =>
         `<option value="${s}" ${(pipe.sched ?? 'STD') === s ? 'selected' : ''}>Sch ${s}</option>`).join('')}</select>`)}
       ${(() => {
-        const wall = isDuct ? null : pipeWall(pipe.dn, pipe.sched ?? 'STD');
+        const wall = (isDuct || isTray) ? null : pipeWall(pipe.dn, pipe.sched ?? 'STD');
         return wall == null ? ''
           : pgRow(`壁厚 (${unitLabel()})`, `<span>${fmtLen(wall, false)}</span>`)
           + pgRow(`內徑 bore (${unitLabel()})`, `<span>${fmtLen(pipe.r * 2 - 2 * wall, false)}</span>`);
       })()}
-      ${pgRow(`保溫厚 (${unitLabel()})`, `<input data-k="insul" type="number" step="${U().step}" value="${toDisp(pipe.insul ?? 0)}">`)}
-      ${(pipe.insul ?? 0) > 0 ? pgRow(`含保溫外徑 (${unitLabel()})`, `<span>${fmtLen(pipe.r * 2 + 2 * pipe.insul, false)}</span>`) : ''}
+      ${isTray ? '' : pgRow(`保溫厚 (${unitLabel()})`, `<input data-k="insul" type="number" step="${U().step}" value="${toDisp(pipe.insul ?? 0)}">`)}
+      ${(!isTray && (pipe.insul ?? 0) > 0) ? pgRow(`含保溫外徑 (${unitLabel()})`, `<span>${fmtLen(pipe.r * 2 + 2 * pipe.insul, false)}</span>`) : ''}
+      ${(isDuct || isTray) ? '' : pgRow('坡度 Slope (‰)', `<input data-k="slope" type="number" step="1" value="${+pipe.slope || 0}" title="每公尺水平落差 mm（‰）；下坡為正。0＝水平">`)}
+      ${(isDuct || isTray) ? '' : (() => {
+        const s = +pipe.slope || 0;
+        if (!s) return '';   // 水平不顯 Fall 列，維持面板精簡
+        const hLen = pipeHorizLength(pipe);          // 水平長度（公尺 canonical）
+        const fall = (s / 1000) * hLen;              // 總落差＝水平長度×坡度
+        const ratio = `1:${Math.round(1000 / Math.abs(s))}`;
+        return pgRow('總落差 Fall', `<span>${fmtLen(fall)}（${ratio}／水平 ${fmtLen(hLen)}）</span>`);
+      })()}
+      ${isDuct ? '' : (() => {
+        const st = SUPPORT_TYPE_SET.has(pipe.sup_type) ? pipe.sup_type : 'rest';
+        return pgRow('支撐型式（預設）', `<select data-k="suptype" style="width:100%">${SUPPORT_TYPES.map((o) =>
+          `<option value="${o.code}" ${st === o.code ? 'selected' : ''}>${o.name}</option>`).join('')}</select>`);
+      })()}
       ${pgRow('節點數', `<span>${pipe.pts.length}</span>`)}
       ${pgRow('總長', `<span>${fmtLen(pipeLength(pipe))}</span>`)}
     </div>
-    <div class="pg-section">Components（管中元件）</div>
+    ${isTray ? '' : `<div class="pg-section">Components（管中元件）</div>
     ${compRows ? `<div class="pg-grid">${compRows}</div>` : ''}
     <div style="display:flex;gap:6px;margin-top:6px">
       <select class="rsel" id="comp-kind" style="flex:1">${compOpts}</select>
       <button class="pbtn" id="comp-place" style="width:auto;margin:0;padding:6px 12px">沿管放置</button>
-    </div>
+    </div>`}
+    ${udaSection(pipe)}
     <button class="pbtn" id="prop-nodes">節點編輯</button>
     <button class="pbtn danger" id="prop-delete">刪除（Delete）</button>`;
-  propBody.querySelector('[data-k="od"]').addEventListener('change', (e) => {
+  wireUda(pipe, () => selectPipe(index));
+  propBody.querySelector('[data-k="od"]')?.addEventListener('change', (e) => {   // 風管不渲染此欄→null-safe
     pushUndo();
     pipe.dn = null;   // 手改外徑＝自訂 bore，清掉 DN 名目避免下拉與實際 r 矛盾（也不污染存檔/USD）
     pipe.r = Math.round(fromDisp(e.target.value) / 2 * 10000) / 10000;   // 外徑 ÷2 → 半徑（保 0.1mm 精度）
     rebuildAllPipes();
     selectPipe(index);
   });
-  propBody.querySelector('[data-k="spec"]').addEventListener('change', (e) => {
+  propBody.querySelector('[data-k="spec"]')?.addEventListener('change', (e) => {   // 風管不渲染此欄→null-safe
     pushUndo();
     pipe.spec = e.target.value;
     selectPipe(index);
   });
-  propBody.querySelector('[data-k="dn"]').addEventListener('change', (e) => {
+  propBody.querySelector('[data-k="service"]')?.addEventListener('change', (e) => {   // 服務別著色（風管不渲染此欄→null-safe）
+    pushUndo();
+    pipe.service = e.target.value || undefined;   // 空＝無服務別，存 undefined（回用 Spec 色、不污染存檔）
+    rebuildAllPipes();   // 重建以套用服務色材質（材質在 buildPipe 決定）
+    selectPipe(index);
+  });
+  propBody.querySelector('[data-k="dn"]')?.addEventListener('change', (e) => {   // 風管不渲染此欄→null-safe
     pushUndo();
     pipe.dn = e.target.value;
     pipe.r = PIPE_BORES.find((b) => b.dn === pipe.dn)?.r ?? pipe.r;
@@ -942,10 +1435,69 @@ function renderPipeProps(index) {
     rebuildAllPipes();   // 重建以套用/移除保溫外殼
     selectPipe(index);
   });
+  propBody.querySelector('[data-k="slope"]')?.addEventListener('change', (e) => {   // 風管不渲染此欄→null-safe
+    pushUndo();
+    // 坡度存 ‰（每公尺水平落差 mm）；純中繼屬性，只影響渲染/報表，不改 pipe.pts。
+    const v = Math.round(parseFloat(e.target.value) || 0);   // 收斂為整數 ‰
+    pipe.slope = v || undefined;   // 0 存 undefined，維持水平預設乾淨（不污染存檔）
+    rebuildAllPipes();   // 重建以套用/移除坡度視覺落差與標記
+    selectPipe(index);
+  });
+  propBody.querySelector('[data-k="suptype"]')?.addEventListener('change', (e) => {   // 管線預設支撐型式（風管不渲染此欄→null-safe）
+    pushUndo();
+    const v = e.target.value;
+    // rest 為預設→存 undefined 保存檔乾淨（讀取端一律回退 rest）；其餘存實值。
+    pipe.sup_type = (SUPPORT_TYPE_SET.has(v) && v !== 'rest') ? v : undefined;
+    if (hasSupports(pipe.uid)) { regenSupportsForPipe(pipe); rebuildTree(); }   // 已有支撐→依新型式重生
+    selectPipe(index);
+  });
+  // 風管斷面形狀：切換 rect/circ/oval，改變後重繪面板（切換 W/H↔⌀ 欄位）並重建
+  propBody.querySelector('[data-duct="shape"]')?.addEventListener('change', (e) => {
+    pushUndo();
+    pipe.duct = pipe.duct ?? {};
+    pipe.duct.shape = e.target.value;
+    if (pipe.duct.shape === 'circ' && pipe.duct.d == null) pipe.duct.d = pipe.duct.w ?? 0.8;  // 圓形沿用寬作預設直徑
+    pipe.r = Math.max(pipe.duct.w ?? 0, pipe.duct.h ?? 0, pipe.duct.d ?? 0) / 2;   // 同步等效半徑（clash/支撐用）
+    rebuildAllPipes();
+    selectPipe(index);   // 觸發 renderPipeProps 重繪，換出對應尺寸欄位
+  });
+  // 風管斷面尺寸（mm 顯示、公尺寫回 pipe.duct）
+  propBody.querySelectorAll('[data-duct="w"], [data-duct="h"], [data-duct="d"]').forEach((inp) =>
+    inp.addEventListener('change', (e) => {
+      pushUndo();
+      pipe.duct = pipe.duct ?? {};
+      pipe.duct[inp.dataset.duct] = Math.max(0.001, fromDisp(e.target.value));   // 顯示值→公尺，下限 1mm
+      pipe.r = Math.max(pipe.duct.w ?? 0, pipe.duct.h ?? 0, pipe.duct.d ?? 0) / 2;   // 同步等效半徑（clash/支撐用）
+      rebuildAllPipes();
+      selectPipe(index);
+    }));
+  // 電纜橋架寬度/型式：改後同步等效半徑 r（=寬/2）並重建幾何
+  propBody.querySelector('[data-tray="w"]')?.addEventListener('change', (e) => {
+    pushUndo();
+    pipe.tray = pipe.tray ?? {};
+    pipe.tray.w = Math.max(0.05, parseFloat(e.target.value) || 0.3);   // 值已是公尺（選項 value 為公尺）
+    pipe.r = pipe.tray.w / 2;
+    rebuildAllPipes();
+    selectPipe(index);
+  });
+  propBody.querySelector('[data-tray="type"]')?.addEventListener('change', (e) => {
+    pushUndo();
+    pipe.tray = pipe.tray ?? {};
+    pipe.tray.type = e.target.value;
+    rebuildAllPipes();   // 重建以套用型式幾何（ladder/solid/perforated）與著色
+    selectPipe(index);
+  });
   propBody.querySelectorAll('[data-cat]').forEach((inp) => inp.addEventListener('change', () => {
     pushUndo();
     pipe.components[+inp.dataset.cat].at =
       Math.max(0.2, Math.min(fromDisp(inp.value), pipeLength(pipe) - 0.2));
+    rebuildAllPipes();
+    selectPipe(index);
+  }));
+  propBody.querySelectorAll('[data-cvar]').forEach((sel) => sel.addEventListener('change', () => {
+    pushUndo();
+    // 同心存 undefined（保存檔乾淨、讀取端回退同心），偏心存 'ecc'
+    pipe.components[+sel.dataset.cvar].variant = sel.value === 'ecc' ? 'ecc' : undefined;
     rebuildAllPipes();
     selectPipe(index);
   }));
@@ -955,7 +1507,7 @@ function renderPipeProps(index) {
     rebuildAllPipes();
     selectPipe(index);
   }));
-  document.getElementById('comp-place').addEventListener('click', () => {
+  document.getElementById('comp-place')?.addEventListener('click', () => {   // 托盤無元件區→null-safe
     pendingComp = { kind: document.getElementById('comp-kind').value, pipeIndex: index };
     mode = 'placecomp';
     setHint(`沿<b>管線 #${index + 1}</b>移動游標，點擊放置<b>${compName[pendingComp.kind]}</b>（Esc 取消）`);
@@ -973,6 +1525,17 @@ function pipeLength(pipe) {
   for (let i = 0; i < pipe.pts.length - 1; i++) {
     L += Math.hypot(pipe.pts[i + 1][0] - pipe.pts[i][0],
                     pipe.pts[i + 1][1] - pipe.pts[i][1],
+                    pipe.pts[i + 1][2] - pipe.pts[i][2]);
+  }
+  return L;
+}
+
+// 水平長度（XZ 平面投影，公尺 canonical）：供坡度總落差 Fall＝水平長度×坡度 使用。
+// pts 為水平 canonical，故此值≈pipeLength；仍以 XZ 投影計算以求語意正確且不受既有 Y 影響。
+function pipeHorizLength(pipe) {
+  let L = 0;
+  for (let i = 0; i < pipe.pts.length - 1; i++) {
+    L += Math.hypot(pipe.pts[i + 1][0] - pipe.pts[i][0],
                     pipe.pts[i + 1][2] - pipe.pts[i][2]);
   }
   return L;
@@ -1361,9 +1924,22 @@ document.getElementById('duct-btn').addEventListener('click', () => {
   selectNone();
   setHint('風管繪製：依序點擊路徑點，<b>Enter</b> 完成；轉角自動放方形彎頭，之後可沿風管放三通/風門。Esc 取消');
 });
+// 電纜橋架自由佈線：比照風管復用管線折線子系統（profile:'tray'），差別在渲染成 U 型托盤斷面
+document.getElementById('tray-btn').addEventListener('click', () => {
+  if (mode === 'pipe' && trayDraw) { setMode('idle'); return; }
+  setMode('pipe');
+  trayDraw = true;
+  trayWidth = parseFloat(document.getElementById('tray-width').value) || 0.3;
+  trayType = document.getElementById('tray-type').value || 'solid';
+  document.getElementById('tray-btn').classList.add('active');
+  selectNone();
+  setHint('電纜橋架繪製：依序點擊路徑點，<b>Shift</b>=正交鎖定，<b>Enter</b> 完成；轉角自動生水平彎。Esc 取消');
+});
 
 // ------------------------------------------------------------ 滑鼠互動
 const raycaster = new THREE.Raycaster();
+// 點雲命中閾值（公尺）：讓量測/標註能點到掃描點上（測既有現場淨空/間距）
+raycaster.params.Points.threshold = 0.05;
 const pointer = new THREE.Vector2();
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
@@ -1396,17 +1972,34 @@ function orthoLock(pt, e) {
   return locked;
 }
 
+// 最近一次 snapToEquipment 命中的 nozzle 身分（供繪管提交時寫入 pipe.head/tail）。
+// 只有吸附到「具體管嘴」時才是 {eq,nz}；吸附到設備中心或空地時為 null。
+let lastSnapRef = null;
 function snapToEquipment(pt) {
+  lastSnapRef = null;
   // 管嘴優先：1.5m 內吸附最近 nozzle 端點（含高度）——配管接嘴
-  let bestNz = null, bestNzD = 1.5;
+  let bestNz = null, bestNzD = 1.5, bestRef = null;
   for (const { def } of eqObjects.values()) {
     for (const nz of def.nozzles ?? []) {
       const w = nozzleWorld(def, nz);
       const d = Math.hypot(w.x - pt.x, w.z - pt.z);
-      if (d < bestNzD) { bestNzD = d; bestNz = w; }
+      if (d < bestNzD) { bestNzD = d; bestNz = w; bestRef = { eq: def.tag, nz: nz.id }; }
     }
   }
-  if (bestNz) return bestNz;
+  if (bestNz) { lastSnapRef = bestRef; return bestNz; }
+  // branch/tee：0.6m 內吸附到既有管線某點（不含正在繪製的草稿），記 {pipe,at} 母管參考
+  if (pipeDraft.length === 0) {   // 只在「起點」允許起 branch（避免中途誤吸）
+    let bestPipe = null, bestPipeD = 0.6, bestPipeAt = 0, bestPos = null;
+    sceneData.pipes.forEach((pipe, i) => {
+      if (!pipe.pts || pipe.pts.length < 2 || pipe.profile === 'duct' || pipe.profile === 'tray') return;
+      const near = nearestArcOnPipe(pipe, pt);
+      if (near.pos && near.d < bestPipeD) { bestPipeD = near.d; bestPipe = i; bestPipeAt = near.at; bestPos = near.pos; }
+    });
+    if (bestPipe !== null) {
+      lastSnapRef = { pipe: bestPipe, at: roundMM(bestPipeAt) };
+      return bestPos;
+    }
+  }
   // 2m 內吸附最近設備的接管點（y=0.9）
   let best = null, bestD = 2;
   for (const { def } of eqObjects.values()) {
@@ -1415,6 +2008,174 @@ function snapToEquipment(pt) {
   }
   return best ? new THREE.Vector3(best.pos[0], 0.9, best.pos[2])
               : new THREE.Vector3(snapVal(pt.x), 0.9, snapVal(pt.z));
+}
+
+// 由 typed 參考算該端現在的世界座標（Vector3）；查無則回 null。
+// ref 兩型：{ eq:<設備tag>, nz:<nozzleId> }（管↔設備）；{ pipe:<母管idx>, at:<弧長m> }（branch↔母管）。
+function resolveEnd(ref) {
+  if (!ref) return null;
+  if (ref.pipe !== undefined) {                 // branch：母管弧長點的世界座標
+    const mother = sceneData.pipes[ref.pipe];
+    if (!mother) return null;
+    const pose = arcToPose(mother, ref.at ?? 0);
+    return pose ? pose.pos.clone() : null;
+  }
+  if (!ref.eq) return null;
+  const entry = eqObjects.get(ref.eq);
+  if (!entry) return null;
+  const def = entry.def;
+  const nz = (def.nozzles ?? []).find((n) => n.id === ref.nz);
+  if (!nz) return null;
+  return nozzleWorld(def, nz);
+}
+
+// 由半徑（公尺）反查最近 DN 名目（供 bore 一致性檢查）；PIPE_BORES 已按 r 遞增。
+function dnFromRadius(r) {
+  let best = null, bestD = Infinity;
+  for (const b of PIPE_BORES) { const d = Math.abs(b.r - r); if (d < bestD) { bestD = d; best = b.dn; } }
+  return best;
+}
+
+// 連通性檢查：掃全場管線，回問題陣列 [{pipe, issue, detail, at?}]。
+// 檢查兩類：(1) 自由端＝端點未連 nozzle 也非 branch 且不靠近任何 nozzle；
+//          (2) bore 不一致＝pipe 半徑對應 DN 與所接 nozzle 的 dn 不符。
+function checkConnectivity(data) {
+  const problems = [];
+  const SNAP = 0.4;   // 端點視為「靠近某 nozzle」的容差（公尺）
+  // 預先收集所有 nozzle 世界座標（供未帶 ref 但實體靠嘴的端點判定）
+  const allNz = [];
+  for (const { def } of eqObjects.values()) {
+    for (const nz of def.nozzles ?? []) allNz.push({ def, nz, w: nozzleWorld(def, nz) });
+  }
+  const nearestNz = (p) => {
+    let best = null, bestD = SNAP;
+    const v = new THREE.Vector3(...p);
+    for (const e of allNz) { const d = e.w.distanceTo(v); if (d < bestD) { bestD = d; best = e; } }
+    return best;
+  };
+  const pipeDN = (pipe) => pipe.dn || dnFromRadius(pipe.r);
+  data.pipes.forEach((pipe, i) => {
+    if (!pipe.pts || pipe.pts.length < 2 || pipe.bridge) return;
+    if (pipe.profile === 'duct' || pipe.profile === 'tray') return;   // 風管/電纜橋架不做管閥連通檢查
+    const ends = [
+      { name: '起點 head', ref: pipe.head, p: pipe.pts[0] },
+      { name: '終點 tail', ref: pipe.tail, p: pipe.pts[pipe.pts.length - 1] },
+    ];
+    for (const end of ends) {
+      // branch（母管參考）視為已連接，跳過自由端判定
+      if (end.ref && end.ref.pipe !== undefined) continue;
+      let connectedNz = null;
+      if (end.ref && end.ref.eq) {
+        connectedNz = resolveEnd(end.ref) ? { def: eqObjects.get(end.ref.eq)?.def,
+          nz: (eqObjects.get(end.ref.eq)?.def.nozzles ?? []).find((n) => n.id === end.ref.nz) } : null;
+        if (!connectedNz || !connectedNz.nz) {
+          problems.push({ pipe: i, issue: '連接失效', detail: `${end.name} 參考的 ${end.ref.eq}/${end.ref.nz} 已不存在` });
+          continue;
+        }
+      } else {
+        const near = nearestNz(end.p);
+        if (!near) {
+          problems.push({ pipe: i, issue: '自由端', detail: `${end.name} 未連接任何管嘴（附近無 nozzle）` });
+          continue;
+        }
+        connectedNz = near;   // 實體靠嘴但未帶 ref：不算自由端，續做 bore 檢查
+      }
+      // bore 一致性：pipe DN vs nozzle DN
+      const pdn = pipeDN(pipe);
+      const ndn = connectedNz.nz?.dn;
+      if (pdn && ndn && pdn !== ndn) {
+        problems.push({ pipe: i, issue: 'bore 不一致',
+          detail: `${end.name} 管徑 ${pdn} ≠ 管嘴 ${connectedNz.def?.tag ?? ''}/${connectedNz.nz.id} 口徑 ${ndn}` });
+      }
+    }
+  });
+  return problems;
+}
+
+// ============================================================ 模型完整性健檢（對標 E3D Data Integrity Checker）
+// 更廣的 model lint：孤兒參考 / 重複 tag / 未設必要欄位 / 斷開自由端（複用 checkConnectivity）。
+// 回傳結構化清單 [{severity, category, target, detail, locate}]，locate 供 UI 點選定位。
+// severity: 'error' | 'warn'；locate: {kind:'eq',tag} | {kind:'pipe',index} | null。
+function checkModelIntegrity(data) {
+  const issues = [];
+  const add = (severity, category, target, detail, locate = null) =>
+    issues.push({ severity, category, target, detail, locate });
+
+  // 全場設備平坦化（含所屬 unit），並建 tag→def 索引與 pipe.uid 集合。
+  const allEq = [];
+  for (const u of (data.plant?.units ?? [])) {
+    for (const eq of (u.equipment ?? [])) allEq.push(eq);
+  }
+  const eqByTag = new Map();          // tag → 首個 def（供 nozzle 查找）
+  const tagCount = new Map();         // tag → 出現次數（重複偵測）
+  for (const eq of allEq) {
+    const t = eq.tag;
+    if (t) {
+      tagCount.set(t, (tagCount.get(t) ?? 0) + 1);
+      if (!eqByTag.has(t)) eqByTag.set(t, eq);
+    }
+  }
+  const pipeUids = new Set((data.pipes ?? []).map((p) => p.uid).filter(Boolean));
+
+  // (1) 重複 tag：設備 tag 撞名。
+  for (const [t, n] of tagCount) {
+    if (n > 1) add('error', '重複 tag', t, `設備位號「${t}」出現 ${n} 次（tag 須全域唯一）`,
+      { kind: 'eq', tag: t });
+  }
+
+  // (2) 設備必要欄位：缺 tag / 缺 type。
+  allEq.forEach((eq) => {
+    if (!eq.tag) add('error', '未設欄位', '(無 tag 設備)',
+      `${eq.type ?? '設備'} 缺少 tag（無法索引/參考）`, null);
+    if (!eq.type) add('warn', '未設欄位', eq.tag ?? '(無 tag)',
+      `設備缺少 type`, eq.tag ? { kind: 'eq', tag: eq.tag } : null);
+  });
+
+  // (3) 孤兒參考：psupport.sup_of 指向不存在的管線（sup_of ＝ pipe.uid）。
+  allEq.forEach((eq) => {
+    if (eq.sup_of !== undefined && eq.sup_of !== null && !pipeUids.has(eq.sup_of)) {
+      add('error', '孤兒參考', eq.tag ?? '(無 tag)',
+        `支撐 sup_of=「${eq.sup_of}」指向不存在的管線 uid`,
+        eq.tag ? { kind: 'eq', tag: eq.tag } : null);
+    }
+  });
+
+  // (4) 管線必要欄位＋管端參考斷鏈（head/tail）。
+  (data.pipes ?? []).forEach((pipe, i) => {
+    if (!pipe.pts || pipe.pts.length < 2) {
+      add('error', '未設欄位', `PIPE #${i + 1}`,
+        `管線無 pts 或點數不足（<2）`, { kind: 'pipe', index: i });
+      return;   // 無有效幾何，後續端點檢查略過
+    }
+    for (const [name, ref] of [['起點 head', pipe.head], ['終點 tail', pipe.tail]]) {
+      if (!ref) continue;
+      if (ref.pipe !== undefined) {   // branch：母管參考
+        if (!data.pipes[ref.pipe]) add('error', '孤兒參考', `PIPE #${i + 1}`,
+          `${name} branch 母管 #${ref.pipe + 1} 不存在`, { kind: 'pipe', index: i });
+        continue;
+      }
+      if (ref.eq !== undefined) {     // 設備管嘴參考
+        const def = eqByTag.get(ref.eq);
+        if (!def) {
+          add('error', '孤兒參考', `PIPE #${i + 1}`,
+            `${name} 參考設備「${ref.eq}」不存在`, { kind: 'pipe', index: i });
+        } else if (ref.nz !== undefined && !(def.nozzles ?? []).some((n) => n.id === ref.nz)) {
+          add('error', '孤兒參考', `PIPE #${i + 1}`,
+            `${name} 設備「${ref.eq}」無管嘴 id「${ref.nz}」`, { kind: 'pipe', index: i });
+        }
+      }
+    }
+  });
+
+  // (5) 斷開的自由端：複用 checkConnectivity（端點不接 nozzle 也非 branch）。
+  //     連通性另含 bore 不一致，一併納入 lint。
+  for (const p of checkConnectivity(data)) {
+    const sev = p.issue === 'bore 不一致' ? 'warn' : 'error';
+    const cat = p.issue === '自由端' ? '斷開自由端' : p.issue;
+    add(sev, cat, `PIPE #${p.pipe + 1}`, p.detail, { kind: 'pipe', index: p.pipe });
+  }
+
+  return issues;
 }
 
 function pickObject(e) {
@@ -1428,6 +2189,112 @@ function pickObject(e) {
     if (o) return { obj: o, point: hit.point };
   }
   return null;
+}
+
+// 專門對 3D 標註群做 raycast，回傳命中的 dimIndex（無則 null；供右鍵刪除）
+function pickDim(e) {
+  if (!dimGroup) return null;
+  setPointer(e);
+  raycaster.setFromCamera(pointer, camera);
+  for (const hit of raycaster.intersectObjects(dimGroup.children, true)) {
+    let o = hit.object;
+    while (o && o.userData?.dimIndex === undefined) o = o.parent;
+    if (o && o.userData?.dimIndex !== undefined) return o.userData.dimIndex;
+  }
+  return null;
+}
+
+// ------------------------------------------------------------ 點雲 as-built（brownfield 現況疊合）
+// 雷射掃描 .ply → THREE.Points 加到 pcGroup；載入/顯示切換/點徑/透明/移除＋量測命中。
+// 實體點雲不進存檔——只把來源檔名記進 sceneData.scan_models（metadata），存讀不重建點雲。
+const pcGroup = new THREE.Group();
+pcGroup.name = 'pcGroup';
+scene.add(pcGroup);
+let pcEntry = null;          // { points, dispose } | null
+const PC_SIZES = [0.003, 0.01, 0.02];   // 點大小級距（公尺）：3/10/20mm
+const PC_OPACS = [1, 0.6, 0.3];
+let pcSizeIdx = 1;
+let pcOpacIdx = 0;
+
+function pcButtons() {
+  const has = !!pcEntry;
+  const on = has && pcEntry.points.visible;
+  document.getElementById('btn-pc-toggle').disabled = !has;
+  document.getElementById('btn-pc-size').disabled = !has;
+  document.getElementById('btn-pc-opacity').disabled = !has;
+  document.getElementById('btn-pc-clear').disabled = !has;
+  document.getElementById('btn-pc-toggle').classList.toggle('active', on);
+}
+
+// 移除目前點雲並釋放 GPU 資源（geometry+material）；同時清 metadata
+function clearPointCloud(keepMeta = false) {
+  if (pcEntry) {
+    pcGroup.remove(pcEntry.points);
+    pcEntry.dispose();
+    pcEntry = null;
+  }
+  if (!keepMeta && sceneData.scan_models) sceneData.scan_models.length = 0;
+  pcButtons();
+}
+
+async function handlePointCloudFile(file) {
+  if (!file) return;
+  const url = URL.createObjectURL(file);   // 本機檔，不上傳
+  try {
+    clearPointCloud();   // 一次只掛一朵；先釋放舊的
+    const size = PC_SIZES[pcSizeIdx];
+    pcEntry = await loadPointCloud(url, THREE, { size });
+    pcEntry.points.material.opacity = PC_OPACS[pcOpacIdx];
+    pcGroup.add(pcEntry.points);
+    // 只存來源檔名（metadata）；實體點雲不進存檔
+    sceneData.scan_models = [{ src: file.name, kind: 'pointcloud' }];
+    const n = pcEntry.points.geometry.getAttribute('position')?.count ?? 0;
+    setHint(`已載入點雲 <b>${file.name}</b>（${n.toLocaleString()} 點）。可切顯示/點徑/透明，量測可點到掃描點`);
+    pcButtons();
+  } catch (err) {
+    console.error('點雲載入失敗', err);
+    setHint(`點雲載入失敗：${err?.message ?? err}`);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+document.getElementById('btn-pc-load').addEventListener('click', () => {
+  document.getElementById('pc-file').click();
+});
+document.getElementById('pc-file').addEventListener('change', (e) => {
+  handlePointCloudFile(e.target.files?.[0]);
+  e.target.value = '';   // 允許重選同檔
+});
+document.getElementById('btn-pc-toggle').addEventListener('click', () => {
+  if (!pcEntry) return;
+  pcEntry.points.visible = !pcEntry.points.visible;
+  pcButtons();
+});
+document.getElementById('btn-pc-size').addEventListener('click', () => {
+  if (!pcEntry) return;
+  pcSizeIdx = (pcSizeIdx + 1) % PC_SIZES.length;
+  pcEntry.points.material.size = PC_SIZES[pcSizeIdx];
+  setHint(`點雲點徑：<b>${Math.round(PC_SIZES[pcSizeIdx] * 1000)} mm</b>`);
+});
+document.getElementById('btn-pc-opacity').addEventListener('click', () => {
+  if (!pcEntry) return;
+  pcOpacIdx = (pcOpacIdx + 1) % PC_OPACS.length;
+  pcEntry.points.material.opacity = PC_OPACS[pcOpacIdx];
+  setHint(`點雲不透明度：<b>${Math.round(PC_OPACS[pcOpacIdx] * 100)}%</b>`);
+});
+document.getElementById('btn-pc-clear').addEventListener('click', () => {
+  clearPointCloud();
+  setHint('已移除點雲');
+});
+
+// 對點雲做 raycast，回傳最近命中點座標（公尺）；供量測/標註測現場淨空/間距
+function pickPointCloud(e) {
+  if (!pcEntry || !pcEntry.points.visible) return null;
+  setPointer(e);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObject(pcEntry.points, false);
+  return hits.length ? hits[0].point : null;
 }
 
 renderer.domElement.addEventListener('pointermove', (e) => {
@@ -1444,8 +2311,8 @@ renderer.domElement.addEventListener('pointermove', (e) => {
     if (near.pos) {
       if (!compGhost) {
         compGhost = pipe.profile === 'duct'
-          ? buildDuctFitting(pendingComp.kind, pipe.duct?.w ?? 0.8, pipe.duct?.h ?? 0.5)
-          : buildPipeComponent(pendingComp.kind, pipe.r);
+          ? buildDuctFitting(pendingComp.kind, pipe.duct?.w ?? 0.8, pipe.duct?.h ?? 0.5, pipe.duct, pendingComp.variant)
+          : buildPipeComponent(pendingComp.kind, pipe.r, pickComponent(pipe.spec, pipe.dn, pendingComp.kind).ftf);
         compGhost.traverse((o) => {
           if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.55; }
         });
@@ -1541,7 +2408,13 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   if (mode === 'pipe') {
     const pt = groundPoint(e);
     if (pt) {
-      pipeDraft.push(orthoLock(snapToEquipment(pt), e));
+      const snapped = snapToEquipment(pt);      // 設定 lastSnapRef（吸附到 nozzle 時）
+      const ref = lastSnapRef;                   // 先存起，orthoLock 可能改點位置
+      const locked = orthoLock(snapped, e);
+      // 正交鎖定若把點挪離 nozzle 端點，該端連接失效 → 不記錄 ref
+      const moved = Math.hypot(locked.x - snapped.x, locked.z - snapped.z) > 1e-6;
+      pipeDraft.push(locked);
+      pipeDraftRefs.push(moved ? null : ref);
       updatePipePreview();
       setHint(`管線繪製：已 ${pipeDraft.length} 點（<b>Shift</b>=正交鎖定），<b>Enter</b> 完成、<b>Esc</b> 取消`);
     }
@@ -1549,9 +2422,18 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   }
 
   if (mode === 'measure') {
+    if (measureMode === 'clearance') { addClearancePick(e); return; }
+    // 命中優先：模型表面 → 點雲掃描點（測既有淨空/間距）→ 地面
     const hit = pickObject(e);
-    const pt = hit ? hit.point : groundPoint(e);
+    const pt = hit ? hit.point : (pickPointCloud(e) ?? groundPoint(e));
     if (pt) addMeasurePoint(pt.clone());
+    return;
+  }
+
+  if (mode === 'dim3d') {
+    const hit = pickObject(e);
+    const pt = hit ? hit.point : (pickPointCloud(e) ?? groundPoint(e));
+    if (pt) addDimPoint(pt);
     return;
   }
 
@@ -1560,7 +2442,14 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     pushUndo();
     const pipe = sceneData.pipes[pendingComp.pipeIndex];
     pipe.components ??= [];
-    pipe.components.push({ kind: pendingComp.kind, at: pendingComp.at });
+    // spec/bore 驅動選型：記錄該管當前 dn/spec 與 face-to-face 長度（公尺 canonical）。
+    // 風管無 spec 選型，維持沿用寫死幾何（ftf 省略）。
+    const comp = { kind: pendingComp.kind, at: pendingComp.at };
+    if (pipe.profile !== 'duct') {
+      const sel = pickComponent(pipe.spec, pipe.dn, pendingComp.kind);
+      if (sel.ftf) { comp.ftf = roundMM(sel.ftf); comp.dn = sel.dn; comp.spec = sel.spec; }
+    }
+    pipe.components.push(comp);
     pipe.components.sort((a, b) => a.at - b.at);
     const idx = pendingComp.pipeIndex;
     setMode('idle');
@@ -1634,6 +2523,16 @@ const VIEW_WHEEL = () => [
 renderer.domElement.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   if (downXY && Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]) > 5) return;
+  // 3D 標註右鍵 → 刪除該筆（在 idle 或 dim3d 模式皆可）
+  if ((mode === 'idle' || mode === 'dim3d') && dimGroup?.children.length) {
+    const di = pickDim(e);
+    if (di !== null) {
+      openCtxMenu(e.clientX, e.clientY, [
+        { label: '刪除標註', danger: true, run: () => deleteDim(di) },
+      ]);
+      return;
+    }
+  }
   // pipenode 模式：節點右鍵 → 輸入數值（E3D Enter Value）
   if (mode === 'pipenode') {
     const hit = pickObject(e);
@@ -1673,7 +2572,7 @@ renderer.domElement.addEventListener('contextmenu', (e) => {
       } },
       { label: '量距離', run: () => startMeasure('dist') },
       { label: '剖切至此', run: () => {
-        const box = new THREE.Box3().expandByObject(eqObjects.get(tag).group).expandByScalar(1);
+        const box = boxOfBody(eqObjects.get(tag).group).expandByScalar(1);
         clipStart('box', box);
       } },
       { label: '刪除', danger: true, run: deleteSelected },
@@ -1728,10 +2627,13 @@ transform.addEventListener('mouseUp', () => {
     g.position.y = 0; // 鎖地面
     if (snapOn) g.position.set(snapVal(g.position.x), 0, snapVal(g.position.z));
     def.pos = [g.position.x, 0, g.position.z];
+    updateConnectedPipes(def.tag);   // 接了管的設備移動 → 管端跟走
     renderPropPanel(def);
   } else if (transform.mode === 'rotate') {
-    g.rotation.x = 0; g.rotation.z = 0; // 只允許水平旋轉
+    def.rot_x = g.rotation.x;
+    def.rot_z = g.rotation.z;
     def.rot_y = g.rotation.y;
+    updateConnectedPipes(def.tag);   // 旋轉改 nozzle 世界座標 → 管端跟走
     renderPropPanel(def); // 同步旋轉欄位
   } else if (transform.mode === 'scale') {
     // uniform scale 燒進 dims 後歸一
@@ -1924,6 +2826,7 @@ function commitNodeDrag() {
   const p = handle.position;
   pipe.pts[nodeDrag.index] = [snapVal(p.x), Math.max(0.1, roundMM(p.y)), snapVal(p.z)];
   rebuildAllPipes();
+  updateBranchPipes();   // 母管節點移動 → 掛在其上的 branch 端跟隨
   if (hasSupports(pipe.uid)) { regenSupportsForPipe(pipe); rebuildTree(); }   // 節點編輯完自動重生支撐
   const idx = selected.index;
   nodeDrag = null;
@@ -1939,23 +2842,28 @@ document.getElementById('pipe-node-btn').addEventListener('click', () => {
 // ------------------------------------------------------------ 量測工具（E3D Measure：距離＋角度、持久標註）
 let measurePts = [];
 let measureGroup = null;      // 標註持久群（球/線/弧/CSS2D 標籤）
-let measureMode = 'dist';     // 'dist' | 'angle'
+let measureMode = 'dist';     // 'dist' | 'angle' | 'clearance'
 let lastMeasureMode = 'dist'; // 空白鍵重複上次量測用
+let clearancePick = [];       // 淨空模式：暫存已點的兩個物件 { box, label }
 const measureLineMat = new THREE.LineBasicMaterial({ color: 0xffaa3c });
+const MEASURE_BTN = { dist: 'btn-measure', angle: 'btn-measure-angle', clearance: 'btn-measure-clear' };
 
 function startMeasure(kind) {
   if (mode === 'measure' && measureMode === kind) { setMode('idle'); return; }
   setMode('measure');
   measureMode = kind;
   lastMeasureMode = kind;
-  const btn = document.getElementById(kind === 'dist' ? 'btn-measure' : 'btn-measure-angle');
-  btn.classList.add('active');
+  clearancePick = [];
+  document.getElementById(MEASURE_BTN[kind]).classList.add('active');
   setHint(kind === 'dist'
     ? '量距離：點擊<b>兩點</b>（設備表面或地面）；可連續量，Esc 結束'
-    : '量角度：點<b>三點</b>，<b>第一點＝頂點</b>；可連續量，Esc 結束');
+    : kind === 'angle'
+    ? '量角度：點<b>三點</b>，<b>第一點＝頂點</b>；可連續量，Esc 結束'
+    : '淨空量測：點<b>兩個物件</b>（設備／管／結構），顯示包圍盒最短間距；Esc 結束');
 }
 document.getElementById('btn-measure').addEventListener('click', () => startMeasure('dist'));
 document.getElementById('btn-measure-angle').addEventListener('click', () => startMeasure('angle'));
+document.getElementById('btn-measure-clear').addEventListener('click', () => startMeasure('clearance'));
 
 function measureNote(text, at) {
   const el = document.createElement('div');
@@ -2003,9 +2911,137 @@ function addMeasurePoint(pt) {
   }
 }
 
+// 淨空量測（nearest-surface clearance）：resolve 命中物件 → 頂層 group＋標籤，取世界 AABB
+function resolveClearanceTarget(e) {
+  const hit = pickObject(e);
+  if (!hit) return null;
+  const o = hit.obj;
+  let group = null, label = null;
+  if (o.userData.eqTag !== undefined && eqObjects.has(o.userData.eqTag)) {
+    group = eqObjects.get(o.userData.eqTag).group;
+    label = o.userData.eqTag;
+  } else if (o.userData.pipeIndex !== undefined && pipeObjects[o.userData.pipeIndex]) {
+    group = pipeObjects[o.userData.pipeIndex].group;
+    label = `PIPE #${o.userData.pipeIndex + 1}`;
+  } else {
+    return null;
+  }
+  const box = boxOfBody(group);   // 剝除維修包絡盒，量本體淨空（與 clash/剖切一致）
+  if (box.isEmpty()) return null;
+  return { box, label };
+}
+
+// 兩 AABB 最短間距：逐軸求最近點對；分離軸取相鄰端點、重疊軸取重疊區中點。間距 0 表示重疊/接觸
+function clearanceGap(boxA, boxB) {
+  const a = new THREE.Vector3(), b = new THREE.Vector3();
+  for (const ax of ['x', 'y', 'z']) {
+    if (boxA.max[ax] < boxB.min[ax]) { a[ax] = boxA.max[ax]; b[ax] = boxB.min[ax]; }
+    else if (boxB.max[ax] < boxA.min[ax]) { a[ax] = boxA.min[ax]; b[ax] = boxB.max[ax]; }
+    else {
+      const lo = Math.max(boxA.min[ax], boxB.min[ax]);
+      const hi = Math.min(boxA.max[ax], boxB.max[ax]);
+      a[ax] = b[ax] = (lo + hi) / 2;
+    }
+  }
+  return { a, b, gap: a.distanceTo(b) };
+}
+
+function addClearancePick(e) {
+  const t = resolveClearanceTarget(e);
+  if (!t) { setHint('淨空量測：請點擊<b>設備／管線</b>實體（非地面）；Esc 結束'); return; }
+  if (!measureGroup) { measureGroup = new THREE.Group(); scene.add(measureGroup); }
+  clearancePick.push(t);
+  // 標記已點物件的包圍盒中心
+  const c = t.box.getCenter(new THREE.Vector3());
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), nodeMat);
+  dot.position.copy(c);
+  measureGroup.add(dot);
+
+  if (clearancePick.length === 2) {
+    const [t1, t2] = clearancePick;
+    const { a, b, gap } = clearanceGap(t1.box, t2.box);
+    measureGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), measureLineMat));
+    const mid = a.clone().lerp(b, 0.5).add(new THREE.Vector3(0, 0.4, 0));
+    measureNote(`淨空 ${fmtLen(gap)}｜${t1.label} ↔ ${t2.label}`, mid);
+    clearancePick = [];
+    setHint(`淨空 <b>${fmtLen(gap)}</b>（${t1.label} ↔ ${t2.label}）。繼續點兩物件，Esc 結束`);
+  } else {
+    setHint(`已選 <b>${t.label}</b>，再點<b>第二個物件</b>量淨空；Esc 結束`);
+  }
+}
+
 function clearMeasure() {
   measurePts = [];
-  if (measureGroup) { scene.remove(measureGroup); measureGroup = null; }
+  clearancePick = [];
+  if (measureGroup) {
+    measureGroup.traverse((o) => {
+      if (o.isCSS2DObject) { o.element.remove(); return; }   // 清 CSS2D DOM，防孤兒標籤
+      o.geometry?.dispose();
+      if (o.material && o.material !== measureLineMat && o.material !== nodeMat) {
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
+      }
+    });
+    scene.remove(measureGroup);
+    measureGroup = null;
+  }
+}
+
+// ------------------------------------------------------------ 3D 持久尺寸標註（E3D Draw Linear Dimension：sceneData.dims 持久化）
+// 資料：sceneData.dims = [{ a:[x,y,z], b:[x,y,z] }]（公尺 canonical）。
+// 群組由 dimensions.js 純函式重建；切單位（fmtLen 變）、載入場景、增刪皆重建。
+let dimGroup = null;      // 目前的標註群（buildDimensions 產物）
+let dimPts = [];          // 標註模式暫存的第一點
+
+function rebuildDims() {
+  if (dimGroup) {
+    dimGroup.traverse((o) => {
+      if (o.isCSS2DObject) { o.element.remove(); return; }   // 清 CSS2D DOM，防孤兒標籤
+      o.geometry?.dispose();                                  // 釋放 GPU 資源，防切單位/增刪反覆重建洩漏
+      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
+    });
+    scene.remove(dimGroup);
+    dimGroup = null;
+  }
+  dimGroup = buildDimensions(sceneData, THREE, fmtLen, CSS2DObject);
+  scene.add(dimGroup);
+}
+
+function startDim() {
+  if (mode === 'dim3d') { setMode('idle'); return; }
+  setMode('dim3d');
+  document.getElementById('btn-dim3d').classList.add('active');
+  setHint('3D 標註：點<b>兩點</b>（設備表面或地面）建立持久尺寸；可連續標，Esc 結束');
+}
+document.getElementById('btn-dim3d').addEventListener('click', startDim);
+
+// 標註模式點擊：收兩點→push 進 sceneData.dims→重建群組並存進場景資料
+function addDimPoint(pt) {
+  dimPts.push(pt.clone());
+  if (dimPts.length === 2) {
+    const [a, b] = dimPts;
+    if (a.distanceTo(b) >= 1e-4) {
+      pushUndo();
+      sceneData.dims = sceneData.dims ?? [];
+      sceneData.dims.push({
+        a: [roundMM(a.x), roundMM(a.y), roundMM(a.z)],
+        b: [roundMM(b.x), roundMM(b.y), roundMM(b.z)],
+      });
+      rebuildDims();
+      setHint(`已建立標註 <b>${fmtLen(a.distanceTo(b))}</b>。繼續點兩點標下一段，Esc 結束`);
+    }
+    dimPts = [];
+  } else {
+    setHint('3D 標註：已收第一點，再點<b>第二點</b>完成；Esc 取消');
+  }
+}
+
+// 右鍵刪除：傳入 pickObject 命中的 userData.dimIndex，移除該筆後重建
+function deleteDim(dimIndex) {
+  if (!sceneData.dims || dimIndex == null || dimIndex < 0 || dimIndex >= sceneData.dims.length) return;
+  pushUndo();
+  sceneData.dims.splice(dimIndex, 1);
+  rebuildDims();
+  setHint(`已刪除標註（剩 ${sceneData.dims.length} 筆）`);
 }
 
 // ------------------------------------------------------------ 剖切（Clip Box＋六平面，對標 E3D Clip and Cap）
@@ -2158,7 +3194,7 @@ document.getElementById('btn-clipbox').addEventListener('click', () =>
 document.getElementById('btn-clipbox-sel').addEventListener('click', () => {
   let box;
   if (selected?.kind === 'eq') {
-    box = new THREE.Box3().expandByObject(eqObjects.get(selected.def.tag).group).expandByScalar(1);
+    box = boxOfBody(eqObjects.get(selected.def.tag).group).expandByScalar(1);
   } else if (selected?.kind === 'pipe') {
     box = new THREE.Box3();
     for (const p of sceneData.pipes[selected.index].pts) box.expandByPoint(new THREE.Vector3(...p));
@@ -2171,12 +3207,23 @@ document.getElementById('btn-clipsix').addEventListener('click', () =>
 document.getElementById('btn-clipclear').addEventListener('click', clipClear);
 
 // ------------------------------------------------------------ 視角/縮放（View）
+// 對設備群組取「純本體」AABB：包絡盒（envelopeMesh）會被 expandByObject 遞迴計入且不理 .visible，
+// 故先暫移包絡再算、算完還原（同 clash.js runClash 的做法），避免框選/剖切被保留空間撐大。
+function expandByBody(box, group) {
+  const env = group.userData?.envelopeMesh;
+  const detach = env && env.parent === group;
+  if (detach) group.remove(env);
+  box.expandByObject(group);
+  if (detach) group.add(env);
+  return box;
+}
+function boxOfBody(group) { return expandByBody(new THREE.Box3(), group); }
 function sceneBounds() {
   const box = new THREE.Box3();
   let any = false;
   for (const { group, def } of eqObjects.values()) {
     if (hiddenTags.has(def.tag)) continue;
-    box.expandByObject(group);
+    expandByBody(box, group);
     any = true;
   }
   for (const m of underlayMeshes) { box.expandByObject(m); any = true; }
@@ -2200,7 +3247,7 @@ function fitAll() { frameBox(sceneBounds(), camera.position.clone().sub(controls
 function zoomToSelection() {
   if (selected?.kind === 'eq') {
     const entry = eqObjects.get(selected.def.tag);
-    frameBox(new THREE.Box3().expandByObject(entry.group),
+    frameBox(boxOfBody(entry.group),
       camera.position.clone().sub(controls.target).normalize());
   } else if (selected?.kind === 'pipe') {
     const box = new THREE.Box3();
@@ -2274,6 +3321,7 @@ unitSel.addEventListener('change', () => {
   dispUnit = unitSel.value;
   localStorage.setItem('ej3d-disp-unit', dispUnit);
   refreshPropPanel();
+  rebuildDims();   // 標註文字走 fmtLen，切單位需重建
 });
 applySnapSettings();
 
@@ -2302,6 +3350,116 @@ function dwgTitleBlock(right, bottom, meta) {
 }
 
 // ------------------------------------------------------------ GA 出圖（俯視配置圖）
+// 對標 E3D ADP Gridline Dimensioning：由設備分佈自動推結構格線位置（公尺 canonical）。
+// 回傳 { ex:[E 座標…], nz:[N 座標…] }，皆為公尺、由小到大排序、無重複。
+function gaGridAxes(b) {
+  const MODULE = 5;                                   // 預設 5m 模組（依設備聚集取整）
+  const snap = (v) => Math.round(v / MODULE) * MODULE;
+  const collect = (vals) => [...new Set(vals.map(snap))].sort((a, x) => a - x);
+  const eqs = allEquipment().filter((e) => !hiddenTags.has(e.tag));
+  let ex = collect(eqs.map((e) => e.pos[0]));
+  let nz = collect(eqs.map((e) => e.pos[2]));
+  // 設備太少或聚集過密/過疏 → 退回沿場界均勻 5m 格線，保證圖面有可讀格網
+  const uniform = (lo, hi) => {
+    const a = [];
+    for (let g = Math.floor(lo / MODULE) * MODULE; g <= hi + 1e-6; g += MODULE) a.push(g);
+    return a;
+  };
+  // 退回均勻格線時封頂 ≤12 條（過寬場景抽稀），避免比想避開的 >12 更密
+  const capUniform = (lo, hi) => {
+    const raw = uniform(lo, hi);
+    if (raw.length <= 12) return raw;
+    const stride = Math.ceil(raw.length / 12);
+    return raw.filter((_, i) => i % stride === 0);
+  };
+  if (ex.length < 2 || ex.length > 12) ex = capUniform(b.min.x, b.max.x);
+  if (nz.length < 2 || nz.length > 12) nz = capUniform(b.min.z, b.max.z);
+  return { ex, nz };
+}
+
+// 結構格線層：縱線 1/2/3…（沿 E）、橫線 A/B/C…（沿 N），端點畫圈標號（A-1 式）。
+// sx/sz：公尺→SVG px 映射（沿用 gaSvg 慣例）；drawTop/drawBottom/drawLeft/drawRight：繪圖區 px 邊界。
+function gaGridlineParts(axes, sx, sz, drawTop, drawBottom, drawLeft, drawRight) {
+  const parts = [];
+  const R = 9;                                         // 端點圈半徑 px
+  const off = 16;                                      // 圈心離繪圖邊的 px 距離
+  const colNum = (i) => String(i + 1);                 // 縱線編號 1,2,3…
+  const rowLtr = (i) => String.fromCharCode(65 + (i % 26)) + (i >= 26 ? String(Math.floor(i / 26)) : '');
+  // 縱向格線（沿 E，垂直線）＋上下端圈號（數字）
+  axes.ex.forEach((e, i) => {
+    const x = +sx(e);
+    parts.push(`<line x1="${x}" y1="${drawTop}" x2="${x}" y2="${drawBottom}" stroke="#274b66" stroke-width="0.7" stroke-dasharray="10 4 2 4" opacity="0.55"/>`);
+    for (const cy of [drawTop - off, drawBottom + off]) {
+      parts.push(`<circle cx="${x}" cy="${cy}" r="${R}" fill="#fff" stroke="#274b66" stroke-width="1.2"/>`);
+      parts.push(`<text x="${x}" y="${(cy + 3.2).toFixed(1)}" font-size="9.5" font-weight="700" fill="#12283a" text-anchor="middle">${colNum(i)}</text>`);
+    }
+  });
+  // 橫向格線（沿 N，水平線）＋左右端圈號（字母）
+  axes.nz.forEach((n, i) => {
+    const y = +sz(n);
+    parts.push(`<line x1="${drawLeft}" y1="${y}" x2="${drawRight}" y2="${y}" stroke="#274b66" stroke-width="0.7" stroke-dasharray="10 4 2 4" opacity="0.55"/>`);
+    for (const cx of [drawLeft - off, drawRight + off]) {
+      parts.push(`<circle cx="${cx}" cy="${y}" r="${R}" fill="#fff" stroke="#274b66" stroke-width="1.2"/>`);
+      parts.push(`<text x="${cx}" y="${(y + 3.2).toFixed(1)}" font-size="9.5" font-weight="700" fill="#12283a" text-anchor="middle">${rowLtr(i)}</text>`);
+    }
+  });
+  return parts;
+}
+
+// 尺寸標註鏈：沿圖框上緣標各縱格線間距、沿左緣標各橫格線間距（mm，沿用出圖層 ×1000 慣例）；
+// 並標主要設備中心→最近格線的距離。tickLen=延伸線長 px。
+function gaDimChainParts(axes, sx, sz, chainTop, chainLeft) {
+  const parts = [];
+  const BLUE = '#046AFB';                              // 沿用出圖層 mm 標註色
+  const mm = (m) => (m * 1000).toFixed(0);            // 公尺→mm 字串（出圖層慣例）
+  // 上緣：縱格線間距鏈（水平量測）
+  if (axes.ex.length >= 2) {
+    const y = chainTop;
+    const xs = axes.ex.map((e) => +sx(e));
+    parts.push(`<line x1="${xs[0]}" y1="${y}" x2="${xs[xs.length - 1]}" y2="${y}" stroke="${BLUE}" stroke-width="0.8"/>`);
+    xs.forEach((x) => parts.push(`<line x1="${x}" y1="${y - 4}" x2="${x}" y2="${y + 4}" stroke="${BLUE}" stroke-width="0.8"/>`));
+    for (let i = 0; i < axes.ex.length - 1; i++) {
+      const mx = (xs[i] + xs[i + 1]) / 2;
+      parts.push(`<text x="${mx.toFixed(1)}" y="${y - 5}" font-size="9.5" fill="${BLUE}" text-anchor="middle" font-weight="600">${mm(axes.ex[i + 1] - axes.ex[i])}</text>`);
+    }
+  }
+  // 左緣：橫格線間距鏈（垂直量測，文字旋轉 -90°）
+  if (axes.nz.length >= 2) {
+    const x = chainLeft;
+    const ys = axes.nz.map((n) => +sz(n));
+    parts.push(`<line x1="${x}" y1="${ys[0]}" x2="${x}" y2="${ys[ys.length - 1]}" stroke="${BLUE}" stroke-width="0.8"/>`);
+    ys.forEach((y) => parts.push(`<line x1="${x - 4}" y1="${y}" x2="${x + 4}" y2="${y}" stroke="${BLUE}" stroke-width="0.8"/>`));
+    for (let i = 0; i < axes.nz.length - 1; i++) {
+      const my = (ys[i] + ys[i + 1]) / 2;
+      parts.push(`<text x="${(x - 5).toFixed(1)}" y="${my.toFixed(1)}" font-size="9.5" fill="${BLUE}" text-anchor="middle" font-weight="600" transform="rotate(-90 ${(x - 5).toFixed(1)} ${my.toFixed(1)})">${mm(axes.nz[i + 1] - axes.nz[i])}</text>`);
+    }
+  }
+  // 主要設備中心→最近格線偏置（E 向對最近縱線、N 向對最近橫線），只標非零偏置避免雜訊
+  const nearest = (arr, v) => arr.reduce((a, x) => Math.abs(x - v) < Math.abs(a - v) ? x : a, arr[0]);
+  for (const eq of allEquipment()) {
+    if (hiddenTags.has(eq.tag)) continue;
+    const [ecx, , ecz] = eq.pos;
+    const cx = +sx(ecx), cy = +sz(ecz);
+    if (axes.ex.length) {
+      const g = nearest(axes.ex, ecx), dm = ecx - g;
+      if (Math.abs(dm) >= 0.05) {                      // ≥50mm 才標
+        const gx = +sx(g);
+        parts.push(`<line x1="${gx}" y1="${cy}" x2="${cx}" y2="${cy}" stroke="${BLUE}" stroke-width="0.6" stroke-dasharray="3 2" opacity="0.85"/>`);
+        parts.push(`<text x="${((gx + cx) / 2).toFixed(1)}" y="${(cy - 2).toFixed(1)}" font-size="8" fill="${BLUE}" text-anchor="middle">${mm(Math.abs(dm))}</text>`);
+      }
+    }
+    if (axes.nz.length) {
+      const g = nearest(axes.nz, ecz), dm = ecz - g;
+      if (Math.abs(dm) >= 0.05) {
+        const gy = +sz(g);
+        parts.push(`<line x1="${cx}" y1="${gy}" x2="${cx}" y2="${cy}" stroke="${BLUE}" stroke-width="0.6" stroke-dasharray="3 2" opacity="0.85"/>`);
+        parts.push(`<text x="${(cx + 3).toFixed(1)}" y="${((gy + cy) / 2).toFixed(1)}" font-size="8" fill="${BLUE}">${mm(Math.abs(dm))}</text>`);
+      }
+    }
+  }
+  return parts;
+}
+
 function gaSvg(meta = {}) {
   const b = sceneBounds();
   const pad = 6;
@@ -2340,10 +3498,19 @@ function gaSvg(meta = {}) {
     }
     parts.push(`<text x="${sx(ex)}" y="${(parseFloat(sz(ez)) - (dims.r ? dims.r * S : 8) - 4).toFixed(1)}" font-size="10" font-weight="600" fill="#12283a" text-anchor="middle">${eq.tag}</text>`);
   }
+  // 結構格線 + 尺寸標註鏈（對標 E3D ADP Gridline Dimensioning）
+  // 繪圖區 px 範圍：設備投影落在 [0, W*S]×[0, H*S]（x0/z0 已含 pad=6m 邊界）
+  const axes = gaGridAxes(b);
+  const drawTop = 0, drawBottom = H * S, drawLeft = 0, drawRight = W * S;
+  parts.push(...gaGridlineParts(axes, sx, sz, drawTop, drawBottom, drawLeft, drawRight));
+  // 尺寸鏈畫在格線圈之外（上緣圈 off=16 + R=9，鏈再外推）
+  parts.push(...gaDimChainParts(axes, sx, sz, drawTop - 32, drawLeft - 32));
   // 圖框（雙線）＋制式標題欄＋比例尺
   const now = new Date();
   const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  const PW = W * S, PH = H * S + 78;
+  // 為格線端圈＋尺寸鏈預留邊距（px）：內容整體平移 MARGIN，頁面對應加大
+  const MARGIN = 52;
+  const PW = W * S + MARGIN * 2, PH = H * S + MARGIN * 2 + 78;
   const tb = dwgTitleBlock(PW - 7, PH - 7, {
     project: `設備 ${allEquipment().length}・管線 ${sceneData.pipes.length}${meta.by ? ' · ' + meta.by : ''}`,
     title: meta.title ?? `${sceneData.plant.name}｜GENERAL ARRANGEMENT 配置圖`,
@@ -2354,7 +3521,7 @@ function gaSvg(meta = {}) {
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PW} ${PH}" font-family="Inter,'Noto Sans TC',sans-serif" style="background:#fff">
   <rect x="1" y="1" width="${PW - 2}" height="${PH - 2}" fill="#fdfefe" stroke="#12283a" stroke-width="1.8"/>
   <rect x="7" y="7" width="${PW - 14}" height="${PH - 14}" fill="none" stroke="#12283a" stroke-width="0.7"/>
-  <g clip-path="none">
+  <g transform="translate(${MARGIN} ${MARGIN})" clip-path="none">
   ${parts.join('\n  ')}
   </g>
   <g transform="translate(16 ${PH - 24})">
@@ -2489,6 +3656,238 @@ function exportISO() {
 }
 document.getElementById('btn-iso').addEventListener('click', exportISO);
 
+// ------------------------------------------------------------ 立面正交視圖（Elevation，對標 E3D 多視向出圖）
+// 四向（N/S/E/W）正交投影：把設備 AABB／管線折線／結構投到對應垂直面，深度軸壓平。
+// 慣例：X=東、Z=南（+Z）、Y=上。垂直軸恆為 Y（標高 U）。水平軸依視向取 X 或 Z、含鏡射保持左右合理。
+// 幾何用 AABB／輪廓近似（非 HLR）：實線外框＋淡色標高格線＋座標；長度顯示 mm（沿用出圖層 ×1000）。
+const ELEV_DIRS = {
+  // hAxis：水平取哪個世界軸（0=X 東、2=Z 南）；hSign：水平方向鏡射；hName：水平座標軸標記字母
+  n: { hAxis: 0, hSign: 1, hName: 'E', label: '北 N（看向北）', depth: 2 },   // 看向北：水平=東(X)，深度=Z
+  s: { hAxis: 0, hSign: -1, hName: 'E', label: '南 S（看向南）', depth: 2 },  // 看向南：東西鏡射
+  e: { hAxis: 2, hSign: -1, hName: 'N', label: '東 E（看向東）', depth: 0 },  // 看向東：水平=南北(Z)，深度=X
+  w: { hAxis: 2, hSign: 1, hName: 'N', label: '西 W（看向西）', depth: 0 },   // 看向西：南北鏡射
+};
+
+// 收集每個可見設備的世界 AABB（沿用 boxOfBody 純本體盒，與剖切/clash 一致）＋位號
+function elevBodies() {
+  const out = [];
+  for (const { group, def } of eqObjects.values()) {
+    if (hiddenTags.has(def.tag)) continue;
+    out.push({ tag: def.tag, box: boxOfBody(group) });
+  }
+  return out;
+}
+
+function elevSvg(dir, meta = {}) {
+  const cfg = ELEV_DIRS[dir] ?? ELEV_DIRS.n;
+  const b = sceneBounds();
+  const bodies = elevBodies();
+  // 水平座標 h（依視向鏡射後）與垂直座標 v=Y(上)；先蒐集所有點求範圍
+  const H_OF = (wx, wz) => cfg.hSign * (cfg.hAxis === 0 ? wx : wz);   // 世界 →（未鏡射前的）水平量
+  const hs = [], vs = [];
+  const pushHV = (h, v) => { hs.push(h); vs.push(v); };
+  for (const bd of bodies) {
+    for (const hx of [bd.box.min.x, bd.box.max.x]) for (const hz of [bd.box.min.z, bd.box.max.z]) hs.push(H_OF(hx, hz));
+    vs.push(bd.box.min.y, bd.box.max.y);
+  }
+  for (const pipe of sceneData.pipes) for (const p of (pipe.pts ?? [])) pushHV(H_OF(p[0], p[2]), p[1]);
+  if (!hs.length) { hs.push(H_OF(b.min.x, b.min.z), H_OF(b.max.x, b.max.z)); vs.push(b.min.y, b.max.y); }
+  const pad = 4;
+  const hLo = Math.min(...hs) - pad, hHi = Math.max(...hs) + pad;
+  const vLo = Math.min(0, Math.min(...vs)) - pad, vHi = Math.max(...vs) + pad;   // 標高含 0（地面）基準
+  const Wm = hHi - hLo, Hm = vHi - vLo;
+  const S = 12;   // px per m（沿用 GA）
+  const sx = (h) => ((h - hLo) * S).toFixed(1);
+  const sy = (v) => ((vHi - v) * S).toFixed(1);   // Y 向上：SVG y 反轉
+  const parts = [];
+  // 標高格線（每 5m，淡色）＋左緣 EL 標高標記（mm）
+  const drawTop = 0, drawBottom = Hm * S, drawLeft = 0, drawRight = Wm * S;
+  for (let g = Math.ceil(vLo / 5) * 5; g <= vHi + 1e-6; g += 5) {
+    const y = +sy(g);
+    parts.push(`<line x1="${drawLeft}" y1="${y}" x2="${drawRight}" y2="${y}" stroke="#d8dde3" stroke-width="0.6"/>`);
+    parts.push(`<text x="2" y="${(y - 2).toFixed(1)}" font-size="9" fill="#9aa4ad">EL.${(g * 1000).toFixed(0)}</text>`);
+  }
+  // 地面線（EL.0）加深
+  const y0 = +sy(0);
+  parts.push(`<line x1="${drawLeft}" y1="${y0}" x2="${drawRight}" y2="${y0}" stroke="#274b66" stroke-width="1.2"/>`);
+  // 水平座標格線（每 10m）＋底緣座標標記。hLo/hHi 已在鏡射後空間；g 走鏡射空間畫線，
+  // 標記還原世界座標（×hSign）供讀圖（如看向南時左右鏡射，標記仍是真實 E 座標）。
+  for (let g = Math.ceil(hLo / 10) * 10; g <= hHi + 1e-6; g += 10) {
+    const x = +sx(g);
+    const world = cfg.hSign * g;   // 還原世界水平座標（hSign=±1）
+    parts.push(`<line x1="${x}" y1="${drawTop}" x2="${x}" y2="${drawBottom}" stroke="#eceef1" stroke-width="0.6"/>`);
+    parts.push(`<text x="${x}" y="${(drawBottom + 12).toFixed(1)}" font-size="9" fill="#9aa4ad" text-anchor="middle">${cfg.hName}${world.toFixed(0)}</text>`);
+  }
+  // 管線投影（折線；橋接虛線，沿用 GA 樣式）
+  for (const pipe of sceneData.pipes) {
+    if ((pipe.pts?.length ?? 0) < 1) continue;
+    const d = pipe.pts.map((p, i) => `${i ? 'L' : 'M'}${sx(H_OF(p[0], p[2]))} ${sy(p[1])}`).join(' ');
+    parts.push(`<path d="${d}" fill="none" stroke="#5b6b7a" stroke-width="${Math.max(pipe.r * S * 0.8, 1)}"${pipe.bridge ? ' stroke-dasharray="6 4" stroke="#2e8ba8"' : ''} opacity="0.75"/>`);
+  }
+  // 設備投影：AABB 矩形輪廓（實線）＋位號
+  for (const bd of bodies) {
+    const h0 = H_OF(bd.box.min.x, bd.box.min.z), h1 = H_OF(bd.box.max.x, bd.box.max.z);
+    const xL = Math.min(+sx(h0), +sx(h1)), xR = Math.max(+sx(h0), +sx(h1));
+    const yT = +sy(bd.box.max.y), yB = +sy(bd.box.min.y);
+    parts.push(`<rect x="${xL.toFixed(1)}" y="${yT.toFixed(1)}" width="${(xR - xL).toFixed(1)}" height="${(yB - yT).toFixed(1)}" fill="rgba(70,140,200,0.12)" stroke="#274b66" stroke-width="1.2"/>`);
+    parts.push(`<text x="${((xL + xR) / 2).toFixed(1)}" y="${(yT - 4).toFixed(1)}" font-size="10" font-weight="600" fill="#12283a" text-anchor="middle">${bd.tag}</text>`);
+  }
+  // 圖框（雙線）＋標題欄＋比例尺（全沿用 GA）
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const MARGIN = 40;
+  const PW = Wm * S + MARGIN * 2, PH = Hm * S + MARGIN * 2 + 78;
+  const tb = dwgTitleBlock(PW - 7, PH - 7, {
+    project: `設備 ${bodies.length}・管線 ${sceneData.pipes.length}${meta.by ? ' · ' + meta.by : ''}`,
+    title: meta.title ?? `${sceneData.plant.name}｜ELEVATION 立面圖（${cfg.label}）`,
+    dwgno: meta.dwgno ?? `${(sceneId ?? 'SCN').toUpperCase()}-EL${dir.toUpperCase()}-001`,
+    rev: meta.rev ?? 'A', date: dateStr, scaleTxt: `1m=${S}px`,
+  });
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PW} ${PH}" font-family="Inter,'Noto Sans TC',sans-serif" style="background:#fff">
+  <rect x="1" y="1" width="${PW - 2}" height="${PH - 2}" fill="#fdfefe" stroke="#12283a" stroke-width="1.8"/>
+  <rect x="7" y="7" width="${PW - 14}" height="${PH - 14}" fill="none" stroke="#12283a" stroke-width="0.7"/>
+  <g transform="translate(${MARGIN} ${MARGIN})">
+  ${parts.join('\n  ')}
+  </g>
+  <g transform="translate(16 ${PH - 24})">
+    <line x1="0" y1="0" x2="${10 * S}" y2="0" stroke="#12283a" stroke-width="3"/>
+    <text x="${5 * S}" y="-5" font-size="9" fill="#12283a" text-anchor="middle">10 m</text>
+  </g>
+  ${tb}
+</svg>`;
+}
+function elevDefaults(dir) {
+  const cfg = ELEV_DIRS[dir] ?? ELEV_DIRS.n;
+  return { title: `${sceneData.plant.name}｜ELEVATION 立面圖（${cfg.label}）`,
+           dwgno: `${(sceneId ?? 'SCN').toUpperCase()}-EL${dir.toUpperCase()}-001`, rev: 'A', by: dwgLastBy };
+}
+function exportElev(dir) {
+  openDwgDialog(`立面 ${dir.toUpperCase()}`, elevDefaults(dir), (m) => {
+    saveBlob(`${sceneId ?? 'scene'}-ELEV-${dir.toUpperCase()}.svg`, elevSvg(dir, m), 'image/svg+xml', true);
+    setHint(`立面圖（${ELEV_DIRS[dir].label}）已輸出（新分頁預覽＋下載 SVG）`);
+  });
+}
+document.querySelectorAll('[data-elev]').forEach((btn) =>
+  btn.addEventListener('click', () => exportElev(btn.dataset.elev)));
+
+// ------------------------------------------------------------ 剖面圖（Section，對標 E3D Section from Clip）
+// 需先啟用剖切盒(clip box)：沿最近啟用的「垂直剖切面」取一刀，把跨越該平面的設備/管線投影成斷面。
+// 平面法向沿 X 或 Z（±X/±Z 四面之一），投影到該法向的正交垂直面（水平=另一水平軸、垂直=Y）。
+function sectionSvg(meta = {}) {
+  // 選剖切平面：優先啟用中的垂直面（±X 或 ±Z）；以 box 對應面座標為剖位
+  const VERT = [0, 1, 4, 5];   // CLIP_AXES 索引：±X(0,1)、±Z(4,5)（跳過 ±Y 水平面）
+  let pick = null;
+  for (const i of VERT) if (clip.enabled[i]) { pick = i; break; }
+  if (pick == null) return null;
+  const { side, axis } = CLIP_AXES[pick];
+  const cutPos = clip.box[side][axis];          // 剖切平面在該軸座標（公尺）
+  const normAxis = axis;                          // 'x' 或 'z'
+  // 剖面畫布：水平=另一水平軸、垂直=Y。X 法向 → 水平取 Z(南北)；Z 法向 → 水平取 X(東西)
+  const hAxis = normAxis === 'x' ? 2 : 0;         // 0=X,2=Z
+  const hName = normAxis === 'x' ? 'N' : 'E';
+  const H_OF = (p) => p[hAxis];
+  const V_OF = (p) => p[1];
+  const bodies = elevBodies();
+  const EPS = 1e-6;
+  // 跨越剖面的設備：AABB 在 normAxis 上包含 cutPos
+  const cutBodies = bodies.filter((bd) => bd.box.min[normAxis] - EPS <= cutPos && cutPos <= bd.box.max[normAxis] + EPS);
+  // 跨越剖面的管段：相鄰兩節點在 normAxis 兩側（含端點觸面），取交點斷面標記
+  const ni = normAxis === 'x' ? 0 : 2;
+  const cutMarks = [];   // {h, v, r}
+  for (const pipe of sceneData.pipes) {
+    const pts = pipe.pts ?? [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], c = pts[i + 1];
+      const da = a[ni] - cutPos, dc = c[ni] - cutPos;
+      if (da === 0 && dc === 0) continue;              // 管段平行貼面，略過（避免除零）
+      if (da <= 0 && dc >= 0 || da >= 0 && dc <= 0) {
+        const t = Math.abs(da) < EPS && Math.abs(dc) < EPS ? 0 : da / (da - dc);
+        const q = [a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t, a[2] + (c[2] - a[2]) * t];
+        cutMarks.push({ h: H_OF(q), v: V_OF(q), r: pipe.r });
+      }
+    }
+  }
+  if (!cutBodies.length && !cutMarks.length) return '';   // 有剖切但沒東西跨越
+  // 範圍：剖面盒在水平/垂直方向以 clip.box 為界（只畫盒內斷面，符合 E3D Section 慣例）
+  const hLo0 = clip.box.min[hAxis === 0 ? 'x' : 'z'], hHi0 = clip.box.max[hAxis === 0 ? 'x' : 'z'];
+  const vLo0 = Math.min(0, clip.box.min.y), vHi0 = clip.box.max.y;
+  const pad = 3;
+  const hLo = hLo0 - pad, hHi = hHi0 + pad, vLo = vLo0 - pad, vHi = vHi0 + pad;
+  const Wm = hHi - hLo, Hm = vHi - vLo, S = 12;
+  const sx = (h) => ((h - hLo) * S).toFixed(1);
+  const sy = (v) => ((vHi - v) * S).toFixed(1);
+  const parts = [];
+  const drawBottom = Hm * S, drawRight = Wm * S;
+  // 標高格線（每 5m）＋座標
+  for (let g = Math.ceil(vLo / 5) * 5; g <= vHi + 1e-6; g += 5) {
+    const y = +sy(g);
+    parts.push(`<line x1="0" y1="${y}" x2="${drawRight}" y2="${y}" stroke="#d8dde3" stroke-width="0.6"/>`);
+    parts.push(`<text x="2" y="${(y - 2).toFixed(1)}" font-size="9" fill="#9aa4ad">EL.${(g * 1000).toFixed(0)}</text>`);
+  }
+  const y0 = +sy(0);
+  parts.push(`<line x1="0" y1="${y0}" x2="${drawRight}" y2="${y0}" stroke="#274b66" stroke-width="1.2"/>`);
+  for (let g = Math.ceil(hLo / 10) * 10; g <= hHi + 1e-6; g += 10) {
+    const x = +sx(g);
+    parts.push(`<line x1="${x}" y1="0" x2="${x}" y2="${drawBottom}" stroke="#eceef1" stroke-width="0.6"/>`);
+    parts.push(`<text x="${x}" y="${(drawBottom + 12).toFixed(1)}" font-size="9" fill="#9aa4ad" text-anchor="middle">${hName}${g.toFixed(0)}</text>`);
+  }
+  // 設備斷面輪廓：AABB 在水平×垂直的矩形（實線；斷面加對角剖面線示意）
+  const clampH = (h) => Math.max(hLo, Math.min(hHi, h));
+  for (const bd of cutBodies) {
+    const aName = hAxis === 0 ? 'x' : 'z';
+    const xL = +sx(clampH(bd.box.min[aName])), xR = +sx(clampH(bd.box.max[aName]));
+    const yT = +sy(Math.min(vHi, bd.box.max.y)), yB = +sy(Math.max(vLo, bd.box.min.y));
+    parts.push(`<rect x="${Math.min(xL, xR).toFixed(1)}" y="${yT.toFixed(1)}" width="${Math.abs(xR - xL).toFixed(1)}" height="${(yB - yT).toFixed(1)}" fill="rgba(46,139,168,0.14)" stroke="#12283a" stroke-width="1.4"/>`);
+    parts.push(`<text x="${((xL + xR) / 2).toFixed(1)}" y="${(yT - 4).toFixed(1)}" font-size="10" font-weight="600" fill="#12283a" text-anchor="middle">${bd.tag}</text>`);
+  }
+  // 管線斷面：跨面點畫實心圓（直徑=管徑投影），示意被剖到的管
+  for (const m of cutMarks) {
+    if (m.h < hLo || m.h > hHi || m.v < vLo || m.v > vHi) continue;
+    parts.push(`<circle cx="${sx(m.h)}" cy="${sy(m.v)}" r="${Math.max(m.r * S, 2).toFixed(1)}" fill="rgba(70,140,200,0.35)" stroke="#274b66" stroke-width="1.2"/>`);
+  }
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const MARGIN = 40;
+  const PW = Wm * S + MARGIN * 2, PH = Hm * S + MARGIN * 2 + 78;
+  const posMm = (cutPos * 1000).toFixed(0);
+  const tb = dwgTitleBlock(PW - 7, PH - 7, {
+    project: `剖面 ${normAxis.toUpperCase()}=${posMm}mm・斷面 ${cutBodies.length} 設備／${cutMarks.length} 管${meta.by ? ' · ' + meta.by : ''}`,
+    title: meta.title ?? `${sceneData.plant.name}｜SECTION 剖面圖（法向 ${normAxis.toUpperCase()}）`,
+    dwgno: meta.dwgno ?? `${(sceneId ?? 'SCN').toUpperCase()}-SEC-001`,
+    rev: meta.rev ?? 'A', date: dateStr, scaleTxt: `1m=${S}px`,
+  });
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PW} ${PH}" font-family="Inter,'Noto Sans TC',sans-serif" style="background:#fff">
+  <rect x="1" y="1" width="${PW - 2}" height="${PH - 2}" fill="#fdfefe" stroke="#12283a" stroke-width="1.8"/>
+  <rect x="7" y="7" width="${PW - 14}" height="${PH - 14}" fill="none" stroke="#12283a" stroke-width="0.7"/>
+  <g transform="translate(${MARGIN} ${MARGIN})">
+  ${parts.join('\n  ')}
+  </g>
+  <g transform="translate(16 ${PH - 24})">
+    <line x1="0" y1="0" x2="${10 * S}" y2="0" stroke="#12283a" stroke-width="3"/>
+    <text x="${5 * S}" y="-5" font-size="9" fill="#12283a" text-anchor="middle">10 m</text>
+  </g>
+  ${tb}
+</svg>`;
+}
+function exportSection() {
+  if (!clip.mode) { setHint('請先在 <b>檢視 > 剖切</b> 開剖切盒／六平面，再出剖面圖'); return; }
+  const probe = sectionSvg({});
+  if (probe == null) { setHint('剖面圖需要一個<b>垂直剖切面</b>（±X／±Z）；請啟用其中一面'); return; }
+  if (probe === '') { setHint('目前剖切面沒有跨越任何設備／管線，無斷面可畫'); return; }
+  openDwgDialog('剖面 Section', {
+    title: `${sceneData.plant.name}｜SECTION 剖面圖`,
+    dwgno: `${(sceneId ?? 'SCN').toUpperCase()}-SEC-001`, rev: 'A', by: dwgLastBy,
+  }, (m) => {
+    const svg = sectionSvg(m);
+    if (!svg) { setHint('剖面產生失敗（剖切狀態已變更），請重試'); return; }
+    saveBlob(`${sceneId ?? 'scene'}-SECTION.svg`, svg, 'image/svg+xml', true);
+    setHint('剖面圖已輸出（新分頁預覽＋下載 SVG）');
+  });
+}
+document.getElementById('btn-section').addEventListener('click', exportSection);
+
 // ------------------------------------------------------------ 管線清單（Pipe List，對標 E3D Pipe List 報表）
 function renderPipeListPanel() {
   repaintPanel = renderPipeListPanel;
@@ -2514,6 +3913,119 @@ function renderPipeListPanel() {
   }));
 }
 document.getElementById('btn-pipelist').addEventListener('click', renderPipeListPanel);
+
+// ------------------------------------------------------------ 服務別圖例／篩選（對標 E3D 依 service 著色圖例）
+// 各服務色塊＋名稱＋管線數量；點列切換該服務別管線顯示/隱藏（filter，走 applyLayers）。
+// repaintPanel 設為自身，切單位/重繪時保持面板。純 UI 狀態（hiddenServices），不入存檔。
+const hex6 = (c) => '#' + (c >>> 0).toString(16).padStart(6, '0').slice(-6);
+function renderServiceLegend() {
+  repaintPanel = renderServiceLegend;
+  document.getElementById('prop-title').textContent = '服務別圖例';
+  // 逐服務別統計管線數（僅計非風管管線）
+  const counts = {};
+  let noneCount = 0;
+  for (const p of sceneData.pipes) {
+    if (p.profile === 'duct' || p.profile === 'tray') continue;
+    if (p.service && SERVICE_BY_CODE[p.service]) counts[p.service] = (counts[p.service] ?? 0) + 1;
+    else noneCount++;
+  }
+  const legendRow = (key, name, colorInt, n) => {
+    const hidden = hiddenServices.has(key);
+    return `<div data-svc="${key}" title="點擊切換顯示/隱藏" style="display:flex;gap:8px;align-items:center;padding:6px 4px;border-bottom:1px solid var(--bdr);cursor:pointer;font-size:12px;opacity:${hidden ? 0.42 : 1}">
+      <span style="width:16px;height:16px;border-radius:3px;flex:none;background:${hex6(colorInt)};border:1px solid rgba(0,0,0,.25)"></span>
+      <span style="flex:1">${name}</span>
+      <span style="color:var(--dim);white-space:nowrap">${n} 條${hidden ? '｜隱藏' : ''}</span>
+    </div>`;
+  };
+  const rows = PIPE_SERVICES.map((sv) => legendRow(sv.code, sv.name, sv.color, counts[sv.code] ?? 0)).join('')
+    + legendRow('__none__', '（無服務別）＝Spec 色', 0x646f7b, noneCount);
+  propBody.innerHTML = `<div class="pg-section">Service 服務別著色</div>
+    <div style="color:var(--dim);font-size:11px;padding:2px 0 6px">點色塊列切換該服務別管線顯示／隱藏</div>
+    ${rows}
+    <button class="pbtn" id="svc-showall" style="margin-top:8px">全部顯示</button>`;
+  propBody.querySelectorAll('[data-svc]').forEach((row) => row.addEventListener('click', () => {
+    const key = row.dataset.svc;
+    if (hiddenServices.has(key)) hiddenServices.delete(key); else hiddenServices.add(key);
+    applyLayers();          // 套用可見性（不重建幾何，僅切 group.visible）
+    renderServiceLegend();  // 重繪圖例列狀態
+  }));
+  document.getElementById('svc-showall').addEventListener('click', () => {
+    hiddenServices.clear();
+    applyLayers();
+    renderServiceLegend();
+  });
+}
+document.getElementById('btn-service-legend')?.addEventListener('click', renderServiceLegend);
+
+// ------------------------------------------------------------ 重量與重心（Weight & CoG）報表
+// 對標 E3D PROPCON：逐設備估質量→彙總全場總重＋重心。長度用 fmtLen 隨單位切換重繪。
+function renderWeightPanel() {
+  repaintPanel = renderWeightPanel;
+  const rep = computeWeights(sceneData, eqObjects);
+  document.getElementById('prop-title').textContent = `重量與重心（${rep.count}）`;
+  const kg = (v) => (v >= 1000 ? (v / 1000).toFixed(2) + ' t' : Math.round(v) + ' kg');
+  const rows = rep.items
+    .slice()
+    .sort((a, b) => b.mass_kg - a.mass_kg)
+    .map((it) => `<div data-wt="${it.tag}" style="display:flex;gap:8px;padding:6px 4px;border-bottom:1px solid var(--bdr);cursor:pointer;font-size:12px">
+      <span style="width:70px;color:var(--accent);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.tag}</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.name}${it.method !== 'solid' ? '｜' + it.methodLabel : ''}</span>
+      <span style="color:var(--dim);white-space:nowrap">${kg(it.mass_kg)}</span>
+    </div>`).join('');
+  const tt = rep.total_kg;
+  const cog = rep.cog;
+  propBody.innerHTML = `<div class="pg-section">Weight & CoG</div>
+    ${rep.count
+      ? rows
+        + `<div style="display:flex;gap:8px;padding:8px 4px;font-size:12px;font-weight:600;border-top:2px solid var(--bdr)">
+            <span style="flex:1">設備總重 ${rep.count} 台</span>
+            <span>${Math.round(tt).toLocaleString()} kg</span>
+          </div>
+          <div style="display:flex;gap:8px;padding:2px 4px;font-size:12px;color:var(--accent);font-weight:600">
+            <span style="flex:1"></span><span>${(tt / 1000).toFixed(2)} tonne</span>
+          </div>`
+        + (rep.pipe_kg > 0.5
+          ? `<div style="display:flex;gap:8px;padding:2px 4px;font-size:12px;color:var(--dim)"><span style="flex:1">管線估重（另計）</span><span>${kg(rep.pipe_kg)}</span></div>` : '')
+        + `<div class="pg-section" style="margin-top:8px">重心 CoG（設備）</div>
+          <div class="pg-grid">
+            ${pgRow(`東 E (${unitLabel()})`, `<span>${fmtLen(cog[0])}</span>`)}
+            ${pgRow(`上 U (${unitLabel()})`, `<span>${fmtLen(cog[1])}</span>`)}
+            ${pgRow(`北 N (${unitLabel()})`, `<span>${fmtLen(cog[2])}</span>`)}
+          </div>
+          <div style="padding:8px 4px 2px"><button class="rbtn" id="btn-weight-csv" style="width:100%"><span class="ric" data-ic="mto"></span>匯出重量表 CSV</button></div>
+          <div style="font-size:11px;color:var(--dim);padding:8px 4px;line-height:1.5">估算法：${rep.method}</div>`
+      : '<div style="color:var(--dim);font-size:12px;padding:8px 0">尚無設備——先在設備 tab 佈設</div>'}`;
+  propBody.querySelectorAll('[data-wt]').forEach((row) => row.addEventListener('click', () => {
+    const entry = eqObjects.get(row.dataset.wt);
+    if (entry) { selectEquipment(row.dataset.wt); zoomToSelection(); }
+  }));
+  const csvBtn = document.getElementById('btn-weight-csv');
+  if (csvBtn) csvBtn.addEventListener('click', () => exportWeightCsv(rep));
+}
+function exportWeightCsv(rep) {
+  const r = rep ?? computeWeights(sceneData, eqObjects);
+  const esc = (v) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const rows = [];
+  rows.push(['J.S_3D Studio 重量與重心報表（Weight & CoG）', sceneData.plant?.name ?? sceneId ?? '']);
+  rows.push(['輸出時間', new Date().toLocaleString('zh-TW', { hour12: false })]);
+  rows.push(['估算法', r.method]);
+  rows.push([]);
+  rows.push(['位號', '名稱', '類型', '材料', '估法', '質量(kg)', '重心 X(m)', '重心 Y(m)', '重心 Z(m)']);
+  for (const it of r.items) {
+    rows.push([it.tag, it.name, it.type, it.material, it.methodLabel ?? (it.shell ? '薄殼' : '實心'),
+      it.mass_kg.toFixed(1), it.cog[0].toFixed(3), it.cog[1].toFixed(3), it.cog[2].toFixed(3)]);
+  }
+  rows.push([]);
+  rows.push(['[彙總]']);
+  rows.push(['設備總重(kg)', r.total_kg.toFixed(1), '設備總重(tonne)', (r.total_kg / 1000).toFixed(3)]);
+  rows.push(['管線估重(kg)', r.pipe_kg.toFixed(1)]);
+  rows.push(['總重含管線(kg)', r.grand_total_kg.toFixed(1)]);
+  rows.push(['全場重心 CoG(m)', r.cog[0].toFixed(3), r.cog[1].toFixed(3), r.cog[2].toFixed(3)]);
+  const csv = '﻿' + rows.map((row) => row.map(esc).join(',')).join('\r\n');
+  saveBlob(`${sceneId ?? 'scene'}-Weight.csv`, csv, 'text/csv;charset=utf-8', false);
+  setHint(`重量表已輸出：設備 ${r.count} 台、總重 ${(r.total_kg / 1000).toFixed(2)} t（CSV）`);
+}
+document.getElementById('btn-weight').addEventListener('click', renderWeightPanel);
 
 // ------------------------------------------------------------ 剖面蓋色（Clip and Cap）
 let capOn = false;
@@ -2607,6 +4119,256 @@ function exportMTO() {
   setHint(`材料表已輸出：管線 ${sceneData.pipes.length} 條、設備 ${allEquipment().length} 台（CSV）`);
 }
 document.getElementById('btn-mto').addEventListener('click', exportMTO);
+
+// ------------------------------------------------------------ 設備排程表（Equipment Schedule，CSV｜長度單位固定 mm）
+// 對標 E3D Equipment Report：逐設備一列。長度一律 mm（canonical 公尺 ×1000 取整），表頭已標單位。
+// 尺寸換算沿用 renderPropPanel 的 dims 規則：DIA_DIMS 存半徑→顯示直徑（×2）；COUNT_DIMS 為計數不換算。
+function eqScheduleCsv() {
+  const typeName = new Map(ASSET_CATEGORIES.flatMap((c) => c.items.map((it) => [it.type, it.name])));
+  const esc = (v) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const mm = (m) => Math.round((m ?? 0) * 1000);         // 公尺 → mm（整數），與顯示單位解耦
+  // 關鍵尺寸字串：把 def.dims 攤成人類可讀（⌀xxx / 高 xxx / 長 xxx…），長度皆 mm
+  const dimStr = (dims) => Object.entries(dims ?? {}).map(([k, v]) => {
+    if (COUNT_DIMS.has(k)) return `${k} ${v}`;
+    if (DIA_DIMS[k]) return `${DIA_DIMS[k].replace('直徑 ', '').replace('底徑 ', '底')
+      .replace('頂徑 ', '頂')}${mm(v * 2)}`;             // 半徑→直徑 mm
+    return `${k} ${mm(v)}`;
+  }).join(' × ');
+  const rows = [];
+  rows.push(['J.S_3D Studio 設備排程表（Equipment Schedule）', sceneData.plant?.name ?? sceneId ?? '']);
+  rows.push(['輸出時間', new Date().toLocaleString('zh-TW', { hour12: false })]);
+  rows.push(['長度單位', 'mm']);
+  rows.push([]);
+  rows.push(['位號 Tag', '名稱 Name', '型別 Type', '所屬 ZONE', '關鍵尺寸(mm)', '鋼構斷面 Section', '材質 Material', 'P&ID']);
+  let eqN = 0;
+  for (const unit of sceneData.plant.units) {
+    for (const eq of unit.equipment) {
+      eqN += 1;
+      const zone = `${unit.id ?? ''}${unit.name ? '｜' + unit.name : ''}` || (unit.name ?? unit.id ?? '');
+      // 鋼構斷面：僅型鋼件（scolumn/sbeam）帶斷面，展開 D×B｜tw/tf
+      let section = '';
+      if (['scolumn', 'sbeam'].includes(eq.type) || eq.section) {
+        const s = steelSection(eq.section);
+        section = `${s.code}（${sectionDesc(s)}）`;
+      }
+      const material = eq.material ?? eq.design?.['材質'] ?? '';
+      rows.push([eq.tag, eq.name ?? typeName.get(eq.type) ?? '', eq.type, zone,
+        dimStr(eq.dims), section, material, eq.pid_ref ?? '']);
+    }
+  }
+  rows.push([]);
+  rows.push(['[統計]', `設備 ${eqN} 台`]);
+  return '﻿' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
+}
+function exportEqSchedule() {
+  saveBlob(`${sceneId ?? 'scene'}-EquipmentSchedule.csv`, eqScheduleCsv(), 'text/csv;charset=utf-8', false);
+  setHint(`設備排程表已輸出：設備 ${allEquipment().length} 台（CSV）`);
+}
+document.getElementById('btn-eq-schedule').addEventListener('click', exportEqSchedule);
+
+// ------------------------------------------------------------ 管嘴排程表（Nozzle Schedule，CSV｜長度單位固定 mm）
+// 對標 E3D Nozzle Schedule：遍歷所有設備的 def.nozzles，逐管嘴一列。
+// 口徑由 nz.dn 查 PIPE_BORES 得 bore（半徑 r → 直徑 r×2000 mm）；標高＝nz.pos[1]（U 向）×1000 mm。
+function nzScheduleCsv() {
+  const esc = (v) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const mm = (m) => Math.round((m ?? 0) * 1000);
+  // 方向向量 → 方位字（對標 renderNozzleProps 的 NZ_DIRS）
+  const DIR_NAMES = [[[0, 0, -1], '北 N'], [[0, 0, 1], '南 S'], [[1, 0, 0], '東 E'],
+    [[-1, 0, 0], '西 W'], [[0, 1, 0], '上 U'], [[0, -1, 0], '下 D']];
+  const dirLabel = (dir) => {
+    if (!dir) return '';
+    const key = JSON.stringify(dir.map((v) => Math.round(v)));
+    const hit = DIR_NAMES.find(([v]) => JSON.stringify(v) === key);
+    return hit ? hit[1] : dir.map((v) => (+v).toFixed(2)).join(',');
+  };
+  const rows = [];
+  rows.push(['J.S_3D Studio 管嘴排程表（Nozzle Schedule）', sceneData.plant?.name ?? sceneId ?? '']);
+  rows.push(['輸出時間', new Date().toLocaleString('zh-TW', { hour12: false })]);
+  rows.push(['長度單位', 'mm']);
+  rows.push([]);
+  rows.push(['母設備 Tag', '管嘴 Nozzle', '口徑 DN', '口徑 bore(mm)', '標高 U(mm)', '方向 Dir']);
+  let nzN = 0;
+  for (const unit of sceneData.plant.units) {
+    for (const eq of unit.equipment) {
+      for (const nz of (eq.nozzles ?? [])) {
+        nzN += 1;
+        const bore = PIPE_BORES.find((b) => b.dn === nz.dn);
+        const boreMm = bore ? Math.round(bore.r * 2000) : '';     // 內徑代表值：r×2（直徑）→mm
+        rows.push([eq.tag, nz.id, nz.dn ?? '', boreMm, mm(nz.pos?.[1] ?? 0), dirLabel(nz.dir)]);
+      }
+    }
+  }
+  rows.push([]);
+  rows.push(['[統計]', `管嘴 ${nzN} 支`]);
+  return '﻿' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
+}
+function exportNzSchedule() {
+  const nzTotal = allEquipment().reduce((a, eq) => a + (eq.nozzles?.length ?? 0), 0);
+  saveBlob(`${sceneId ?? 'scene'}-NozzleSchedule.csv`, nzScheduleCsv(), 'text/csv;charset=utf-8', false);
+  setHint(`管嘴排程表已輸出：管嘴 ${nzTotal} 支（CSV）`);
+}
+document.getElementById('btn-nz-schedule').addEventListener('click', exportNzSchedule);
+
+// ------------------------------------------------------------ 通用條件查詢與篩選報表（Query / Filter）
+// 使用者選範圍（設備／管線／橋架風管／全部）＋一組 AND 條件（型別 type、service、DN/bore、spec、UDA 鍵=值），
+// 篩出符合元素成清單，點選定位（沿用 selectEquipment/selectPipe），可匯出 CSV（UTF-8 BOM，比照 MTO/排程樣式）。
+// 純讀 sceneData/eqObjects 現有資料，不改資料結構、不動幾何、不觸 render 疊層。
+let queryState = { scope: 'all', type: '', service: '', dn: '', spec: '', udaKey: '', udaVal: '' };
+let queryResults = [];   // [{ kind:'eq'|'pipe', tag, type, attrs, ref }]，ref = eq.tag 或 pipe index
+
+// 蒐集場景現有型別（設備 def.type ＋ 管線 profile），供下拉；型別以出現過者為準
+function queryTypeOptions() {
+  const typeName = new Map(ASSET_CATEGORIES.flatMap((c) => c.items.map((it) => [it.type, it.name])));
+  const set = new Set();
+  for (const eq of allEquipment()) set.add(eq.type);
+  const opts = [...set].sort().map((t) => `<option value="${t}" ${queryState.type === t ? 'selected' : ''}>${t}｜${typeName.get(t) ?? t}</option>`);
+  // 管線 profile 型別（pipe/duct/tray）
+  const prof = [['pipe', '管線 Pipe'], ['duct', '風管 Duct'], ['tray', '橋架 Tray']];
+  const profOpts = prof.map(([v, n]) => `<option value="${v}" ${queryState.type === v ? 'selected' : ''}>${v}｜${n}</option>`);
+  return { opts, profOpts };
+}
+
+// 執行篩選：依 scope + AND 條件回傳結果陣列
+function runQuery() {
+  const st = queryState;
+  const typeName = new Map(ASSET_CATEGORIES.flatMap((c) => c.items.map((it) => [it.type, it.name])));
+  const res = [];
+  const wantEq = st.scope === 'all' || st.scope === 'eq';
+  const wantPipe = st.scope === 'all' || st.scope === 'pipe' || st.scope === 'tray';
+  // 設備
+  if (wantEq) {
+    for (const eq of allEquipment()) {
+      if (st.type && eq.type !== st.type) continue;
+      if (st.service) continue;   // 設備無 service 概念，指定 service 時排除設備
+      if (st.dn) continue;        // 設備無 DN
+      if (st.spec && (eq.spec ?? '') !== st.spec) continue;
+      if (st.udaKey) { const v = eq.uda?.[st.udaKey]; if (v === undefined) continue; if (st.udaVal !== '' && String(v) !== st.udaVal) continue; }
+      const attrs = [eq.name ?? typeName.get(eq.type) ?? '', eq.material ?? eq.design?.['材質'] ?? '',
+        st.udaKey ? `${st.udaKey}=${eq.uda?.[st.udaKey] ?? ''}` : ''].filter(Boolean).join('｜');
+      res.push({ kind: 'eq', tag: eq.tag, type: eq.type, attrs, ref: eq.tag });
+    }
+  }
+  // 管線／橋架／風管
+  if (wantPipe) {
+    sceneData.pipes.forEach((p, i) => {
+      const prof = p.profile ?? 'pipe';
+      if (st.scope === 'tray' && !(prof === 'tray' || prof === 'duct')) return;   // 「橋架」範圍含 tray+duct
+      if (st.type) { if (['pipe', 'duct', 'tray'].includes(st.type)) { if (prof !== st.type) return; } else return; }   // 型別為設備類→管線一律不符
+      if (st.service && p.service !== st.service) return;
+      const dn = p.dn ?? `⌀${Math.round(p.r * 2000)}mm`;
+      if (st.dn && p.dn !== st.dn) return;
+      if (st.spec && (p.spec ?? '') !== st.spec) return;
+      if (st.udaKey) { const v = p.uda?.[st.udaKey]; if (v === undefined) return; if (st.udaVal !== '' && String(v) !== st.udaVal) return; }
+      const attrs = [p.spec ?? '—', dn, p.service ? (SERVICE_BY_CODE[p.service]?.name ?? p.service) : '',
+        fmtLen(pipeLength(p)), st.udaKey ? `${st.udaKey}=${p.uda?.[st.udaKey] ?? ''}` : ''].filter(Boolean).join('｜');
+      res.push({ kind: 'pipe', tag: `PIPE-${i + 1}`, type: prof, attrs, ref: i });
+    });
+  }
+  return res;
+}
+
+function renderQueryPanel() {
+  repaintPanel = renderQueryPanel;
+  document.getElementById('prop-title').textContent = '通用條件查詢';
+  const st = queryState;
+  const { opts, profOpts } = queryTypeOptions();
+  const udaKeys = udaKeysInScene();
+  const scopeOpts = [['all', '全部'], ['eq', '設備'], ['pipe', '管線'], ['tray', '橋架／風管']]
+    .map(([v, n]) => `<option value="${v}" ${st.scope === v ? 'selected' : ''}>${n}</option>`).join('');
+  const svcOpts = `<option value="">（不限）</option>` + PIPE_SERVICES.map((sv) =>
+    `<option value="${sv.code}" ${st.service === sv.code ? 'selected' : ''}>${sv.name}</option>`).join('');
+  const dnOpts = `<option value="">（不限）</option>` + PIPE_BORES.map((b) =>
+    `<option value="${b.dn}" ${st.dn === b.dn ? 'selected' : ''}>${b.dn}（⌀${Math.round(b.r * 2000)}mm）</option>`).join('');
+  const specOpts = `<option value="">（不限）</option>` + PIPE_SPECS.map((sp) =>
+    `<option value="${sp.code}" ${st.spec === sp.code ? 'selected' : ''}>${sp.code}｜${sp.name}</option>`).join('');
+  const udaKeyOpts = `<option value="">（不限）</option>` + udaKeys.map((k) =>
+    `<option value="${k}" ${st.udaKey === k ? 'selected' : ''}>${k}</option>`).join('');
+  const qrow = (label, ctrl) => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px"><span style="width:78px;color:var(--dim)">${label}</span>${ctrl}</div>`;
+  const esc = (s) => String(s ?? '').replace(/</g, '&lt;');
+  const resRows = queryResults.map((r, i) => `<div data-qr="${i}" style="display:flex;gap:8px;padding:6px 4px;border-bottom:1px solid var(--bdr);cursor:pointer;font-size:12px">
+      <span style="width:74px;color:var(--accent);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.tag)}</span>
+      <span style="width:64px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.type)}</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(r.attrs)}</span>
+    </div>`).join('');
+  propBody.innerHTML = `<div class="pg-section">通用條件查詢</div>
+    ${qrow('範圍', `<select data-q="scope" style="flex:1">${scopeOpts}</select>`)}
+    ${qrow('型別 Type', `<select data-q="type" style="flex:1"><option value="" ${!st.type ? 'selected' : ''}>（不限）</option><optgroup label="設備">${opts.join('')}</optgroup><optgroup label="管線類">${profOpts.join('')}</optgroup></select>`)}
+    ${qrow('Service', `<select data-q="service" style="flex:1">${svcOpts}</select>`)}
+    ${qrow('DN/Bore', `<select data-q="dn" style="flex:1">${dnOpts}</select>`)}
+    ${qrow('Spec', `<select data-q="spec" style="flex:1">${specOpts}</select>`)}
+    ${qrow('UDA 鍵', `<select data-q="udaKey" style="flex:1">${udaKeyOpts}</select>`)}
+    ${qrow('UDA 值', `<input data-q="udaVal" type="text" placeholder="留空＝有此鍵即可" value="${esc(st.udaVal)}" style="flex:1">`)}
+    <div style="display:flex;gap:6px;padding:8px 0 4px">
+      <button class="rbtn" id="q-run" style="flex:1"><span class="ric" data-ic="scan"></span>查詢</button>
+      <button class="rbtn" id="q-csv" style="flex:1" ${queryResults.length ? '' : 'disabled'}><span class="ric" data-ic="mto"></span>匯出 CSV</button>
+      <button class="rbtn" id="q-save" style="flex:1" ${queryResults.length ? '' : 'disabled'} title="把此查詢條件記到場景供重用"><span class="ric" data-ic="saveas"></span>存為集合</button>
+    </div>
+    <div class="pg-section">結果（${queryResults.length}）</div>
+    ${queryResults.length ? resRows : '<div style="color:var(--dim);font-size:12px;padding:8px 0">按「查詢」列出符合條件的元素</div>'}
+    ${sceneData.querySets?.length ? `<div class="pg-section">已存集合（${sceneData.querySets.length}）</div>` +
+      sceneData.querySets.map((qs, i) => `<div data-qs="${i}" style="display:flex;gap:8px;padding:6px 4px;border-bottom:1px solid var(--bdr);cursor:pointer;font-size:12px" title="載入此查詢集合"><span style="flex:1">${esc(qs.name)}</span><span style="color:var(--dim)">${esc(qs.scope)}</span></div>`).join('') : ''}`;
+  // 綁定條件輸入
+  propBody.querySelectorAll('[data-q]').forEach((el) => {
+    const k = el.dataset.q;
+    el.addEventListener('change', () => { queryState[k] = el.value; });
+  });
+  document.getElementById('q-run').addEventListener('click', () => {
+    // 先同步一次（未觸發 change 的 input 也吃到）
+    propBody.querySelectorAll('[data-q]').forEach((el) => { queryState[el.dataset.q] = el.value; });
+    queryResults = runQuery();
+    setHint(`查詢完成：符合 ${queryResults.length} 項`);
+    renderQueryPanel();
+  });
+  const csvBtn = document.getElementById('q-csv');
+  if (csvBtn && !csvBtn.disabled) csvBtn.addEventListener('click', exportQueryCsv);
+  const saveBtn = document.getElementById('q-save');
+  if (saveBtn && !saveBtn.disabled) saveBtn.addEventListener('click', saveQuerySet);
+  propBody.querySelectorAll('[data-qr]').forEach((row) => row.addEventListener('click', () => {
+    const r = queryResults[+row.dataset.qr];
+    if (!r) return;
+    if (r.kind === 'eq') selectEquipment(r.ref); else selectPipe(r.ref);
+    zoomToSelection();
+  }));
+  propBody.querySelectorAll('[data-qs]').forEach((row) => row.addEventListener('click', () => {
+    const qs = sceneData.querySets?.[+row.dataset.qs];
+    if (!qs) return;
+    queryState = { scope: qs.scope, type: qs.type ?? '', service: qs.service ?? '', dn: qs.dn ?? '', spec: qs.spec ?? '', udaKey: qs.udaKey ?? '', udaVal: qs.udaVal ?? '' };
+    queryResults = runQuery();
+    setHint(`已載入集合「${qs.name}」：符合 ${queryResults.length} 項`);
+    renderQueryPanel();
+  }));
+}
+
+function exportQueryCsv() {
+  const esc = (v) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const st = queryState;
+  const cond = [`範圍=${st.scope}`, st.type && `型別=${st.type}`, st.service && `service=${st.service}`,
+    st.dn && `DN=${st.dn}`, st.spec && `spec=${st.spec}`,
+    st.udaKey && `UDA ${st.udaKey}${st.udaVal !== '' ? '=' + st.udaVal : '（有此鍵）'}`].filter(Boolean).join('；') || '（無條件）';
+  const rows = [];
+  rows.push(['J.S_3D Studio 條件查詢報表（Query）', sceneData.plant?.name ?? sceneId ?? '']);
+  rows.push(['輸出時間', new Date().toLocaleString('zh-TW', { hour12: false })]);
+  rows.push(['查詢條件', cond]);
+  rows.push([]);
+  rows.push(['Tag', '型別 Type', '種類', '關鍵屬性']);
+  for (const r of queryResults) rows.push([r.tag, r.type, r.kind === 'eq' ? '設備' : '管線類', r.attrs]);
+  rows.push([]);
+  rows.push(['[統計]', `符合 ${queryResults.length} 項`]);
+  const csv = '﻿' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
+  saveBlob(`${sceneId ?? 'scene'}-Query.csv`, csv, 'text/csv;charset=utf-8', false);
+  setHint(`條件查詢報表已輸出：符合 ${queryResults.length} 項（CSV）`);
+}
+
+// 另存為集合：把目前查詢條件記到 sceneData.querySets 供重用（純 metadata、與單位無關、隨場景 JSON 存讀）
+function saveQuerySet() {
+  const name = (prompt('集合名稱', `查詢 ${(sceneData.querySets?.length ?? 0) + 1}`) ?? '').trim();
+  if (!name) return;
+  sceneData.querySets = sceneData.querySets ?? [];
+  sceneData.querySets.push({ name, ...queryState });
+  setHint(`已存為集合「${name}」`);
+  renderQueryPanel();
+}
+document.getElementById('btn-query').addEventListener('click', renderQueryPanel);
 
 // ------------------------------------------------------------ 出圖工具：制式圖框彈窗＋批次打包 ZIP
 let dwgLastBy = '';
@@ -2726,7 +4488,9 @@ function renderNozzles(group, def) {
 function nozzleWorld(def, nz) {
   const dir = new THREE.Vector3(...nz.dir).normalize();
   const p = new THREE.Vector3(...nz.pos).add(dir.multiplyScalar(0.32));
-  p.applyAxisAngle(new THREE.Vector3(0, 1, 0), def.rot_y ?? 0);
+  // 用完整三軸 Euler（與 group.rotation.set(rot_x,rot_y,rot_z) 'XYZ' 一致），
+  // 否則設備繞 X/Z 旋轉時 nozzle 世界座標會與畫面分岔，污染 updateConnectedPipes 寫回的 canonical pts。
+  p.applyEuler(new THREE.Euler(def.rot_x ?? 0, def.rot_y ?? 0, def.rot_z ?? 0, 'XYZ'));
   return p.add(new THREE.Vector3(...def.pos));
 }
 
@@ -2743,9 +4507,11 @@ function addNozzleAt(tag, hit) {
   const k = comps.indexOf(Math.max(...comps));
   const dirW = new THREE.Vector3(0, 0, 0);
   dirW.setComponent(k, Math.sign(n.getComponent(k)) || 1);
-  const yAxis = new THREE.Vector3(0, 1, 0);
-  const local = hit.point.clone().sub(new THREE.Vector3(...def.pos)).applyAxisAngle(yAxis, -(def.rot_y ?? 0));
-  const dirL = dirW.clone().applyAxisAngle(yAxis, -(def.rot_y ?? 0));
+  // 反轉完整三軸旋轉（world→local），與 nozzleWorld 的正向 Euler 對稱
+  const qi = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(def.rot_x ?? 0, def.rot_y ?? 0, def.rot_z ?? 0, 'XYZ')).invert();
+  const local = hit.point.clone().sub(new THREE.Vector3(...def.pos)).applyQuaternion(qi);
+  const dirL = dirW.clone().applyQuaternion(qi);
   def.nozzles = def.nozzles ?? [];
   const usedNz = new Set(def.nozzles.map((n) => n.id));
   let nzi = 1; while (usedNz.has(`N${nzi}`)) nzi++;
@@ -2843,6 +4609,40 @@ function removeSupportsOf(uid) {
   return n;
 }
 
+// 依附鋼構：於支撐落點 (x,z) 下方，找承載面（scolumn 柱頂／sbeam 樑頂／splat 樓板頂）。
+// 回傳 { y, tag }＝承載面標高（公尺 canonical）與其結構 tag；找不到回 null（呼叫端落地 y=0）。
+// 只採「頂面標高 ≤ 管底、且落在該構件水平投影內、且與管底淨距 ≤ MAX_REACH」的最高承載面。
+const SUP_MAX_REACH = 3.0;                        // 支撐可延伸的最大高度（公尺）；超過視為無承載面→落地
+function bearingSurfaceAt(x, z, pipeBottomY) {
+  let best = null;                               // { y, tag }：取最高（最貼近管底）者
+  for (const eq of allEquipment()) {
+    if (!STRUCT_TYPES.has(eq.type) || eq.type === 'psupport') continue;   // 只依附主結構鋼，不疊在支撐上
+    const [ex, ey, ez] = eq.pos ?? [0, 0, 0];
+    const rot = eq.rot_y ?? 0, c = Math.cos(rot), s = Math.sin(rot);
+    // 落點相對構件的本地平面座標（反旋轉；本地 X/Z）
+    const dx = x - ex, dz = z - ez;
+    const lx = dx * c - dz * s, lz = dx * s + dz * c;
+    let topY, halfX, halfZ;
+    if (eq.type === 'scolumn') {                 // 柱：頂面 y=pos.y+h，footprint 用底板外框近似
+      const bp = Math.max(0.42, 0.3) / 2 + 0.06; // 底板半寬近似（含裕度）
+      topY = ey + (eq.dims?.h ?? 0); halfX = bp; halfZ = bp;
+    } else if (eq.type === 'sbeam') {            // 樑：沿本地 X 長 len，頂面 y=pos.y+elev+depth/2
+      const sec = steelSection(eq.section);
+      const depth = (sec.depth ?? sec.side ?? sec.od ?? 300) / 1000;
+      topY = ey + (eq.dims?.elev ?? 3) + depth / 2;
+      halfX = (eq.dims?.len ?? 4) / 2; halfZ = Math.max((sec.flange ?? sec.side ?? sec.od ?? 200) / 1000, 0.1) / 2 + 0.05;
+    } else if (eq.type === 'splat') {            // 樓板：頂面 y=pos.y+elev+0.03，footprint w×d
+      topY = ey + (eq.dims?.elev ?? 0) + 0.03;
+      halfX = (eq.dims?.w ?? 2) / 2; halfZ = (eq.dims?.d ?? 2) / 2;
+    } else continue;                             // stairs/srail/cageladder 不作承載面
+    if (Math.abs(lx) > halfX || Math.abs(lz) > halfZ) continue;           // 落點不在水平投影內
+    if (topY > pipeBottomY + 0.02) continue;                             // 承載面高於管底→無法承載
+    if (pipeBottomY - topY > SUP_MAX_REACH) continue;                    // 太遠→不依附
+    if (!best || topY > best.y) best = { y: topY, tag: eq.tag };
+  }
+  return best;
+}
+
 function regenSupportsForPipe(pipe) {
   const SPAN = 4, spots = [], pts = pipe.pts;
   for (let i = 0; i < pts.length - 1; i++) {
@@ -2860,13 +4660,19 @@ function regenSupportsForPipe(pipe) {
   pipe.uid = pipe.uid ?? `PL-${Math.random().toString(36).slice(2, 8)}`;
   let unit = sceneData.plant.units.find((u) => u.id === 'U-SUP');
   if (!unit) { unit = { id: 'U-SUP', name: '管線支撐', equipment: [] }; sceneData.plant.units.push(unit); }
+  const stype = SUPPORT_TYPE_SET.has(pipe.sup_type) ? pipe.sup_type : 'rest';   // 管線預設支撐型式
   for (const sp of spots) {
+    const pipeBottomY = sp.y - pipe.r;                                  // 管底標高（承載目標）
+    // 依附偵測：hanger 由上吊不落地，故不找承載面（底端＝吊點下淨距，維持貼管）。
+    const bear = stype === 'hanger' ? null : bearingSurfaceAt(sp.x, sp.z, pipeBottomY);
+    const baseY = bear ? bear.y : 0;                                    // 依附面標高，或落地 y=0
     const def = {
-      tag: nextTag('PS'), type: 'psupport', name: '管線支撐',
-      dims: { h: +(sp.y - pipe.r).toFixed(2), r: Math.max(pipe.r, 0.05) },
-      pos: [+sp.x.toFixed(2), 0, +sp.z.toFixed(2)], rot_y: +sp.yaw.toFixed(3),
+      tag: nextTag('PS'), type: 'psupport', stype, name: '管線支撐',
+      dims: { h: roundMM(pipeBottomY - baseY), r: Math.max(pipe.r, 0.05) },
+      pos: [roundMM(sp.x), roundMM(baseY), roundMM(sp.z)], rot_y: +sp.yaw.toFixed(3),
       sup_of: pipe.uid, design: {}, instruments: [], pid_ref: '',
     };
+    if (bear) def.sup_on = bear.tag;                                    // 記錄依附鋼構關聯（找不到才落地、不設此欄）
     unit.equipment.push(def);
     buildEquipment(def);
   }
@@ -3031,24 +4837,45 @@ function clearClashMarks() {
   clashMarks = [];
 }
 
-function runClashDock() {
+let clashShowCleared = false;   // 面板是否展開「本輪已解決（Cleared）」清單
+function runClashDock(fresh = false) {
   const t0 = performance.now();
-  const { clashes, capped, open, total } = runClash(sceneData, eqObjects, hiddenTags);
+  // baseline 只在 fresh（執行一次比對）時推進；被動重繪（Cleared 展開、Hold/Approve）固定拿上輪 baseline 比對且不寫回，
+  // 否則首次 render 後 lastClashKeys 已等於當前 keys，一互動就會 prev===cur → NEW/Cleared 全歸零。
+  const prevKeys = sceneData.lastClashKeys;
+  const { clashes, capped, open, total, cleared } = runClash(sceneData, eqObjects, hiddenTags, undefined, prevKeys, fresh);
   const ms = Math.round(performance.now() - t0);
   const n = { physical: 0, touch: 0, clearance: 0 };
-  for (const c of clashes) if (n[c.type] !== undefined) n[c.type]++;
+  let nNew = 0, nPersist = 0, nInsul = 0;
+  for (const c of clashes) {
+    if (n[c.type] !== undefined) n[c.type]++;
+    if (c.lifecycle === 'new') nNew++; else if (c.lifecycle === 'persistent') nPersist++;
+    if (c.insul) nInsul++;
+  }
+  const clearedList = cleared ?? [];
   document.getElementById('clash-summary').textContent =
-    `Physical ${n.physical}｜Touch ${n.touch}｜Clearance ${n.clearance}　未處理 ${open}/${total}（${ms}ms${capped ? '，已截斷' : ''}）`;
+    `Physical ${n.physical}｜Touch ${n.touch}｜Clearance ${n.clearance}　New ${nNew}／Persist ${nPersist}${nInsul ? `／保溫 ${nInsul}` : ''}${clearedList.length ? `／已解 ${clearedList.length}` : ''}　未處理 ${open}/${total}（${ms}ms${capped ? '，已截斷' : ''}）`;
   document.getElementById('clash-count').textContent = `　${clashes.length} 筆`;
   const list = document.getElementById('clash-list');
   const CB = { physical: ['#d9534f', 'Physical'], touch: ['#e0a800', 'Touch'], clearance: ['#4a90d9', 'Clearance'] };
   const SB = { held: ['#8e6bd6', 'HELD'], approved: ['#3fae6b', 'APPROVED'] };
+  const LB = { new: ['#c0392b', 'NEW'], persistent: ['#6b7785', 'PERSIST'] };   // lifecycle 小標籤
   const badge = (bg, txt) => `<span style="display:inline-block;padding:1px 6px;border-radius:4px;background:${bg};color:#fff;font-size:10px;font-weight:600">${txt}</span>`;
-  list.innerHTML = clashes.length ? clashes.map((c, i) => {
+  // 本輪已解決（Cleared）：上輪有、本輪消失者。以可折疊區塊列於清單頂。
+  const clearedHead = clearedList.length
+    ? `<div id="clash-cleared-toggle" style="padding:4px 8px;cursor:pointer;color:var(--dim);font-size:11px;border-bottom:1px solid var(--line)">${clashShowCleared ? '▾' : '▸'} 本輪已解決 ${clearedList.length} 筆（Cleared）</div>`
+      + (clashShowCleared ? clearedList.map((k) => {
+          const disp = k.startsWith('S|') ? k.slice(2) + '（軟）' : k;
+          return `<div class="clash-row" style="opacity:0.6">${badge('#3fae6b', 'CLEARED')}<span style="color:var(--dim)">${disp}</span></div>`;
+        }).join('') : '')
+    : '';
+  list.innerHTML = clearedHead + (clashes.length ? clashes.map((c, i) => {
     const cb = CB[c.type] ?? ['#888', c.type];
+    const lb = LB[c.lifecycle];
     return `<div class="clash-row" data-ci="${i}" style="opacity:${c.status === 'approved' ? 0.5 : 1}">
       ${badge(cb[0], cb[1])}
-      <span style="color:var(--dim);font-family:monospace;font-size:11px" title="遮蔽碼 Hard/Soft">${c.code}</span>
+      ${lb ? badge(lb[0], lb[1]) : ''}
+      <span style="color:var(--dim);font-family:monospace;font-size:11px" title="遮蔽碼 Hard/Soft/Insul(I=保溫)">${c.code}</span>
       <span>${c.a}</span><span>${c.b}</span>
       <span style="color:var(--dim)">(${fmtLen(c.point.x, false)}, ${fmtLen(c.point.z, false)}) ${unitLabel()}</span>
       ${SB[c.status] ? badge(SB[c.status][0], SB[c.status][1]) : ''}
@@ -3057,21 +4884,22 @@ function runClashDock() {
         <button data-appr="${i}" class="pane-x" title="Approve（核可 by-design，抑制）">✓</button>
       </span>
     </div>`;
-  }).join('') : '<div style="padding:14px;color:var(--dim)">無碰撞——場景乾淨</div>';
+  }).join('') : (clearedHead ? '' : '<div style="padding:14px;color:var(--dim)">無碰撞——場景乾淨</div>'));
+  document.getElementById('clash-cleared-toggle')?.addEventListener('click', () => { clashShowCleared = !clashShowCleared; runClashDock(); });
   clashDock.classList.add('show');
   const setStatus = (i, st) => {
     const c = clashes[i];
     pushUndo();
     sceneData.clashStatus = sceneData.clashStatus ?? {};
-    const key = clashKey(c.a, c.b);
+    const key = c.soft ? 'S|' + clashKey(c.a, c.b) : clashKey(c.a, c.b);   // 軟碰撞(維修包絡)與硬碰撞分開命名，避免核准間隙連帶隱藏真實硬撞
     if (sceneData.clashStatus[key] === st) delete sceneData.clashStatus[key];   // 再按一次＝取消
     else sceneData.clashStatus[key] = st;
     runClashDock();
   };
   list.querySelectorAll('[data-hold]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); setStatus(+b.dataset.hold, 'held'); }));
   list.querySelectorAll('[data-appr]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); setStatus(+b.dataset.appr, 'approved'); }));
-  list.querySelectorAll('.clash-row').forEach((row) => row.addEventListener('click', () => {
-    list.querySelectorAll('.clash-row').forEach((r) => r.classList.toggle('selected', r === row));
+  list.querySelectorAll('.clash-row[data-ci]').forEach((row) => row.addEventListener('click', () => {
+    list.querySelectorAll('.clash-row[data-ci]').forEach((r) => r.classList.toggle('selected', r === row));
     const c = clashes[+row.dataset.ci];
     clearClashMarks();
     for (const tag of [c.a, c.b]) {
@@ -3089,10 +4917,330 @@ function runClashDock() {
     frameBox(box, camera.position.clone().sub(controls.target).normalize());
   }));
 }
-document.getElementById('btn-clash-run').addEventListener('click', runClashDock);
+document.getElementById('btn-clash-run').addEventListener('click', () => runClashDock(true));
 document.getElementById('clash-close').addEventListener('click', () => {
   clashDock.classList.remove('show');
   clearClashMarks();
+});
+
+// ------------------------------------------------------------ 連通性檢查（沿用 clash-dock 面板）
+function runConnectivityDock() {
+  const t0 = performance.now();
+  const problems = checkConnectivity(sceneData);
+  const ms = Math.round(performance.now() - t0);
+  const nFree = problems.filter((p) => p.issue === '自由端').length;
+  const nBore = problems.filter((p) => p.issue === 'bore 不一致').length;
+  const nBroken = problems.filter((p) => p.issue === '連接失效').length;
+  document.getElementById('clash-summary').textContent =
+    `自由端 ${nFree}｜bore 不一致 ${nBore}｜連接失效 ${nBroken}（${ms}ms）`;
+  document.getElementById('clash-count').textContent = `　${problems.length} 筆`;
+  const badge = (bg, txt) => `<span style="display:inline-block;padding:1px 6px;border-radius:4px;background:${bg};color:#fff;font-size:10px;font-weight:600">${txt}</span>`;
+  const CB = { '自由端': '#d9534f', 'bore 不一致': '#e0a800', '連接失效': '#c0284e' };
+  const list = document.getElementById('clash-list');
+  list.innerHTML = problems.length ? problems.map((p, i) =>
+    `<div class="clash-row" data-pi="${i}" style="grid-template-columns:88px 90px 1fr">
+      ${badge(CB[p.issue] ?? '#888', p.issue)}
+      <span style="color:var(--dim);font-family:monospace;font-size:11px">PIPE #${p.pipe + 1}</span>
+      <span>${p.detail}</span>
+    </div>`).join('') : '<div style="padding:14px;color:var(--dim)">無問題——管線連通乾淨</div>';
+  clashDock.classList.add('show');
+  clearClashMarks();
+  list.querySelectorAll('.clash-row').forEach((row) => row.addEventListener('click', () => {
+    list.querySelectorAll('.clash-row').forEach((r) => r.classList.toggle('selected', r === row));
+    const p = problems[+row.dataset.pi];
+    selectPipe(p.pipe);      // 選取該管並定位視角
+    zoomToSelection();
+  }));
+}
+document.getElementById('btn-connect-check').addEventListener('click', runConnectivityDock);
+
+// ------------------------------------------------------------ 模型完整性健檢（沿用 clash-dock 面板）
+function locateIntegrity(locate) {
+  if (!locate) return;
+  if (locate.kind === 'eq') { selectEquipment(locate.tag); zoomToSelection(); }
+  else if (locate.kind === 'pipe') { selectPipe(locate.index); zoomToSelection(); }
+}
+function runIntegrityDock() {
+  const t0 = performance.now();
+  const issues = checkModelIntegrity(sceneData);
+  const ms = Math.round(performance.now() - t0);
+  const nErr = issues.filter((x) => x.severity === 'error').length;
+  const nWarn = issues.filter((x) => x.severity === 'warn').length;
+  const cats = {};
+  for (const x of issues) cats[x.category] = (cats[x.category] ?? 0) + 1;
+  const catSummary = Object.entries(cats).map(([k, v]) => `${k} ${v}`).join('｜') || '無問題';
+  document.getElementById('clash-summary').textContent =
+    issues.length ? `錯誤 ${nErr}｜警告 ${nWarn}（${catSummary}，${ms}ms）`
+                  : `✓ 模型健檢通過（${ms}ms）`;
+  document.getElementById('clash-count').textContent = `　${issues.length} 筆`;
+  const badge = (bg, txt) => `<span style="display:inline-block;padding:1px 6px;border-radius:4px;background:${bg};color:#fff;font-size:10px;font-weight:600">${txt}</span>`;
+  const list = document.getElementById('clash-list');
+  list.innerHTML = issues.length ? issues.map((x, i) =>
+    `<div class="clash-row" data-ii="${i}" style="grid-template-columns:52px 96px 96px 1fr">
+      ${badge(x.severity === 'error' ? '#d9534f' : '#e0a800', x.severity === 'error' ? '錯誤' : '警告')}
+      <span style="font-size:11px;font-weight:600">${x.category}</span>
+      <span style="color:var(--dim);font-family:monospace;font-size:11px">${x.target}</span>
+      <span>${x.detail}</span>
+    </div>`).join('') : '<div style="padding:14px;color:var(--dim)">✓ 模型健檢通過——無孤兒參考/重複位號/缺欄位/斷點</div>';
+  clashDock.classList.add('show');
+  clearClashMarks();
+  list.querySelectorAll('.clash-row').forEach((row) => row.addEventListener('click', () => {
+    list.querySelectorAll('.clash-row').forEach((r) => r.classList.toggle('selected', r === row));
+    locateIntegrity(issues[+row.dataset.ii].locate);
+  }));
+}
+document.getElementById('btn-model-lint').addEventListener('click', runIntegrityDock);
+
+// ------------------------------------------------------------ UDA 使用者自訂屬性（E3D UDA）＋依屬性著色
+// def.uda = { 鍵:'值', ... } 任意字串鍵值，設備/管線皆可掛；純 metadata、與單位無關、隨場景 JSON 存讀（undo/複製沿用深拷貝）。
+function escAttr(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// 屬性面板 UDA 區塊：列出現有鍵值可編輯/刪除，末列「＋ 新增屬性」（key/value 輸入）。
+function udaSection(obj) {
+  const uda = obj.uda ?? {};
+  const rows = Object.entries(uda).map(([k, v]) => `
+    <label title="${escAttr(k)}" style="overflow:hidden;text-overflow:ellipsis">${escAttr(k)}</label>
+    <div class="pg-v" style="display:flex;gap:4px;align-items:center">
+      <input data-udak="${escAttr(k)}" value="${escAttr(v)}" style="flex:1" title="屬性值（可編輯）">
+      <button class="pane-x" data-udadel="${escAttr(k)}" title="刪除此屬性">✕</button>
+    </div>`).join('');
+  return `<div class="pg-section">使用者自訂屬性 UDA</div>
+    <div class="pg-grid">${rows}</div>
+    <div style="display:flex;gap:6px;margin-top:6px">
+      <input id="uda-newk" placeholder="屬性名（如 狀態）" style="flex:1;min-width:0">
+      <input id="uda-newv" placeholder="值（如 運轉中）" style="flex:1;min-width:0">
+      <button class="pbtn" id="uda-add" style="width:auto;margin:0;padding:6px 12px">＋ 新增</button>
+    </div>`;
+}
+
+// 綁定 UDA 區塊事件；repaint 為所屬面板重繪閉包（設備/管線各自傳入）。存改前 pushUndo，著色開啟時即時重套。
+function wireUda(obj, repaint) {
+  propBody.querySelectorAll('[data-udak]').forEach((inp) => inp.addEventListener('change', () => {
+    pushUndo();
+    obj.uda[inp.dataset.udak] = inp.value;
+    if (udaColorKey) refreshRenderLayers(false);
+  }));
+  propBody.querySelectorAll('[data-udadel]').forEach((b) => b.addEventListener('click', () => {
+    pushUndo();
+    delete obj.uda[b.dataset.udadel];
+    if (obj.uda && Object.keys(obj.uda).length === 0) delete obj.uda;
+    if (udaColorKey) refreshRenderLayers(false);
+    repaint();
+  }));
+  document.getElementById('uda-add')?.addEventListener('click', () => {
+    const k = document.getElementById('uda-newk').value.trim();
+    const v = document.getElementById('uda-newv').value;
+    if (!k) { setHint('請先輸入屬性名'); return; }
+    pushUndo();
+    obj.uda = obj.uda ?? {};
+    obj.uda[k] = v;
+    if (udaColorKey) refreshRenderLayers(false);
+    repaint();
+  });
+}
+
+// ---- 依屬性著色：獨立 override 群集（只記錄/還原 material.color），與 review 的 transparent/opacity/wireframe 群集互不干擾 ----
+let udaColorKey = null;                 // 目前著色的 UDA 鍵；null=關閉
+let udaFilter = false;                   // true=值不符者半透明過濾聚焦
+// mesh → { origMat, cloneMat }：管身 cylinder/joint 用共用單例材質（pipeMat/serviceMats），
+// 直接改 color 會污染同服務其他管線與快取；故著色時換上該 mesh 專屬 clone，還原時換回原材質並 dispose clone。
+const udaColorOverride = new Map();
+const UDA_PALETTE = [0x2e7cf6, 0xef5350, 0x66bb6a, 0xffa726, 0xab47bc, 0x26c6da, 0xd4e157, 0x8d6e63, 0xec407a, 0x78909c];
+
+// 蒐集場景中所有 UDA 鍵（設備 def + 管線），去重
+function udaKeysInScene() {
+  const keys = new Set();
+  for (const { def } of eqObjects.values()) for (const k of Object.keys(def.uda ?? {})) keys.add(k);
+  for (const p of (sceneData?.pipes ?? [])) for (const k of Object.keys(p.uda ?? {})) keys.add(k);
+  return [...keys];
+}
+
+// 依 tag 取設備 def；依 index 取管線；回傳該物件的 uda 值（key 對應）
+function udaValueOfMesh(m) {
+  if (m.userData.eqTag !== undefined) return eqObjects.get(m.userData.eqTag)?.def?.uda?.[udaColorKey];
+  if (m.userData.pipeIndex !== undefined) return sceneData.pipes[m.userData.pipeIndex]?.uda?.[udaColorKey];
+  return undefined;
+}
+
+// 與 review 同源的實體 mesh 蒐集（跳過已透明/標記材質，避免污染）
+function colorMeshes() { return reviewMeshes(); }
+
+// skipLegend=true：重建/重組時不重繪圖例面板（不搶正在編輯的屬性面板）；一律先 restoreUdaColor 再依現況套色
+function applyUdaColor(skipLegend) {
+  restoreUdaColor();   // 一律先還原上一輪（換回 base、dispose clone、清 map）——避免 clone 疊 clone、X-ray 暫態被烙進 clone、rebuild 後洩漏
+  if (!udaColorKey) return;
+  // 依「出現過的值」穩定指派調色盤色（依字典序，重繪一致）
+  const values = new Set();
+  for (const m of colorMeshes()) { const v = udaValueOfMesh(m); if (v !== undefined && v !== '') values.add(String(v)); }
+  const valList = [...values].sort();
+  const colorOf = new Map(valList.map((v, i) => [v, UDA_PALETTE[i % UDA_PALETTE.length]]));
+  for (const m of colorMeshes()) {
+    const raw = udaValueOfMesh(m);
+    const has = raw !== undefined && raw !== '';
+    if (!has && !udaFilter) continue;   // 無值且不過濾：此 mesh 不動（保原共用材質）
+    if (!udaColorOverride.has(m)) {
+      const clone = m.material.clone();   // 專屬 clone，避免污染共用單例材質與快取
+      udaColorOverride.set(m, { origMat: m.material, cloneMat: clone });
+      m.material = clone;
+    }
+    const mat = m.material;
+    if (has) {
+      mat.color.setHex(colorOf.get(String(raw)));
+    } else {
+      // 過濾聚焦：無此屬性者半透明淡出，保原色（color 從 origMat 承接、不改）
+      mat.transparent = true;
+      mat.opacity = 0.08;
+    }
+    mat.needsUpdate = true;
+  }
+  if (!skipLegend) renderUdaLegend(valList, colorOf);   // 重建/重組時不搶面板（使用者可能正在編別的設備）
+}
+
+function restoreUdaColor() {
+  for (const [m, o] of udaColorOverride) {
+    m.material = o.origMat;   // 換回原共用材質
+    o.cloneMat.dispose();     // 釋放專屬 clone，避免洩漏
+    m.material.needsUpdate = true;
+  }
+  udaColorOverride.clear();
+}
+
+// 圖例（沿用屬性面板顯示區；不入存檔）
+function renderUdaLegend(valList, colorOf) {
+  const hex = (n) => '#' + n.toString(16).padStart(6, '0');
+  document.getElementById('prop-title').textContent = `屬性著色：${udaColorKey}`;
+  propBody.innerHTML = `
+    <div class="pg-section">依屬性著色（UDA）</div>
+    <div class="pg-grid">
+      ${pgRow('著色屬性', `<select id="uda-color-key" style="width:100%">${
+        udaKeysInScene().map((k) => `<option value="${escAttr(k)}" ${k === udaColorKey ? 'selected' : ''}>${escAttr(k)}</option>`).join('')}</select>`)}
+      ${pgRow('過濾聚焦', `<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="uda-filter"${udaFilter ? ' checked' : ''}>值缺者淡出</label>`)}
+    </div>
+    <div class="pg-section">色表 Legend</div>
+    <div class="pg-grid">
+      ${valList.length ? valList.map((v) => `<label>${escAttr(v)}</label><div class="pg-v"><span style="display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:middle;background:${hex(colorOf.get(v))};border:1px solid var(--bdr)"></span></div>`).join('')
+        : '<label style="grid-column:1/-1;color:var(--dim)">此屬性在場景中尚無任何值</label>'}
+    </div>
+    <button class="pbtn danger" id="uda-color-off">關閉著色（還原原色）</button>`;
+  document.getElementById('uda-color-key').addEventListener('change', (e) => { udaColorKey = e.target.value; refreshRenderLayers(false); });
+  document.getElementById('uda-filter').addEventListener('change', (e) => { udaFilter = e.target.checked; refreshRenderLayers(false); });
+  document.getElementById('uda-color-off').addEventListener('click', () => { udaColorKey = null; udaFilter = false; refreshRenderLayers(false); syncUdaButton(); setHint('屬性著色：關（已還原原色）'); });
+  syncUdaButton();
+}
+
+function syncUdaButton() {
+  document.getElementById('btn-uda-color')?.classList.toggle('active', !!udaColorKey);
+}
+
+// 換場景/重建前呼叫：清空著色 override 記錄與旗標（舊 mesh 即將被移除，不需逐一還原）
+function resetUdaColor() {
+  udaColorKey = null;
+  udaFilter = false;
+  udaColorOverride.clear();
+  syncUdaButton();
+}
+
+document.getElementById('btn-uda-color').addEventListener('click', () => {
+  if (udaColorKey) { udaColorKey = null; udaFilter = false; refreshRenderLayers(false); syncUdaButton(); setHint('屬性著色：關（已還原原色）'); return; }
+  const keys = udaKeysInScene();
+  if (!keys.length) { setHint('場景中尚無任何 UDA 屬性；請先在設備/管線屬性面板新增屬性'); return; }
+  udaColorKey = keys[0];
+  refreshRenderLayers(false);   // 內部重繪圖例面板並套色，並與 X-ray 正確疊加
+});
+
+// ------------------------------------------------------------ 審查工具：X-ray/線框＋截圖（e3d/feat-review）
+// 只作用於設備/管線實體 mesh；跳過已透明材質（保溫 insul、包絡、量測球/線等）與坡度箭頭標記。
+// 用 override 群集記錄每個被改 mesh 的原 { transparent, opacity, wireframe }，恢復時逐一還原、清空。
+let xrayOn = false;
+let wireframeOn = false;
+const renderOverride = new Map();   // mesh → { mat, transparent, opacity, wireframe }（連材質實例一起存，還原以記錄當下的材質為準，避免 UDA clone 交叉污染共用單例）
+
+function reviewMeshes() {
+  const out = [];
+  const collect = (root) => root.traverse((o) => {
+    if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
+    if (o.userData.insul || o.userData.slopeMarker || o.userData.transCone || o.userData.envelope) return;  // 勿污染已透明/標記材質（含維修包絡）
+    out.push(o);
+  });
+  for (const { group } of eqObjects.values()) collect(group);
+  for (const p of pipeObjects) if (p) collect(p.group);
+  return out;
+}
+
+function rememberOverride(m) {
+  if (!renderOverride.has(m)) {
+    renderOverride.set(m, { mat: m.material, transparent: m.material.transparent, opacity: m.material.opacity, wireframe: m.material.wireframe });
+  }
+}
+
+function applyRenderOverride() {
+  // 依 xray/wireframe 目前狀態，對現有實體 mesh 套用 override（先記錄原值）
+  for (const m of reviewMeshes()) {
+    rememberOverride(m);
+    const orig = renderOverride.get(m);   // 作用在記錄當下的材質實例，避免 UDA clone 換材後找不到同一目標
+    orig.mat.transparent = xrayOn ? true : orig.transparent;
+    orig.mat.opacity = xrayOn ? 0.25 : orig.opacity;
+    orig.mat.wireframe = wireframeOn;
+    orig.mat.needsUpdate = true;
+  }
+}
+
+function restoreRenderOverride() {
+  // 全部關閉時：逐一還原原始材質狀態並清空記錄，避免污染
+  for (const [, orig] of renderOverride) {
+    orig.mat.transparent = orig.transparent;   // 還原到被記錄當下的材質實例，而非可能已被 UDA 換掉的 m.material
+    orig.mat.opacity = orig.opacity;
+    orig.mat.wireframe = orig.wireframe;
+    orig.mat.needsUpdate = true;
+  }
+  renderOverride.clear();
+}
+
+// 統一重組兩層材質 override（UDA 著色 + X-ray/線框），避免交互殘留：先全拆，再「UDA 先套→X-ray 後疊」。
+// 保證 UDA clone 一定從乾淨 base 複製、X-ray 一定作用在 mesh「當下」材質（有 UDA 時＝clone），任何開關順序都能正確還原。
+function refreshRenderLayers(skipLegend) {
+  restoreRenderOverride();                            // 拆 X-ray（還原被記錄的材質實例、清 map）
+  applyUdaColor(skipLegend);                          // 內部先 restoreUdaColor；UDA 關＝只還原，有開＝在乾淨 base 重套
+  if (xrayOn || wireframeOn) applyRenderOverride();   // 再把 X-ray/線框疊到當前材質
+}
+
+function syncReviewButtons() {
+  document.getElementById('btn-xray').classList.toggle('active', xrayOn);
+  document.getElementById('btn-wireframe').classList.toggle('active', wireframeOn);
+}
+
+// 換場景/重建前呼叫：清空 override 記錄與旗標（舊 mesh 即將被移除，不需逐一還原）
+function resetReviewRender() {
+  xrayOn = false;
+  wireframeOn = false;
+  renderOverride.clear();
+  syncReviewButtons();
+}
+
+document.getElementById('btn-xray').addEventListener('click', () => {
+  xrayOn = !xrayOn;
+  refreshRenderLayers(true);   // 統一重組，避免與 UDA 著色交互殘留（不搶屬性面板）
+  syncReviewButtons();
+  setHint(xrayOn ? '透視 X-ray：<b>開</b>（再按恢復）' : '透視 X-ray：關');
+});
+
+document.getElementById('btn-wireframe').addEventListener('click', () => {
+  wireframeOn = !wireframeOn;
+  refreshRenderLayers(true);
+  syncReviewButtons();
+  setHint(wireframeOn ? '線框顯示：<b>開</b>（再按恢復）' : '線框顯示：關');
+});
+
+document.getElementById('btn-shot').addEventListener('click', () => {
+  renderer.render(scene, camera);  // preserveDrawingBuffer=false → 先渲染同幀再讀 buffer
+  const url = renderer.domElement.toDataURL('image/png');
+  const safe = String(sceneData?.plant?.name ?? 'scene').replace(/[^\w一-龥-]+/g, '_');
+  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${safe}_${ts}.png`;
+  a.click();
+  setHint('已輸出截圖 PNG');
 });
 
 // ------------------------------------------------------------ 視角書籤（E3D Save & Restore Views）
@@ -3273,14 +5421,25 @@ addEventListener('keydown', (e) => {
   } else if (e.key === 'Enter' && mode === 'pipe' && pipeDraft.length >= 2) {
     pushUndo();
     const ptsOut = pipeDraft.map((p) => [roundMM(p.x), roundMM(p.y), roundMM(p.z)]);
-    if (ductDraw) {
+    if (trayDraw) {
+      const w = trayWidth;
+      // 等效半徑 r＝寬/2（clash/支撐/報表沿用管線機制）；tray 屬性存於 pipe.tray（比照 duct）
+      sceneData.pipes.push({ r: w / 2, profile: 'tray', tray: { w, type: trayType }, spec: 'ELEC', dn: `CT${(w * 1000) | 0}`, pts: ptsOut });
+    } else if (ductDraw) {
       const [w, h] = ductSize;
       sceneData.pipes.push({ r: Math.max(w, h) / 2, profile: 'duct', duct: { w, h }, spec: 'HVAC', dn: `${(w * 1000) | 0}×${(h * 1000) | 0}`, pts: ptsOut });
     } else {
       const spec = document.getElementById('pipe-spec').value;
       const dn = document.getElementById('pipe-bore').value;
       const r = PIPE_BORES.find((b) => b.dn === dn)?.r ?? 0.12;
-      sceneData.pipes.push({ r, spec, dn, pts: ptsOut });
+      const pipe = { r, spec, dn, pts: ptsOut };
+      // typed 連接參考：起點→head、終點→tail（吸附到 nozzle 或母管 branch 時才有）
+      const toRef = (r) => r ? (r.pipe !== undefined ? { pipe: r.pipe, at: r.at } : { eq: r.eq, nz: r.nz }) : null;
+      const headRef = toRef(pipeDraftRefs[0]);
+      const tailRef = toRef(pipeDraftRefs[pipeDraftRefs.length - 1]);
+      if (headRef) pipe.head = headRef;
+      if (tailRef) pipe.tail = tailRef;
+      sceneData.pipes.push(pipe);
     }
     buildPipe(sceneData.pipes.at(-1), sceneData.pipes.length - 1);
     clearPipeDraft();
@@ -3348,6 +5507,7 @@ function deleteSelected() {
     const tag = selected.def.tag;
     const entry = eqObjects.get(tag);
     transform.detach();
+    disposeEnvelope(entry.group);   // 包絡幾何/材質 dispose，防 GPU 洩漏
     scene.remove(entry.group);
     eqObjects.delete(tag);
     hiddenTags.delete(tag);

@@ -242,7 +242,7 @@ export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL, prev
         push({ type: cls, a: A.tag, b: B.tag, code: obstCode(A.def) + obstCode(B.def),
                point: A.obb.center.clone().lerp(B.obb.center, 0.5) });
       }
-      if (out.length >= MAX_RESULTS) return finish(out, true, prev, status, sceneData);
+      if (out.length >= MAX_RESULTS) return finish(out, true, prev, status, sceneData, persist);
     }
   }
 
@@ -301,7 +301,7 @@ export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL, prev
           push({ type: soft, a: EN.tag, b: E.tag,
                  code: 'S' + obstCode(E.def),
                  point: EN.obb.center.clone().lerp(E.obb.center, 0.5), soft: true });
-          if (out.length >= MAX_RESULTS) return finish(out, true, prev, status, sceneData);
+          if (out.length >= MAX_RESULTS) return finish(out, true, prev, status, sceneData, persist);
         }
       }
     }
@@ -325,7 +325,7 @@ export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL, prev
         if (hit) {
           push({ type: 'touch', a: EN.tag, b: `PIPE #${pi + 1}`,
                  code: 'SH', point: hit, pipeIndex: pi, soft: true });
-          if (out.length >= MAX_RESULTS) return finish(out, true, prev, status, sceneData);
+          if (out.length >= MAX_RESULTS) return finish(out, true, prev, status, sceneData, persist);
         }
       }
     }

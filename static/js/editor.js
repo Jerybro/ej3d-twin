@@ -1308,7 +1308,7 @@ function renderPipeProps(index) {
   const DUCT_VARIANT_KINDS = new Set(['transition', 'reducer']);   // 支援同心/偏心選項的配件
   const DUCT_SHAPES = [{ v: 'rect', name: '矩形' }, { v: 'circ', name: '圓形' }, { v: 'oval', name: '橢圓' }];
   const compKinds = isTray ? [] : isDuct ? DUCT_FITTINGS : PIPE_COMPONENTS;   // 托盤暫不提供管中元件
-  const compName = Object.fromEntries([...PIPE_COMPONENTS, ...DUCT_FITTINGS].map((c) => [c.kind, c.name]));
+  const compName = Object.fromEntries((isDuct ? DUCT_FITTINGS : PIPE_COMPONENTS).map((c) => [c.kind, c.name]));   // 依當前 profile 解析標籤，避免管線 reducer 顯示成風管『變徑』
   const compRows = (pipe.components ?? []).map((c, i) =>
     `<label>${compName[c.kind] ?? c.kind}</label>
      <div class="pg-v" style="display:flex;gap:4px;align-items:center">

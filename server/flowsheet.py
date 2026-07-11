@@ -522,3 +522,224 @@ def run_flowsheet(fid: str, body: dict = Body(...)) -> dict:
         "connections": conn_out,
         "ms": ms_total,
     }
+
+
+# ══════════════════════════════════════════════════════ 4. 聯合最佳化（P4：情況二）
+# 決策變數橫跨多個 block、目標在任一 block、下游模型的預測當「約束」一起解——
+# 對標 ASPEN optimization block。與單模型 optimize 的本質差異：每個候選解都要
+# 沿 connections 跑完整條鏈（A 的輸出變成 B 的輸入），所以最佳解是「全廠可行解」，
+# 不是 A 的局部最優。
+#
+# 效能關鍵：批次鏈式評估——N 個候選「一起」按拓撲序走鏈，每個 block 只呼叫一次
+# registry.predict(list[N])（batch），全程 blocks×2 輪 ≈ 16 次模型呼叫，而非 N×blocks 次。
+# 誠實邊界：決策變數的搜尋範圍固定＝該模型訓練域 P1–P99（與守門員同源）——
+# 最佳化天生不會把模型推出訓練域，「越最佳化越失真」被結構性擋掉。
+
+def _metric_of(block: dict) -> str:
+    """block 的可量測輸出：regression→value、anomaly→health（給目標/約束共用）。"""
+    return "health" if block.get("kind") == "anomaly" else "value"
+
+
+def _chain_eval(spec: dict, order: list, connections: list, base_inputs: dict,
+                dec_matrix: dict, n: int, fid: str) -> dict:
+    """批次鏈式評估：N 個候選同時沿拓撲序走完整條鏈。
+
+    - base_inputs: {bid: {feat: val}}（現場基準：defaults ← 呼叫端 inputs 覆蓋）
+    - dec_matrix:  {(bid, feat): np.ndarray[N]}（決策變數的候選值欄）
+    回 {bid: np.ndarray[N]}——每個 block 的量測輸出（value 或 health）。
+    任一 block 失敗直接丟 HTTPException（最佳化沒有「部分成功」的意義）。
+    """
+    import numpy as np
+
+    block_by_id = {b["id"]: b for b in spec["blocks"]}
+    incoming: dict = {bid: {} for bid in block_by_id}   # bid → {feat: ndarray[N]}
+    out: dict = {}
+    for bid in order:
+        b = block_by_id[bid]
+        rows = []
+        base = base_inputs.get(bid) or {}
+        dec_feats = [f for (dbid, f) in dec_matrix if dbid == bid]
+        inc = incoming.get(bid) or {}
+        for i in range(n):
+            row = dict(base)
+            for f in dec_feats:
+                row[f] = float(dec_matrix[(bid, f)][i])
+            for f, arr in inc.items():
+                row[f] = float(arr[i])
+            rows.append(row)
+        rt0 = time.perf_counter()
+        try:
+            resp = registry.predict(b["model_key"], rows, check_enabled=True)
+            _usage_record(b["model_key"], "predict", source=f"flowsheet-opt:{fid}",
+                          n_inputs=n, ok=True,
+                          ms=int((time.perf_counter() - rt0) * 1000), http=200, err=None)
+        except HTTPException as e:
+            _usage_record(b["model_key"], "predict", source=f"flowsheet-opt:{fid}",
+                          n_inputs=n, ok=False,
+                          ms=int((time.perf_counter() - rt0) * 1000),
+                          http=e.status_code, err=str(e.detail))
+            raise HTTPException(422, f"聯合最佳化：block {bid} 評估失敗——{e.detail}") from None
+        preds = resp.get("predictions") or []
+        metric = _metric_of(b)
+        vals = np.array([float(p.get(metric)) if p.get(metric) is not None else np.nan
+                         for p in preds])
+        out[bid] = vals
+        # 沿 connection 把本 block 的 value 欄餵給下游（anomaly-as-source 已由儲存端擋掉）
+        for c in connections:
+            if c["from"] != bid:
+                continue
+            incoming.setdefault(c["to"], {})[c["target_input"]] = vals
+    return out
+
+
+@router.post("/{fid}/optimize/")
+def optimize_flowsheet(fid: str, body: dict = Body(...)) -> dict:
+    """全廠聯合最佳化（情況二）：body =
+      {objective: {block, mode: min|max|target, value?},
+       decisions: [{block, feature}, ...],
+       constraints: [{block, op: le|ge, value}, ...],
+       inputs: {bid: {feat: val}},   # 現場邊界快照（沿用 run 的覆蓋語意）
+       n_samples?: int}
+
+    - 決策變數限「邊界特徵」（被 connection 餵的由上游決定，不可當旋鈕）→ 422。
+    - 每個決策變數的搜尋範圍＝該模型 feature_stats 的 [p1, p99]（無統計 → 422）。
+    - 約束量測：regression 取 value、anomaly 取 health（如 B-701 health ≥ 50）。
+    - 隨機搜尋＋最佳鄰域細化一輪（與 automl.optimize 同款策略，但每個候選走整條鏈）。
+    - 無可行解 → feasible=false，回「違約最小」的折衷解與各約束實況，不硬掰。
+    """
+    import numpy as np
+
+    t0 = time.perf_counter()
+    spec = _load_spec(fid)
+    blocks = spec["blocks"]
+    connections = spec.get("connections") or []
+    order = _topo_order(blocks, connections)
+    block_by_id = {b["id"]: b for b in blocks}
+
+    # --- 解析與驗證 objective / decisions / constraints ---
+    obj = body.get("objective") or {}
+    obid = str(obj.get("block") or "").strip()
+    mode = obj.get("mode", "min")
+    if obid not in block_by_id:
+        raise HTTPException(422, f"objective.block 不存在：{obid}")
+    if mode not in ("min", "max", "target"):
+        raise HTTPException(422, "objective.mode 需為 min/max/target")
+    if mode == "target" and obj.get("value") in (None, ""):
+        raise HTTPException(422, "target 模式需要 objective.value")
+
+    fed: dict = {}
+    for c in connections:
+        fed.setdefault(c["to"], set()).add(c["target_input"])
+
+    decisions = body.get("decisions") or []
+    if not decisions:
+        raise HTTPException(422, "至少需要一個決策變數 decisions[]")
+    bounds: dict = {}
+    for d in decisions:
+        dbid, feat = str(d.get("block") or "").strip(), str(d.get("feature") or "").strip()
+        if dbid not in block_by_id:
+            raise HTTPException(422, f"decisions 引用不存在的 block：{dbid}")
+        if feat in fed.get(dbid, set()):
+            raise HTTPException(422, f"{dbid}.{feat} 由上游 connection 決定，不可當決策變數")
+        stats = (registry.feature_stats(block_by_id[dbid]["model_key"]) or {}).get(feat) or {}
+        lo, hi = stats.get("p1"), stats.get("p99")
+        if lo is None or hi is None or hi <= lo:
+            raise HTTPException(422, f"{dbid}.{feat} 無訓練域統計，無法界定搜尋範圍（守門域＝邊界）")
+        bounds[(dbid, feat)] = (float(lo), float(hi))
+
+    constraints = []
+    for c in body.get("constraints") or []:
+        cbid, op = str(c.get("block") or "").strip(), c.get("op")
+        if cbid not in block_by_id:
+            raise HTTPException(422, f"constraints 引用不存在的 block：{cbid}")
+        if op not in ("le", "ge"):
+            raise HTTPException(422, "constraints.op 需為 le（≤）或 ge（≥）")
+        try:
+            cval = float(c.get("value"))
+        except (TypeError, ValueError):
+            raise HTTPException(422, f"constraints value 需為數值：{c}") from None
+        constraints.append({"block": cbid, "op": op, "value": cval,
+                            "metric": _metric_of(block_by_id[cbid])})
+
+    # --- 現場基準（沿用 run 的覆蓋語意：defaults ← 呼叫端 inputs） ---
+    body_inputs = body.get("inputs") or {}
+    base_inputs = {}
+    for b in blocks:
+        base = dict(b.get("defaults") or {})
+        base.update(body_inputs.get(b["id"]) or {})
+        base_inputs[b["id"]] = base
+
+    # --- 基準鏈（N=1）：baseline 目標值與約束實況 ---
+    baseline = _chain_eval(spec, order, connections, base_inputs, {}, 1, fid)
+    baseline_pred = float(baseline[obid][0])
+
+    def score(o: "np.ndarray") -> "np.ndarray":
+        if mode == "max":
+            return -o
+        if mode == "min":
+            return o
+        return np.abs(o - float(obj["value"]))
+
+    def feas_mask(res: dict) -> "np.ndarray":
+        m = np.ones(len(res[obid]), dtype=bool)
+        for c in constraints:
+            arr = res[c["block"]]
+            m &= (arr <= c["value"]) if c["op"] == "le" else (arr >= c["value"])
+        return m
+
+    def violation(res: dict) -> "np.ndarray":
+        v = np.zeros(len(res[obid]))
+        for c in constraints:
+            arr = res[c["block"]]
+            diff = (arr - c["value"]) if c["op"] == "le" else (c["value"] - arr)
+            v += np.maximum(0.0, diff) / max(abs(c["value"]), 1e-9)
+        return v
+
+    rng = np.random.RandomState(0)
+    n1 = int(min(max(int(body.get("n_samples") or 600), 50), 2000))
+    dec1 = {k: rng.uniform(lo, hi, n1) for k, (lo, hi) in bounds.items()}
+    res1 = _chain_eval(spec, order, connections, base_inputs, dec1, n1, fid)
+
+    # 細化：可行解（或違約最小）前 40 名的鄰域再抽一輪
+    s1 = score(res1[obid]); f1 = feas_mask(res1); v1 = violation(res1)
+    rank1 = np.lexsort((s1, ~f1, v1))   # 先可行、再低違約、再低 score
+    top = rank1[:40]
+    n2 = len(top) * 15
+    dec2 = {}
+    for k, (lo, hi) in bounds.items():
+        span = (hi - lo) * 0.08
+        centers = np.repeat(dec1[k][top], 15)
+        dec2[k] = np.clip(rng.normal(centers, span or 1e-9), lo, hi)
+    res2 = _chain_eval(spec, order, connections, base_inputs, dec2, n2, fid)
+
+    allres = {bid: np.concatenate([res1[bid], res2[bid]]) for bid in res1}
+    alldec = {k: np.concatenate([dec1[k], dec2[k]]) for k in dec1}
+    s = score(allres[obid]); f = feas_mask(allres); v = violation(allres)
+    order_all = np.lexsort((s, ~f, v))
+    best_i = int(order_all[0])
+    feasible = bool(f[best_i])
+
+    best: dict = {}
+    for (dbid, feat), arr in alldec.items():
+        best.setdefault(dbid, {})[feat] = round(float(arr[best_i]), 5)
+    cons_out = []
+    for c in constraints:
+        at_best = float(allres[c["block"]][best_i])
+        ok = (at_best <= c["value"]) if c["op"] == "le" else (at_best >= c["value"])
+        cons_out.append({**c, "at_best": round(at_best, 4), "ok": bool(ok),
+                         "baseline": round(float(baseline[c["block"]][0]), 4)})
+
+    return {
+        "flowsheet_id": fid,
+        "objective": {"block": obid, "metric": _metric_of(block_by_id[obid]),
+                      "mode": mode, "value": obj.get("value")},
+        "feasible": feasible,
+        "pred": round(float(allres[obid][best_i]), 4),
+        "baseline_pred": round(baseline_pred, 4),
+        "best": best,
+        "constraints": cons_out,
+        "bounds": {f"{k[0]}.{k[1]}": [round(lo, 5), round(hi, 5)]
+                   for k, (lo, hi) in bounds.items()},
+        "n_evaluated": int(n1 + n2),
+        "ms": int((time.perf_counter() - t0) * 1000),
+    }

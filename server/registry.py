@@ -537,15 +537,31 @@ def _predict_tabular(pack, X: np.ndarray, task: str) -> list:
     return [{"value": round(float(v), 6)} for v in vals]
 
 
+_ARTIFACT_CACHE: dict = {}  # str(path) → (mtime_ns, 已載入物件)：模型常駐快取
+
+
 def _load_artifact(rec: dict, sid: str, mid: str):
     """從註冊表 pin 的成品副本載入 joblib（脫鉤主路徑）；
-    舊 record 無 artifact_path 時退回原 (sid, mid) 檔。"""
+    舊 record 無 artifact_path 時退回原 (sid, mid) 檔。
+
+    模型常駐快取：以檔案 mtime 為驗證鍵——同 path 重新發布（覆蓋檔案）會自動失效重載；
+    上限 32 個（FIFO 淘汰），把 flowsheet 每拍 run 與聯合最佳化的重複磁碟載入消掉。
+    """
     import joblib
     ap = rec.get("artifact_path")
     p = _abs(ap) if ap else _pipe_path(sid, mid)
     if not p.exists():
         raise HTTPException(409, "model artifact missing（成品已遺失，請重新訓練並重新發布）")
-    return joblib.load(p)
+    key = str(p)
+    mtime = p.stat().st_mtime_ns
+    hit = _ARTIFACT_CACHE.get(key)
+    if hit is not None and hit[0] == mtime:
+        return hit[1]
+    obj = joblib.load(p)
+    if len(_ARTIFACT_CACHE) >= 32:
+        _ARTIFACT_CACHE.pop(next(iter(_ARTIFACT_CACHE)))
+    _ARTIFACT_CACHE[key] = (mtime, obj)
+    return obj
 
 
 def _predict_anomaly_pack(pack: dict, rec: dict, X: np.ndarray) -> list:

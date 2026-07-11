@@ -397,8 +397,8 @@ async function runWsOptimize(blk) {
   const mode = $('ws-mode').value;
   const knobs = [...document.querySelectorAll('.ws-use:checked')].map((c) => c.dataset.f);
   const out = $('ws-out');
-  if (!knobs.length) { out.innerHTML = '<div class="fo-headline err">至少勾選一個決策變數</div>'; return; }
-  if (mode === 'target' && $('ws-value').value === '') { out.innerHTML = '<div class="fo-headline err">逼近模式需要目標值</div>'; return; }
+  if (!knobs.length) { out.innerHTML = '<div class="fo-headline err">至少勾選一個決策變數（上方旋鈕區）</div>'; flagErr($('ws-knobs'), false); return; }
+  if (mode === 'target' && $('ws-value').value === '') { out.innerHTML = '<div class="fo-headline err">逼近模式需要目標值</div>'; flagErr($('ws-value')); return; }
   const btn = $('ws-run');
   btn.disabled = true; btn.textContent = '⚙ 求解中…';
   try {
@@ -432,6 +432,151 @@ async function runWsOptimize(blk) {
     out.innerHTML = `<div class="fo-headline err">最佳化失敗：${e.message || e}</div>`;
   } finally {
     btn.disabled = false; btn.textContent = '⚙ 執行最佳化（勾選的變數）';
+  }
+}
+
+// ---------------------------------------------------------------- 全廠聯合最佳化（P4）
+// 決策變數跨 block、下游模型預測（含健康分數）當約束——每個候選解走完整條模型鏈。
+// 搜尋範圍＝各模型訓練域 P1–P99（守門域＝邊界，結構性防「越最佳化越失真」）。
+
+// 驗證錯誤高亮：紅框＋捲到該欄＋聚焦，使用者一改就消除（與設計器同款 UX）
+function flagErr(el, focus = true) {
+  if (!el) return;
+  el.classList.add('field-err');
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  if (focus && el.focus) try { el.focus({ preventScroll: true }); } catch { /* no-op */ }
+  const clear = () => { el.classList.remove('field-err'); el.removeEventListener('input', clear); el.removeEventListener('change', clear); };
+  el.addEventListener('input', clear); el.addEventListener('change', clear);
+}
+
+function boundarySnapshot() {
+  // 現場邊界快照：最近一拍每個 block 的 inputs，拿掉上游餵的鍵（那是傳遞結果不是邊界）
+  const snap = {};
+  for (const b of spec.blocks) {
+    const res = lastRun?.blocks?.[b.id];
+    if (!res?.inputs) continue;
+    const row = {};
+    for (const [f, v] of Object.entries(res.inputs)) {
+      if (!fedBy[b.id]?.has(f)) row[f] = v;
+    }
+    snap[b.id] = row;
+  }
+  return snap;
+}
+
+function openPlantWs() {
+  wsTag = '__plant__';
+  document.getElementById('info-card').classList.add('hidden');
+  $('block-ws').classList.remove('hidden');
+  buildPlantWs();
+}
+
+function buildPlantWs() {
+  $('ws-body').innerHTML = `
+    <div><span class="ws-tag">全廠聯合最佳化</span></div>
+    <div class="ws-sub">決策變數可跨 block；下游模型預測（含健康分數）可設為約束；每個候選解沿製程連接走完整條模型鏈——全廠可行解，不是單塊局部最優。</div>
+    <div class="ws-cols">
+      <div>
+        <div class="info-section">目標</div>
+        <div class="fo-row">
+          <select id="po-block">${spec.blocks.map((b) => `<option value="${b.id}">${b.id}｜${b.output_label || (b.kind === 'anomaly' ? '健康分數' : '')}</option>`).join('')}</select>
+        </div>
+        <div class="fo-row fo-inline">
+          <select id="po-mode"><option value="min">最小化</option><option value="max">最大化</option><option value="target">逼近指定值</option></select>
+          <input type="number" id="po-value" placeholder="目標值" style="display:none">
+        </div>
+        <div class="info-section">約束（下游輸出／健康分數）</div>
+        <div id="po-cons"></div>
+        <button class="fo-apply" id="po-addcon">＋ 加一條約束</button>
+        <button class="fo-run" id="po-run" style="margin-top:10px">⚙ 執行聯合最佳化</button>
+      </div>
+      <div>
+        <div class="info-section">決策變數（勾選；範圍＝訓練域）</div>
+        <div id="po-decs" style="max-height:40vh;overflow-y:auto"></div>
+      </div>
+    </div>
+    <div id="po-out"></div>`;
+  $('po-decs').innerHTML = spec.blocks.map((b) => {
+    const feats = knobFeatures(b).filter((f) => b.feature_ranges?.[f]);
+    if (!feats.length) return '';
+    return `<div style="margin-bottom:9px">
+      <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:3px">${b.id}｜${b.name || ''}</div>
+      ${feats.map((f) => { const rg = b.feature_ranges[f]; return `
+      <label style="display:flex;gap:6px;align-items:center;font-size:11.5px;padding:2px 0;cursor:pointer">
+        <input type="checkbox" class="po-dec" data-b="${b.id}" data-f="${f}">
+        <span style="font-family:ui-monospace,Consolas,monospace;font-size:10.5px;overflow:hidden;text-overflow:ellipsis">${f}</span>
+        <span style="margin-left:auto;color:var(--text-dim);font-size:10px;white-space:nowrap">${fmt(rg[0])}~${fmt(rg[1])}</span>
+      </label>`; }).join('')}</div>`;
+  }).join('');
+  $('po-mode').addEventListener('change', () => {
+    $('po-value').style.display = $('po-mode').value === 'target' ? '' : 'none';
+  });
+  $('po-addcon').addEventListener('click', addConRow);
+  $('po-run').addEventListener('click', runPlantOptimize);
+  addConRow();
+}
+
+function addConRow() {
+  const row = document.createElement('div');
+  row.className = 'fo-row fo-inline po-con';
+  row.innerHTML = `
+    <select class="pc-block">${spec.blocks.map((b) => `<option value="${b.id}">${b.id}｜${b.kind === 'anomaly' ? '健康' : '輸出'}</option>`).join('')}</select>
+    <select class="pc-op" style="max-width:62px"><option value="le">≤</option><option value="ge">≥</option></select>
+    <input type="number" class="pc-val" placeholder="值" style="max-width:88px">
+    <button class="fo-clear" style="flex:0 0 auto" title="移除">✕</button>`;
+  row.querySelector('.fo-clear').onclick = () => row.remove();
+  $('po-cons').appendChild(row);
+}
+
+async function runPlantOptimize() {
+  const out = $('po-out');
+  const decisions = [...document.querySelectorAll('.po-dec:checked')].map((c) => ({ block: c.dataset.b, feature: c.dataset.f }));
+  if (!decisions.length) { out.innerHTML = '<div class="fo-headline err">至少勾選一個決策變數（右欄）</div>'; flagErr($('po-decs'), false); return; }
+  const mode = $('po-mode').value;
+  if (mode === 'target' && $('po-value').value === '') { out.innerHTML = '<div class="fo-headline err">逼近模式需要目標值</div>'; flagErr($('po-value')); return; }
+  const constraints = [...document.querySelectorAll('.po-con')].map((r) => ({
+    block: r.querySelector('.pc-block').value,
+    op: r.querySelector('.pc-op').value,
+    value: r.querySelector('.pc-val').value,
+  })).filter((c) => c.value !== '').map((c) => ({ ...c, value: +c.value }));
+  const body = { objective: { block: $('po-block').value, mode }, decisions, constraints, inputs: boundarySnapshot() };
+  if (mode === 'target') body.objective.value = +$('po-value').value;
+  const btn = $('po-run');
+  btn.disabled = true; btn.textContent = '⚙ 全廠求解中…（數秒）';
+  try {
+    const r = await fetch(`/agatha/flowsheet/${encodeURIComponent(spec.flowsheet_id)}/optimize/`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then((x) => x.json());
+    if (!r || !r.best) throw new Error(r?.detail || '回應缺 best');
+    const oblk = specBlock(r.objective.block);
+    const modeTxt = { min: '最小化', max: '最大化', target: `逼近 ${r.objective.value}` }[r.objective.mode];
+    out.innerHTML = `
+      <div class="fo-headline ${r.feasible ? '' : 'err'}">${r.feasible ? '✓ 找到全廠可行解' : '⚠ 無可行解——以下為違約最小的折衷解'}：
+        ${oblk?.output_label || r.objective.block} ${modeTxt}　${fmt(r.baseline_pred)} → <b>${fmt(r.pred)}</b> ${oblk?.unit || ''}
+        <div style="font-size:10.5px;font-weight:400;color:var(--text-dim);margin-top:3px">評估 ${r.n_evaluated} 個候選（${r.ms} ms）·搜尋範圍＝訓練域·預估以現場邊界快照計，「套用」後即時驗證</div></div>
+      ${r.constraints?.length ? `<div class="fo-result"><table>
+        ${r.constraints.map((c) => `<tr>
+          <td>${c.block} ${c.metric === 'health' ? '健康' : '輸出'} ${c.op === 'le' ? '≤' : '≥'} ${c.value}</td>
+          <td>${fmt(c.baseline)} → <b>${fmt(c.at_best)}</b></td>
+          <td style="text-align:right">${c.ok ? '<span class="fl-chip">✓ 滿足</span>' : '<span class="fl-chip out">✗ 違反</span>'}</td></tr>`).join('')}
+      </table></div>` : ''}
+      <div class="fo-result"><table>
+        ${Object.entries(r.best).flatMap(([bid, feats]) => Object.entries(feats).map(([f, v]) => `
+          <tr><td>${bid}.${f}</td><td class="fo-best">${fmt(v)}</td></tr>`)).join('')}
+        <tr><td colspan="2" style="text-align:right;border-bottom:none">
+          <button class="fo-apply" id="po-apply-all">全部套用 → 下一拍生效</button></td></tr>
+      </table></div>`;
+    $('po-apply-all')?.addEventListener('click', () => {
+      for (const [bid, feats] of Object.entries(r.best)) {
+        for (const [f, v] of Object.entries(feats)) (overrides[bid] ??= {})[f] = +v;
+      }
+      $('po-apply-all').textContent = '已套用（看監看卡 KPI 即時驗證）';
+      $('po-apply-all').disabled = true;
+    });
+  } catch (e) {
+    out.innerHTML = `<div class="fo-headline err">聯合最佳化失敗：${e.message || e}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = '⚙ 執行聯合最佳化';
   }
 }
 
@@ -492,6 +637,9 @@ export async function initTwinFlow(context) {
   for (const c of spec.connections ?? []) {
     (fedBy[c.to] ??= new Set()).add(c.target_input);
   }
+  // 監看卡「工程檢視」連結跟著當前方案走（不寫死示範）
+  const engLink = document.querySelector('#flow-panel .panel-hint a');
+  if (engLink) engLink.href = `/static/incinerator_flowsheet.html?id=${encodeURIComponent(spec.flowsheet_id)}`;
   // 常用操作滑桿（calc-slider 同樣式）
   $('flow-sliders').innerHTML = KNOBS.map((k) => `
     <div class="calc-slider">
@@ -517,6 +665,7 @@ export async function initTwinFlow(context) {
     if (btn) openBlockWs(btn.dataset.tag);
   });
   $('ws-close').addEventListener('click', closeBlockWs);
+  $('flow-plant-opt').addEventListener('click', openPlantWs);
 
   // 資訊卡開/關/內容變動（app.js 控制）→ 重排右側；視窗改尺寸同理
   const infoCard = document.getElementById('info-card');

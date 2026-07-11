@@ -1,5 +1,5 @@
 :root {
-  /* 全平台統一：Tukey 藍白外殼（3D 場景維持深色畫布，白色浮動面板對比） */
+  /* 全平台統一：藍白外殼（3D 場景維持深色畫布，白色浮動面板對比） */
   --bg: #0e141b;
   --panel: rgba(255, 255, 255, 0.94);
   --panel-border: #DBDDE0;
@@ -466,6 +466,11 @@ body.flow-on #info-card { max-height: 46vh; }
 .ui-pop-row { display: flex; align-items: center; gap: 8px; padding: 5px 2px; font-size: 12.5px; cursor: pointer; }
 .ui-pop-row input { accent-color: var(--accent); }
 .ui-pop-hint { font-size: 10.5px; color: var(--text-dim); margin-top: 6px; }
+
+/* 驗證錯誤欄位高亮（工作面/表單通用）：紅框＋光暈＋輕微搖動，一輸入即消除 */
+@keyframes fe-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.field-err { border: 1px solid var(--alarm) !important; box-shadow: 0 0 0 3px rgba(255, 77, 79, 0.16) !important;
+  animation: fe-shake 0.28s ease; border-radius: 7px; }
 
 /* 資訊卡 AI 模型段 */
 #info-model .mono { font-family: ui-monospace, Consolas, monospace; font-size: 11px; }

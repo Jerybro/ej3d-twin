@@ -165,6 +165,19 @@
   #mimic .gsum{font-size:10px;font-weight:700;}
   @keyframes mblink{50%{opacity:.35;}}
   #mimic g.out .sym,#mimic g.out .vbox{stroke:#C0392B;animation:mblink 1s step-end infinite;}
+
+  /* 方案選擇頁（無 ?id 時）：不預設任何示範，由使用者挑方案與檢視方式 */
+  .picker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;}
+  .pk-card{background:var(--white);border:1px solid var(--bdr);border-radius:10px;padding:16px 18px;}
+  .pk-card h3{font-size:15px;font-weight:600;margin:0 0 3px;}
+  .pk-card .pk-meta{font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6;}
+  .pk-acts{display:flex;gap:7px;flex-wrap:wrap;}
+  .pk-acts a{font-size:12.5px;text-decoration:none;border:1px solid var(--bdr);border-radius:7px;
+       padding:6px 12px;color:var(--text);background:var(--white);}
+  .pk-acts a:hover{border-color:var(--blue);color:var(--blue);}
+  .pk-acts a.pk-3d{background:rgba(4,106,251,.06);color:var(--blue);font-weight:600;}
+  .pk-new{border-style:dashed;display:flex;align-items:center;justify-content:center;min-height:120px;}
+  .pk-new a{font-size:13.5px;color:var(--blue);text-decoration:none;font-weight:600;}
 </style>
 </head>
 <body>
@@ -182,6 +195,8 @@
   </header>
   <h1 id="title">Flowsheet 數據孿生（載入規格中…）</h1>
   <div class="sub" id="sub">泛用 flowsheet 渲染器：讀宣告式規格檔畫圖、每拍呼叫一次全廠求解器、顯示守門員（訓練域）狀態。</div>
+
+  <div id="picker" style="display:none"></div>
 
   <div class="bar">
     <span class="lbl">運轉情境</span>
@@ -237,9 +252,10 @@
 //   規格：GET  /agatha/flowsheet/{FID}/spec/  → name/desc/trains/blocks/connections/order
 //   求解：POST /agatha/flowsheet/{FID}/run/   → 每拍一次，回全部 block 的預測＋守門員
 //   自訂：localStorage fsCustom:{FID} → 蓋在規格檔上（僅顯示層，不動後端）
-// 換 ?id=xxx 即渲染另一座廠。
+// 換 ?id=xxx 即渲染另一座廠；**不帶 ?id → 方案選擇頁**（列出全部 flowsheet，
+// 各附 工程檢視/組態/3D 入口）——不預設跳任何示範方案。
 // ============================================================================
-const FID = new URLSearchParams(location.search).get('id') ?? 'incinerator-8b';
+const FID = new URLSearchParams(location.search).get('id');
 
 let SPEC=null;                 // 規格檔本體
 let BLK={};                    // id → spec block
@@ -412,8 +428,44 @@ function sim(){
     inlet_steam_t_h:steam,inlet_steam_temp_C:steam_temp,condenser_vac_kPa:cond_vac};
 }
 
+// ---------------- 方案選擇頁（無 ?id）----------------
+// 設計原則：不預設跳任何示範方案——列出全部 flowsheet，各附 工程檢視/組態/3D 入口，
+// 有綁定 3D 場景的方案才出現 3D 按鈕（掃 /api/scenes 的 flowsheet 欄對映）。
+async function renderPicker(){
+  document.title='選擇數據孿生方案｜J.S Process Intelligence';
+  $('title').textContent='選擇要開啟的數據孿生方案';
+  $('sub').textContent='每個方案是一座用設計器組出來的廠：選檢視方式進入；要新建就開設計器。';
+  for(const sel of ['.bar','#ctrls','#view-cards','#mimic'])document.querySelector(sel).style.display='none';
+  document.querySelector('.logbox').style.display='none';
+  const pk=$('picker'); pk.style.display='';
+  pk.innerHTML='<div class="pk-meta">載入方案清單…</div>';
+  let flows=[],scenes=[];
+  try{
+    [flows,scenes]=await Promise.all([
+      fetch('/agatha/flowsheet/').then(r=>r.json()),
+      fetch('/api/scenes').then(r=>r.json()).catch(()=>[]),
+    ]);
+  }catch(e){pk.innerHTML=`<div class="bootfail">⚠ 方案清單載入失敗：${esc(e.message||e)}<br><button onclick="renderPicker()">↻ 重試</button></div>`;return;}
+  const scenesOf=fid=>scenes.filter(s=>s.flowsheet===fid);
+  pk.innerHTML=`<div class="picker-grid">
+    ${flows.map(f=>`<div class="pk-card">
+      <h3>${esc(f.name||f.flowsheet_id)}</h3>
+      <div class="pk-meta">${f.n_blocks} 個模型 block · <span style="font-family:var(--mono);font-size:11px">${esc(f.flowsheet_id)}</span></div>
+      <div class="pk-acts">
+        <a href="?id=${encodeURIComponent(f.flowsheet_id)}">工程檢視（卡片）</a>
+        <a href="?id=${encodeURIComponent(f.flowsheet_id)}&view=mimic">組態畫面</a>
+        ${scenesOf(f.flowsheet_id).map(s=>`<a class="pk-3d" href="/twin?scene=${encodeURIComponent(s.id)}&flow=1">▶ 3D 智慧運轉（${esc(s.name||s.id)}）</a>`).join('')}
+        <a href="/static/flowsheet_builder.html?id=${encodeURIComponent(f.flowsheet_id)}">✎ 編輯</a>
+      </div>
+    </div>`).join('')}
+    <div class="pk-card pk-new"><a href="/static/flowsheet_builder.html">＋ 新建方案（開啟設計器）</a></div>
+  </div>
+  <div class="pk-meta" style="margin-top:12px">沒看到 3D 按鈕的方案＝尚未綁定 3D 場景（在場景 JSON 加 "flowsheet" 鍵，或由 P&ID 運轉畫面的綁定抽屜設定）。</div>`;
+}
+
 // ---------------- 初始化 ----------------
 async function boot(){
+  if(!FID){renderPicker();return;}   // 無 ?id → 方案選擇頁，不預設任何示範
   $('hz').textContent='載入規格…';
   let spec;
   try{
@@ -432,9 +484,15 @@ async function boot(){
   document.title=(spec.name||FID)+'｜J.S Process Intelligence';
   $('title').textContent=spec.name||FID;
   $('sub').innerHTML=`${esc(spec.desc||'')}　<code>?id=${esc(FID)}</code> · 規格 <code>GET /agatha/flowsheet/${esc(FID)}/spec/</code> · 每拍 <code>POST …/run/</code> ×1`;
-  $('btn-3d').href=`/twin?scene=incinerator-plant&flow=1`;
+  // 3D 入口跟著「當前方案」走：掃場景清單找綁定此 flowsheet 的場景；沒有就藏按鈕
+  $('btn-3d').style.display='none';
+  fetch('/api/scenes').then(r=>r.json()).then(list=>{
+    const sc=(list||[]).find(s=>s.flowsheet===FID);
+    if(sc){$('btn-3d').href=`/twin?scene=${encodeURIComponent(sc.id)}&flow=1`;$('btn-3d').style.display='';}
+  }).catch(()=>{});
   $('btn-edit').href=`/static/flowsheet_builder.html?id=${encodeURIComponent(FID)}`;
-  buildTrains(); buildCtrls(); buildDrawer(); applyGlobal(); buildMimic(); applyView();
+  buildTrains(); buildCtrls(); buildDrawer(); applyGlobal(); buildMimic();
+  applyView(new URLSearchParams(location.search).get('view')==='mimic'?'mimic':undefined);
   logln(`✓ 規格已載入：${spec.name||FID}（${(spec.blocks||[]).length} blocks / ${(spec.connections||[]).length} connections / ${(spec.trains||[]).length} trains）`);
   if(timer)clearInterval(timer);
   tick(); timer=setInterval(tick,2000);

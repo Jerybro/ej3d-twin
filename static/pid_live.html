@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>P&amp;ID 運轉畫面｜J.S Process Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  /* 產品統一藍白殼（與 incinerator_flowsheet.html 同一套 design token） */
+  :root{
+    --blue:#046AFB; --bg:#F6F7FA; --white:#fff; --bdr:#DBDDE0;
+    --text:#061027; --text2:#555; --green:#059669; --green-deep:#052E22;
+    --amber:#B45309; --red:#C0392B;
+    --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-size:14px;
+       font-family:Inter,"Noto Sans TC","Microsoft JhengHei",sans-serif;}
+  .wrap{max-width:1440px;margin:0 auto;padding:22px 28px 40px;}
+  header.site{display:flex;align-items:center;gap:12px;margin-bottom:4px;}
+  .brand{display:inline-flex;align-items:center;justify-content:center;height:30px;padding:0 10px;
+         border-radius:8px;background:var(--green-deep);color:#fff;font-size:13px;font-weight:600;letter-spacing:.5px;}
+  .logo{font-size:19px;font-weight:600;}
+  .site-sub{color:var(--text2);font-size:13px;}
+  .hdr-actions{margin-left:auto;display:flex;gap:8px;}
+  .hbtn{font-size:13px;color:var(--text);text-decoration:none;border:1px solid var(--bdr);border-radius:7px;
+        padding:7px 12px;background:var(--white);cursor:pointer;font-family:inherit;}
+  .hbtn:hover{border-color:var(--blue);color:var(--blue);}
+  .hbtn.hbtn-disabled{opacity:.45;pointer-events:none;cursor:default;}
+  h1{font-size:21px;font-weight:600;margin:12px 0 3px;}
+  .sub{color:var(--text2);font-size:13px;margin-bottom:14px;line-height:1.8;}
+  .sub code{background:var(--white);border:1px solid var(--bdr);border-radius:5px;padding:1px 6px;font-family:var(--mono);font-size:11.5px;}
+
+  /* 頂列：狀態（右上）＋縮放 */
+  .toolrow{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;}
+  .hz{font-size:12px;color:var(--text2);font-variant-numeric:tabular-nums;margin-left:auto;}
+  .hz .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);margin-right:5px;}
+  .hz.off .dot{background:#C9CFD6;}
+  .guardsum{font-size:12px;color:var(--text2);font-variant-numeric:tabular-nums;}
+  .zoomseg{display:inline-flex;border:1px solid var(--bdr);border-radius:8px;overflow:hidden;}
+  .zoomseg button{border:none;background:var(--white);color:var(--text2);font-size:12px;
+      padding:6px 13px;cursor:pointer;font-family:inherit;border-left:1px solid var(--bdr);}
+  .zoomseg button:first-child{border-left:none;}
+  .zoomseg button:hover{color:var(--blue);}
+  .zoomseg button.on{background:rgba(4,106,251,.09);color:var(--blue);font-weight:700;}
+
+  /* 頂部說明條（未綁定 flowsheet / 載入失敗 / run 失敗——一次一條，不彈窗） */
+  .banner{background:var(--white);border:1px solid var(--bdr);border-left:3px solid var(--amber);
+      border-radius:8px;padding:10px 14px;font-size:12.5px;color:var(--text2);margin-bottom:12px;line-height:1.7;display:none;}
+  .banner.show{display:block;}
+  .banner b,.banner code{color:var(--text);}
+  .banner code{font-family:var(--mono);font-size:11px;}
+
+  /* ---------------- 畫布：深灰工業底＋捲動容器 ----------------
+     結構：#canvas-outer（scroll）> #canvas-sizer（佔位=縮放後尺寸）> #canvas-inner（transform:scale）
+     transform 不影響 layout 尺寸，若無 sizer，縮小後會留一大片死捲動區。 */
+  #canvas-outer{background:#2B2F35;border:1px solid var(--bdr);border-radius:10px;
+      overflow:auto;height:68vh;min-height:420px;position:relative;isolation:isolate;}
+  #canvas-sizer{position:relative;}
+  #canvas-inner{position:absolute;left:0;top:0;transform-origin:0 0;}
+  .underlay-img{position:absolute;outline:2px solid #fff; /* outline 不佔 layout，公尺↔px 映射不失真 */
+      box-shadow:0 2px 10px rgba(0,0,0,.35);background:#3E434A;}
+  .underlay-empty{position:absolute;display:flex;align-items:center;justify-content:center;
+      color:#8891A0;font-size:12px;background:#3E434A;border:2px dashed #5A616B;text-align:center;padding:8px;}
+
+  /* 位號 chip：中心定位在設備 (x,z)。counter-scale：整張圖縮小時 chip 以 --inv 反向放大
+     （上限 3 倍），單張圖 fit 檢視下位號維持可讀＝PI Vision 行為。
+     transform-origin 預設在元素中心 → translate(-50%,-50%) scale(k) 恰好以錨點為中心縮放。 */
+  .chip{position:absolute;transform:translate(-50%,-50%) scale(var(--inv,1));background:var(--white);
+      border:1.5px solid var(--bdr);border-radius:7px;padding:3px 7px;font-size:11px;
+      line-height:1.35;white-space:nowrap;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.25);
+      z-index:5;}
+  .chip:hover{box-shadow:0 2px 8px rgba(0,0,0,.4);z-index:20;}
+  .chip .ctag{font-weight:700;color:var(--text);}
+  .chip .cval{font-weight:700;font-variant-numeric:tabular-nums;margin-left:4px;}
+  .chip .cunit{font-weight:400;color:var(--text2);font-size:9.5px;margin-left:1px;}
+  .chip.st-na .cval{color:#8891A0;}
+  .chip.st-ok .cval{color:var(--green);}
+  .chip.st-warn{border-color:var(--amber);}
+  .chip.st-warn .cval{color:var(--amber);}
+  .chip.st-crit{border-color:var(--red);box-shadow:0 0 0 2px rgba(192,57,43,.25);}
+  .chip.st-crit .cval{color:var(--red);}
+  /* 守門員 out（出定義域）＝紅框閃爍，疊加在 band 配色之上 */
+  .chip.st-out{animation:chipblink 1s step-end infinite;border-color:var(--red);border-width:2px;}
+  @keyframes chipblink{50%{box-shadow:0 0 0 3px rgba(192,57,43,.45);}}
+  /* 位號 chip：無對應 flowsheet block（半透明小灰，不搶畫面） */
+  .chip.chip-unbound{background:rgba(255,255,255,.55);border:1px dashed #B8C0C9;
+      padding:2px 6px;box-shadow:none;z-index:4;}
+  .chip.chip-unbound .ctag{color:#8891A0;font-weight:600;}
+
+  /* chip 點擊浮卡：掛在 canvas-outer（不吃 canvas-inner 的 scale，縮圖模式下文字仍可讀）；
+     定位用 chip 的 getBoundingClientRect 換算，對任何縮放皆準（見 openPopcard）。 */
+  .popcard{position:absolute;transform:translate(-50%,10px);background:var(--white);
+      border:1px solid var(--bdr);border-radius:9px;box-shadow:0 8px 26px rgba(6,16,39,.22);
+      padding:12px 14px;font-size:12.5px;min-width:210px;z-index:50;line-height:1.7;}
+  .popcard .pctag{font-size:14px;font-weight:700;color:var(--blue);}
+  .popcard .pcnm{color:var(--text2);margin-bottom:6px;}
+  .popcard .pcrow{display:flex;justify-content:space-between;gap:12px;}
+  .popcard .pcrow span:first-child{color:var(--text2);flex-shrink:0;}
+  .popcard .pcclose{position:absolute;top:6px;right:8px;background:none;border:none;font-size:14px;
+      color:var(--text2);cursor:pointer;}
+  .popcard .pcmk{font-family:var(--mono);font-size:10px;color:#9AA3AE;word-break:break-all;margin-top:4px;}
+
+  .legend{font-size:11px;color:var(--text2);margin-top:10px;display:flex;gap:14px;flex-wrap:wrap;}
+  .legend i{font-style:normal;display:inline-flex;align-items:center;gap:5px;}
+  .dot2{width:8px;height:8px;border-radius:50%;display:inline-block;}
+
+  /* ---------------- 底部工具列 ---------------- */
+  .footbar{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap;}
+  .footbar .hbtn.active{background:rgba(4,106,251,.08);border-color:var(--blue);color:var(--blue);font-weight:600;}
+
+  /* ---------------- 綁定抽屜 ---------------- */
+  #drawer{position:fixed;top:0;right:-400px;width:392px;height:100%;background:var(--white);
+          border-left:1px solid var(--bdr);box-shadow:-8px 0 30px rgba(6,16,39,.10);z-index:60;
+          transition:right .25s ease;overflow-y:auto;padding:18px 18px 30px;}
+  #drawer.open{right:0;}
+  #drawer h2{font-size:15px;font-weight:600;margin-bottom:2px;}
+  #drawer .dsub{font-size:11.5px;color:var(--text2);margin-bottom:14px;line-height:1.6;}
+  #drawer .dclose{position:absolute;top:12px;right:14px;background:none;border:none;font-size:18px;color:var(--text2);cursor:pointer;}
+  .dsection{border:1px solid var(--bdr);border-radius:9px;padding:12px;margin-bottom:12px;}
+  .dsection .dtitle{font-size:12.5px;font-weight:700;margin-bottom:8px;color:var(--text);}
+  .dsection select{width:100%;padding:7px 8px;border:1px solid var(--bdr);border-radius:7px;
+      font-size:12.5px;font-family:inherit;color:var(--text);background:var(--white);}
+  .dhint{font-size:10.5px;color:var(--text2);margin-top:8px;line-height:1.6;}
+  .deqlist{max-height:44vh;overflow-y:auto;border:1px solid var(--bdr);border-radius:9px;}
+  .deqlist .dempty{padding:12px;font-size:11.5px;color:var(--text2);}
+  .deqrow{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--bdr);font-size:11.5px;}
+  .deqrow:last-child{border-bottom:none;}
+  .deqrow .eqtag{font-weight:700;color:var(--blue);width:72px;flex-shrink:0;font-size:11.5px;
+      overflow:hidden;text-overflow:ellipsis;}
+  .deqrow .eqtag small{color:var(--text2);font-weight:400;}
+  .deqrow select{flex:1;min-width:0;padding:5px 6px;border:1px solid var(--bdr);border-radius:6px;font-size:11px;font-family:inherit;}
+  .deqrow .clearbtn{flex-shrink:0;background:none;border:1px solid var(--bdr);border-radius:6px;
+      color:var(--text2);font-size:10.5px;padding:5px 7px;cursor:pointer;font-family:inherit;}
+  .deqrow .clearbtn:hover{border-color:var(--red);color:var(--red);}
+  .dsave{width:100%;margin-top:12px;padding:10px;border:1px solid var(--blue);border-radius:8px;
+      background:var(--blue);color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}
+  .dsave:hover{opacity:.9;}
+  .dsave:disabled{opacity:.5;cursor:default;}
+  .dsavemsg{font-size:11.5px;margin-top:8px;line-height:1.6;word-break:break-all;}
+  .dsavemsg.ok{color:var(--green);}
+  .dsavemsg.err{color:var(--red);}
+
+  .bootfail{background:var(--white);border:1px solid var(--bdr);border-radius:10px;padding:16px 18px;
+      font-size:13px;line-height:1.8;margin:14px;max-width:520px;}
+  .bootfail .mut{color:var(--text2);font-size:12px;}
+  .bootfail code{font-family:var(--mono);font-size:11.5px;}
+  .bootfail button{margin-top:8px;padding:7px 14px;border:1px solid var(--bdr);border-radius:7px;background:var(--white);cursor:pointer;font-family:inherit;}
+  .bootfail button:hover{border-color:var(--blue);color:var(--blue);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="site">
+    <span class="brand">J.S</span>
+    <span class="logo">Process Intelligence</span>
+    <span class="site-sub">P&amp;ID 運轉畫面</span>
+    <div class="hdr-actions">
+      <button class="hbtn" id="btn-bind">⚙ 綁定模型</button>
+      <a class="hbtn" href="/">← 回首頁</a>
+    </div>
+  </header>
+  <h1 id="title">P&amp;ID 運轉畫面（載入場景中…）</h1>
+  <div class="sub" id="sub">以客戶 P&amp;ID 圖面為底圖，位號旁釘上即時模型預測值。</div>
+
+  <div id="banner" class="banner"></div>
+
+  <div class="toolrow">
+    <span class="hz off" id="hz"><span class="dot"></span>載入中…</span>
+    <span class="guardsum" id="guardsum"></span>
+    <span class="zoomseg">
+      <button id="btn-fit" class="on">適合視窗</button>
+      <button id="btn-100">100%</button>
+    </span>
+  </div>
+
+  <div id="canvas-outer">
+    <div id="canvas-sizer"><div id="canvas-inner"></div></div>
+  </div>
+
+  <div class="legend">
+    <i><span class="dot2" style="background:var(--green)"></span>正常</i>
+    <i><span class="dot2" style="background:var(--amber)"></span>注意（warn）</i>
+    <i><span class="dot2" style="background:var(--red)"></span>警戒（crit）／守門員出定義域（閃爍）</i>
+    <i><span class="dot2" style="background:#B8C0C9"></span>無對應 flowsheet block（灰）</i>
+  </div>
+
+  <div class="footbar">
+    <button class="hbtn active" id="btn-toggle-live">⏸ 暫停即時</button>
+    <a class="hbtn" id="btn-engview" href="#">工程檢視</a>
+    <a class="hbtn" id="btn-3dview" href="#">3D 檢視</a>
+  </div>
+</div>
+
+<aside id="drawer">
+  <button class="dclose" id="drawer-close">×</button>
+  <h2>位號 ↔ 模型 綁定</h2>
+  <div class="dsub">場景層綁定 flowsheet；設備層各自選一個已發布模型。儲存後畫面即時套用，不需重整頁面。</div>
+
+  <div class="dsection">
+    <div class="dtitle">場景 Flowsheet</div>
+    <select id="d-flowsheet"><option value="">載入中…</option></select>
+    <div class="dhint">flowsheet 的 block 編號需與位號一致，該位號才會有即時值（可在設計器把 block 編號改成位號）。</div>
+  </div>
+
+  <div class="dsection">
+    <div class="dtitle">設備模型（<span id="d-eqcount">0</span> 個位號）</div>
+    <div class="deqlist" id="d-eqlist"></div>
+  </div>
+
+  <button class="dsave" id="d-save">儲存綁定</button>
+  <div class="dsavemsg" id="d-savemsg"></div>
+</aside>
+
+<script>
+// ============================================================================
+// P&ID 運轉畫面（Stage 2）— PI Vision 式：客戶 P&ID 圖面當底圖，位號旁釘上
+// 即時模型預測值。完全由場景 JSON 與 flowsheet 規格驅動，頁內不寫死任何
+// 位號／場景內容（NDA：程式必須對任何場景通用）。
+//   場景：GET/PUT /api/scenes/{sid}             → plant.units[].equipment[]、underlays[]、flowsheet?
+//   規格：GET     /agatha/flowsheet/{fid}/spec/ → blocks（defaults/warn/crit/unit/better/kind）
+//   求解：POST    /agatha/flowsheet/{fid}/run/  → 每 2.5s 一次，回全部 block 的預測＋守門員
+//   清單：GET /agatha/flowsheet/、GET /agatha/find_model_list/（綁定抽屜用）
+// 座標約定（與 3D 場景同源）：underlay「中心」在 (x,z)、寬 w 高 h 公尺；
+// 設備錨點 = (pos[0], pos[2])。畫布用固定 px/公尺比例排版，多圖先算全體外接框。
+// ============================================================================
+const SID = new URLSearchParams(location.search).get('scene') || '';
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// 數值格式與工程檢視（twinflow / incinerator_flowsheet）同款三段式
+const fmt = v => (v == null || !isFinite(v)) ? '--'
+  : Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2);
+
+const PX_PER_M = 32;   // 固定比例：每公尺 32px（100% 縮放時）。客戶 P&ID tile 原生約 30-50 px/m，
+                       // 32 讓 100% 檢視接近原圖解析度、單張圖可直接讀圖面文字。
+const INV_CAP = 3;     // chip 反向放大上限（多圖全景縮很小的時候，chip 不無限放大蓋圖）
+
+let SCENE = null;           // 目前場景 JSON（PUT 前一律先重 GET 最新整份，見 saveBindings）
+let EQUIPS = [];            // 攤平的設備清單 [{tag,name,type,pos,model}]（含 index 對應 chip 元素）
+let SPEC = null;            // flowsheet 規格；場景無 flowsheet 或載入失敗則為 null
+let BLOCK_OF = {};          // block id（== 位號 tag）→ spec block
+let LAST_RUN_BLOCKS = {};   // 上一拍 run 回應 blocks（供浮卡顯示「最近值」）
+let CHIP = [];              // index → {el, val, unit}（渲染後快取，避免每拍 103 次 DOM 查找）
+let liveOn = true;          // 使用者「▶/⏸ 即時」開關
+let inFlight = false;       // 單拍防重入：上一拍 run 未回來前不疊發（run 實測近秒級）
+let tickN = 0, timer = null;
+let failStreak = 0;         // 連續 run 失敗次數（≥3 進入節流：10 秒才重試一次，不空轉刷錯）
+let nextTryAt = 0;
+let bannerKind = '';        // 目前 banner 的來源（'fs' 綁定/規格問題、'run' 即時失敗）
+let scale = 1, fitScale = 1;
+let bbox = {minX: 0, minZ: 0, w: 1, h: 1};   // 全體 underlay 外接框（場景公尺）
+let bootOk = false;
+const WALK = {};            // 隨機漫步狀態 {blockId: {feature: value}}（邊界訊號模擬）
+
+// ---------------- 啟動 ----------------
+async function boot() {
+  if (!SID) { bootFail('網址缺少 ?scene=<場景 id>'); return; }
+  setHz('載入場景…', false);
+  let scene;
+  try {
+    const r = await fetch(`/api/scenes/${encodeURIComponent(SID)}`, {signal: AbortSignal.timeout(8000)});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    scene = await r.json();
+  } catch (e) { bootFail('場景載入失敗：' + (e.message || e)); return; }
+  SCENE = scene;
+  bootOk = true;
+  applySceneToPage();
+  updateFootLinks();
+  $('btn-3dview').href = `/twin?scene=${encodeURIComponent(SID)}`;
+  await loadFlowsheetSpecAndStart();
+}
+
+// 狀態列：●＋文字；live=true 綠點（有成功資料流）、false 灰點
+function setHz(text, live) {
+  $('hz').classList.toggle('off', !live);
+  $('hz').innerHTML = `<span class="dot"></span>${text}`;
+}
+
+function bootFail(msg) {
+  setHz('場景載入失敗', false);
+  $('title').textContent = 'P&ID 運轉畫面';
+  $('canvas-inner').innerHTML = `<div class="bootfail" style="position:static">⚠ ${esc(msg)}<br>
+    <span class="mut">確認網址帶 <code>?scene=&lt;場景 id&gt;</code>，且該場景已存在。</span><br>
+    <button onclick="location.reload()">↻ 重試</button></div>`;
+  // 場景讀不到時綁定抽屜沒有意義（需要 SCENE/EQUIPS），停用避免點下去炸例外
+  $('btn-bind').disabled = true;
+  $('btn-bind').classList.add('hbtn-disabled');
+  $('btn-bind').title = '場景載入失敗，無法開啟綁定抽屜';
+}
+
+// 「工程檢視」連到同一份 flowsheet 的卡片式頁面；未綁定時停用
+// （裸網址會落回該頁預設 flowsheet，對不上目前場景，會誤導使用者）。
+function updateFootLinks() {
+  const btn = $('btn-engview');
+  if (SCENE.flowsheet) {
+    btn.href = `/static/incinerator_flowsheet.html?id=${encodeURIComponent(SCENE.flowsheet)}`;
+    btn.classList.remove('hbtn-disabled');
+    btn.title = '';
+  } else {
+    btn.href = '#';
+    btn.classList.add('hbtn-disabled');
+    btn.title = '此場景尚未綁定 flowsheet';
+  }
+}
+
+// ---------------- 場景 → 頁面（標題＋攤平設備＋畫布） ----------------
+function flattenEquipment() {
+  EQUIPS = [];
+  ((SCENE.plant && SCENE.plant.units) || []).forEach(u => {
+    (u.equipment || []).forEach(eq => {
+      EQUIPS.push({tag: String(eq.tag), name: eq.name || eq.tag, type: eq.type || '',
+                   pos: Array.isArray(eq.pos) ? eq.pos : [0, 0, 0], model: eq.model || null});
+    });
+  });
+}
+
+function applySceneToPage() {
+  flattenEquipment();
+  const plantName = (SCENE.plant && SCENE.plant.name) || SID;
+  document.title = plantName + '｜P&ID 運轉畫面';
+  $('title').textContent = plantName;
+  const nUnderlay = (SCENE.underlays || []).length;
+  const fsTxt = SCENE.flowsheet ? `flowsheet <code>${esc(SCENE.flowsheet)}</code>` : '尚未綁定 flowsheet';
+  $('sub').innerHTML = `${nUnderlay} 張圖面 · ${EQUIPS.length} 台設備 · ${fsTxt}　<code>?scene=${esc(SID)}</code>`;
+  buildCanvas();
+}
+
+// ---------------- 畫布：外接框＋固定 px/公尺排版 ----------------
+// 多圖場景：先算全體 underlay 外接框（每張圖中心 (x,z)、寬 w 高 h → 邊界 x±w/2, z±h/2），
+// 再以固定 PX_PER_M 排版 → 圖與圖維持場景裡的相對位置，不重疊（只要場景座標不重疊）。
+function computeBBox() {
+  const uls = SCENE.underlays || [];
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  uls.forEach(u => {
+    const w = +u.w || 10, h = +u.h || 10, x = +u.x || 0, z = +u.z || 0;
+    minX = Math.min(minX, x - w / 2); maxX = Math.max(maxX, x + w / 2);
+    minZ = Math.min(minZ, z - h / 2); maxZ = Math.max(maxZ, z + h / 2);
+  });
+  // 設備一律納入外接框：沒有底圖、或設備落在圖框外時，chip 也不能被裁掉
+  EQUIPS.forEach(e => {
+    minX = Math.min(minX, e.pos[0]); maxX = Math.max(maxX, e.pos[0]);
+    minZ = Math.min(minZ, e.pos[2]); maxZ = Math.max(maxZ, e.pos[2]);
+  });
+  if (!isFinite(minX)) { minX = -10; maxX = 10; minZ = -10; maxZ = 10; }  // 空場景保底
+  // 四周留 2 公尺邊，貼邊 chip 不會削到
+  minX -= 2; maxX += 2; minZ -= 2; maxZ += 2;
+  bbox = {minX, minZ, w: Math.max(maxX - minX, 1), h: Math.max(maxZ - minZ, 1)};
+}
+
+// 場景座標(公尺) → 畫布 px（100% 基準；即時縮放由 CSS transform:scale 疊加）。
+// 等價於規格的中心定位公式：chip 在圖上的相對位置 u=(ex-(ux-w/2))/w、v=(ez-(uz-h/2))/h，
+// 因為 underlay 左上角排在 toPx(ux-w/2, uz-h/2)、寬 w*PX_PER_M，兩者同一線性映射。
+function toPx(x, z) {
+  return {left: (x - bbox.minX) * PX_PER_M, top: (z - bbox.minZ) * PX_PER_M};
+}
+
+function buildCanvas() {
+  computeBBox();
+  const inner = $('canvas-inner');
+  const W = bbox.w * PX_PER_M, H = bbox.h * PX_PER_M;
+  inner.style.width = W + 'px';
+  inner.style.height = H + 'px';
+  let html = '';
+  const uls = SCENE.underlays || [];
+  uls.forEach((u, i) => {
+    const w = (+u.w || 10) * PX_PER_M, h = (+u.h || 10) * PX_PER_M;
+    const p = toPx((+u.x || 0) - (+u.w || 10) / 2, (+u.z || 0) - (+u.h || 10) / 2);
+    // 不用 loading="lazy"：fit 全景時所有圖面本來就同時在視窗內（lazy 無收益），
+    // 且背景分頁/隱藏視窗的 lazy 觀察器不觸發，會整片灰底。decoding="async" 已足夠不卡 UI。
+    html += `<img class="underlay-img" data-l="${p.left}" data-t="${p.top}" data-w="${w}" data-h="${h}"
+      src="${esc(u.image || '')}" decoding="async" alt="P&amp;ID 圖面 ${i + 1}"
+      style="left:${p.left}px;top:${p.top}px;width:${w}px;height:${h}px" />`;
+  });
+  if (!uls.length) {
+    html += `<div class="underlay-empty" style="left:0;top:0;width:${W}px;height:${H}px">此場景無圖紙底圖，僅顯示位號相對位置</div>`;
+  }
+  inner.innerHTML = html;
+  // 圖檔載入失敗 → 換成同尺寸說明區塊（用 JS 綁事件，避免內嵌 onerror 的屬性轉義地雷）
+  inner.querySelectorAll('.underlay-img').forEach(img => {
+    img.addEventListener('error', () => {
+      const div = document.createElement('div');
+      div.className = 'underlay-empty';
+      div.style.cssText = `left:${img.dataset.l}px;top:${img.dataset.t}px;width:${img.dataset.w}px;height:${img.dataset.h}px`;
+      div.textContent = '圖檔載入失敗：' + (img.getAttribute('src') || '(未設定)');
+      img.replaceWith(div);
+    }, {once: true});
+  });
+  renderChips();
+  applyZoom(fitScale = computeFitScale(), true);
+}
+
+// ---------------- 位號 chip ----------------
+// live 判定＝「有對應 flowsheet block（block id == 位號）」——即時值的真正來源。
+// equipment.model（設備級模型綁定）只是靜態標註（浮卡/3D 檢視用），不決定 chip 是否有值。
+// SPEC 載入前先全灰，載入完成後 renderChips() 再跑一次升級樣式。
+function renderChips() {
+  const inner = $('canvas-inner');
+  inner.querySelectorAll('.chip').forEach(el => el.remove());
+  CHIP = [];
+  const frag = document.createDocumentFragment();
+  EQUIPS.forEach((eq, i) => {
+    const p = toPx(eq.pos[0], eq.pos[2]);
+    const el = document.createElement('div');
+    el.dataset.i = i;
+    el.style.left = p.left + 'px';
+    el.style.top = p.top + 'px';
+    const blk = SPEC && BLOCK_OF[eq.tag];
+    if (blk) {
+      el.className = 'chip st-na';
+      el.title = `${eq.tag}｜${blk.name || eq.name}`;
+      el.innerHTML = `<span class="ctag">${esc(eq.tag)}</span><span class="cval">--</span><span class="cunit"></span>`;
+      CHIP[i] = {el, val: el.querySelector('.cval'), unit: el.querySelector('.cunit')};
+    } else {
+      el.className = 'chip chip-unbound';
+      el.title = `${eq.tag}｜無對應 flowsheet block`;
+      el.innerHTML = `<span class="ctag">${esc(eq.tag)}</span>`;
+      CHIP[i] = {el, val: null, unit: null};
+    }
+    frag.appendChild(el);
+  });
+  inner.appendChild(frag);
+}
+
+// 單顆 chip 上值＋配色。band 規則與工程檢視同源：
+//   anomaly → health/100：over_threshold→crit；≥70 ok／≥50 warn／<50 crit
+//   regression → warn/crit 有效時依 better 方向：low＝越低越好（v≥crit 紅）、high 相反
+//   守門員 status=out → 紅框閃爍（疊加）
+function updateChip(i, eq, blk, rbk) {
+  const c = CHIP[i];
+  if (!c || !c.val) return;
+  c.el.classList.remove('st-na', 'st-ok', 'st-warn', 'st-crit', 'st-out');
+  if (!rbk || rbk.error || rbk.skipped || !rbk.prediction) {
+    c.el.classList.add('st-na');
+    c.val.textContent = '--';
+    c.unit.textContent = '';
+    return;
+  }
+  const p = rbk.prediction;
+  let cls = 'ok';
+  if (blk.kind === 'anomaly') {
+    const h = p.health;
+    cls = p.over_threshold ? 'crit' : (h >= 70 ? 'ok' : (h >= 50 ? 'warn' : 'crit'));
+    c.val.textContent = (h != null) ? Math.round(h) : '--';
+    c.unit.textContent = '/100';
+  } else {
+    const v = p.value;
+    const wn = parseFloat(blk.warn), cr = parseFloat(blk.crit);
+    if (v != null && !Number.isNaN(wn) && !Number.isNaN(cr)) {
+      if (blk.better === 'high') cls = v <= cr ? 'crit' : (v <= wn ? 'warn' : 'ok');
+      else cls = v >= cr ? 'crit' : (v >= wn ? 'warn' : 'ok');
+    }
+    c.val.textContent = fmt(v);
+    c.unit.textContent = blk.unit || '';
+  }
+  c.el.classList.add('st-' + cls);
+  if (((rbk.guard && rbk.guard.status) || '') === 'out') c.el.classList.add('st-out');
+}
+
+// run 失敗／暫停時把所有 live chip 退回灰 '--'（規格：run 失敗 → chips 全灰，不留舊值誤導）
+function grayAllChips() {
+  EQUIPS.forEach((eq, i) => {
+    const c = CHIP[i];
+    if (!c || !c.val) return;
+    c.el.classList.remove('st-ok', 'st-warn', 'st-crit', 'st-out');
+    c.el.classList.add('st-na');
+    c.val.textContent = '--';
+    c.unit.textContent = '';
+  });
+}
+
+// ---------------- 縮放（適合視窗 / 100%）＋ chip counter-scale ----------------
+function computeFitScale() {
+  const outer = $('canvas-outer');
+  const W = bbox.w * PX_PER_M, H = bbox.h * PX_PER_M;
+  if (W <= 0 || H <= 0) return 1;
+  return Math.max(0.02, Math.min((outer.clientWidth - 16) / W, (outer.clientHeight - 16) / H, 1));
+}
+function applyZoom(s, isFit) {
+  scale = s;
+  const inner = $('canvas-inner');
+  inner.style.transform = `scale(${s})`;
+  // sizer 佔位＝縮放後的視覺尺寸（transform 不改 layout，沒有 sizer 會留一片死捲動區）
+  $('canvas-sizer').style.width = (bbox.w * PX_PER_M * s) + 'px';
+  $('canvas-sizer').style.height = (bbox.h * PX_PER_M * s) + 'px';
+  // chip 反向縮放：畫面縮小時位號維持可讀（上限 INV_CAP 倍，避免全景時 chip 蓋滿圖）
+  inner.style.setProperty('--inv', Math.min(1 / s, INV_CAP));
+  $('btn-fit').classList.toggle('on', !!isFit);
+  $('btn-100').classList.toggle('on', !isFit && Math.abs(s - 1) < 0.001);
+  closePopcards();  // 縮放後浮卡定位已失準，直接收掉
+}
+$('btn-fit').addEventListener('click', () => applyZoom(fitScale = computeFitScale(), true));
+$('btn-100').addEventListener('click', () => applyZoom(1, false));
+window.addEventListener('resize', () => {
+  if ($('btn-fit').classList.contains('on')) applyZoom(fitScale = computeFitScale(), true);
+});
+
+// ---------------- chip 點擊浮卡（位號/名稱/型別/model_key/最近值） ----------------
+function closePopcards() { document.querySelectorAll('.popcard').forEach(p => p.remove()); }
+
+$('canvas-inner').addEventListener('click', e => {   // 只掛一次（buildCanvas 不重掛，避免重複觸發）
+  const chipEl = e.target.closest('.chip');
+  closePopcards();
+  if (!chipEl) return;
+  e.stopPropagation();
+  openPopcard(+chipEl.dataset.i, chipEl);
+});
+document.addEventListener('click', e => {            // 點畫布外任意處收合浮卡
+  if (!e.target.closest('.popcard') && !e.target.closest('.chip')) closePopcards();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closePopcards(); $('drawer').classList.remove('open'); }
+});
+
+function openPopcard(i, chipEl) {
+  const eq = EQUIPS[i];
+  if (!eq) return;
+  const blk = SPEC && BLOCK_OF[eq.tag];
+  const rbk = LAST_RUN_BLOCKS[eq.tag];
+  const p = rbk && rbk.prediction;
+  let valLine = '尚無即時值';
+  if (p) {
+    if (blk && blk.kind === 'anomaly' && p.health != null) valLine = `健康 ${Math.round(p.health)} /100`;
+    else if (p.value != null) valLine = `${fmt(p.value)} ${(blk && blk.unit) || ''}`;
+  }
+  const modelTxt = blk ? (blk.name || blk.id)
+    : (eq.model ? (eq.model.title || eq.model.product_type || '已綁定') : '未綁定');
+  const mk = (blk && blk.model_key) || (eq.model && eq.model.model_key) || '';
+  const gs = rbk && rbk.guard && rbk.guard.status;
+  // 浮卡掛在 canvas-outer（不吃 inner 的 scale）；用 chip 螢幕座標換算回 outer 內容座標，
+  // 任何縮放倍率下都精準對齊 chip 下緣（不能直接抄 chip.style.left/top——那是 100% 基準值）。
+  const outer = $('canvas-outer');
+  const oRect = outer.getBoundingClientRect();
+  const cRect = chipEl.getBoundingClientRect();
+  const card = document.createElement('div');
+  card.className = 'popcard';
+  card.style.left = (cRect.left + cRect.width / 2 - oRect.left + outer.scrollLeft) + 'px';
+  card.style.top = (cRect.bottom - oRect.top + outer.scrollTop) + 'px';
+  card.innerHTML = `<button class="pcclose">×</button>
+    <div class="pctag">${esc(eq.tag)}</div>
+    <div class="pcnm">${esc(eq.name)}${eq.type ? '｜' + esc(eq.type) : ''}</div>
+    <div class="pcrow"><span>模型</span><span>${esc(modelTxt)}</span></div>
+    <div class="pcrow"><span>最近值</span><span>${esc(valLine)}</span></div>
+    ${gs ? `<div class="pcrow"><span>守門員</span><span>${esc({ok:'✓ 訓練域內',warn:'⚠ 外插',out:'✖ 出定義域',unknown:'— 無統計'}[gs] || gs)}</span></div>` : ''}
+    ${mk ? `<div class="pcmk">model_key ${esc(mk)}</div>` : ''}`;
+  outer.appendChild(card);
+  card.querySelector('.pcclose').addEventListener('click', ev => { ev.stopPropagation(); card.remove(); });
+  card.addEventListener('click', ev => ev.stopPropagation());
+}
+
+// ---------------- flowsheet 規格載入＋即時求解迴圈 ----------------
+function showBanner(kind, html) { bannerKind = kind; const b = $('banner'); b.innerHTML = html; b.classList.add('show'); }
+function hideBanner(kind) {      // 只清自己那類的 banner，避免 run 成功把「未綁定」提示也清掉
+  if (kind && bannerKind !== kind) return;
+  bannerKind = ''; $('banner').classList.remove('show');
+}
+
+async function loadFlowsheetSpecAndStart() {
+  // 先停舊迴圈（解除綁定/換 flowsheet 後，舊 timer 不能繼續空轉）
+  if (timer) { clearInterval(timer); timer = null; }
+  SPEC = null; BLOCK_OF = {}; LAST_RUN_BLOCKS = {};
+  tickN = 0; failStreak = 0; nextTryAt = 0;
+  if (!SCENE.flowsheet) {
+    renderChips();   // 全灰
+    showBanner('fs', '此場景尚未綁定 flowsheet，位號全灰顯示。點右上「<b>⚙ 綁定模型</b>」選擇 flowsheet 後即有即時值。');
+    setHz('未綁定 flowsheet', false);
+    $('guardsum').textContent = '';
+    return;
+  }
+  setHz('載入 flowsheet 規格…', false);
+  let spec;
+  try {
+    const r = await fetch(`/agatha/flowsheet/${encodeURIComponent(SCENE.flowsheet)}/spec/`, {signal: AbortSignal.timeout(8000)});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    spec = await r.json();
+  } catch (e) {
+    renderChips();   // 全灰；圖照常顯示
+    showBanner('fs', `flowsheet <code>${esc(SCENE.flowsheet)}</code> 規格載入失敗：<b>${esc(e.message || e)}</b>（圖面照常顯示、位號全灰，不影響檢視）`);
+    setHz('flowsheet 規格載入失敗', false);
+    return;
+  }
+  SPEC = spec; BLOCK_OF = {};
+  (SPEC.blocks || []).forEach(b => { BLOCK_OF[b.id] = b; });
+  hideBanner('fs');
+  const nHit = EQUIPS.filter(eq => BLOCK_OF[eq.tag]).length;
+  if (!nHit) {
+    showBanner('fs', `flowsheet <code>${esc(SCENE.flowsheet)}</code> 已載入，但沒有任何 block 編號與本場景位號一致——位號全灰。到設計器把 block 編號改成位號（如圖面上的設備編號）即可對上。`);
+  }
+  renderChips();     // 有 block 的位號升級成白 chip（等待資料）
+  liveOn = true;
+  updateLiveBtn();
+  tick();
+  timer = setInterval(tick, 2500);
+}
+
+// 每拍：組 inputs（spec defaults ± ±0.8% 有界隨機漫步；跳過被 connection 餵的 target_input）
+// → POST run/ → 更新全部 chip＋狀態列。防重入：上一拍沒回來前直接略過本拍。
+async function tick() {
+  if (!SPEC || !liveOn || inFlight) return;
+  if (failStreak >= 3 && Date.now() < nextTryAt) return;   // 失敗節流：10 秒才重試一次
+  inFlight = true;
+  try {
+    tickN++;
+    const t0 = performance.now();
+    // 被 connection 餵值的 (block, feature) 不送——執行期由上游輸出覆蓋（真實 DCS 語意）
+    const fed = new Set();
+    (SPEC.connections || []).forEach(c => fed.add(c.to + ' ' + c.target_input));
+    const inputs = {};
+    for (const b of (SPEC.blocks || [])) {
+      const bi = {};
+      for (const [f, dv] of Object.entries(b.defaults || {})) {
+        if (fed.has(b.id + ' ' + f)) continue;
+        const base = Math.abs(+dv || 1);
+        const prev = (WALK[b.id] && WALK[b.id][f] != null) ? WALK[b.id][f] : +dv;
+        // 有界隨機漫步：步長 ±0.8%（相對 default），但整體夾在 default ±2.5% 內，
+        // 值持續在跳又不會漂出訓練域（無界漫步幾分鐘後會把守門員全推成 warn/out）。
+        let v = prev + (Math.random() - 0.5) * 2 * 0.008 * base;
+        v = Math.min((+dv) + 0.025 * base, Math.max((+dv) - 0.025 * base, v));
+        (WALK[b.id] ??= {})[f] = v;
+        bi[f] = +v.toFixed(4);
+      }
+      inputs[b.id] = bi;
+    }
+    let resp;
+    try {
+      const r = await fetch(`/agatha/flowsheet/${encodeURIComponent(SCENE.flowsheet)}/run/`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({inputs, source: 'pid-live'}),
+        signal: AbortSignal.timeout(6000)});
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      resp = await r.json();
+    } catch (e) {
+      failStreak++;
+      nextTryAt = Date.now() + 10000;
+      grayAllChips();   // 規格：run 失敗 → chips 全灰＋頂部一條說明，不留舊值
+      showBanner('run', `即時求解失敗（第 ${tickN} 拍）：<b>${esc(e.message || e)}</b>${failStreak >= 3 ? '——已連續失敗，改為每 10 秒重試。' : ''}圖面照常顯示。`);
+      setHz(`run 失敗（第 ${tickN} 拍）`, false);
+      return;
+    }
+    if (failStreak) { failStreak = 0; hideBanner('run'); }
+    LAST_RUN_BLOCKS = resp.blocks || {};
+    const counts = {ok: 0, warn: 0, out: 0, unknown: 0, na: 0};
+    EQUIPS.forEach((eq, i) => {
+      const blk = BLOCK_OF[eq.tag];
+      if (!blk) return;                       // 灰 chip：不在 guard 摘要內
+      const rbk = LAST_RUN_BLOCKS[eq.tag];
+      updateChip(i, eq, blk, rbk);
+      if (!rbk || rbk.error || rbk.skipped) { counts.na++; return; }
+      const gs = (rbk.guard && rbk.guard.status) || 'unknown';
+      if (counts[gs] != null) counts[gs]++; else counts.unknown++;
+    });
+    const gp = [`${counts.ok} ok`];
+    if (counts.warn) gp.push(`${counts.warn} warn`);
+    if (counts.out) gp.push(`${counts.out} out`);
+    if (counts.unknown) gp.push(`${counts.unknown} unknown`);
+    if (counts.na) gp.push(`${counts.na} 無值`);
+    $('guardsum').textContent = 'guard: ' + gp.join(' / ');
+    const ms = resp.ms != null ? resp.ms : Math.round(performance.now() - t0);
+    setHz(`第 ${tickN} 拍 · ${ms}ms`, true);
+  } finally {
+    inFlight = false;
+  }
+}
+
+// ---------------- ▶/⏸ 即時開關 ----------------
+function updateLiveBtn() {
+  const btn = $('btn-toggle-live');
+  btn.textContent = liveOn ? '⏸ 暫停即時' : '▶ 恢復即時';
+  btn.classList.toggle('active', liveOn);
+}
+$('btn-toggle-live').addEventListener('click', () => {
+  liveOn = !liveOn;
+  updateLiveBtn();
+  if (liveOn && SPEC) {
+    failStreak = 0; nextTryAt = 0;
+    tick();
+  } else if (!liveOn) {
+    setHz(`已暫停（第 ${tickN} 拍）`, false);
+  }
+});
+
+// ============================================================================
+// 綁定抽屜：場景級 flowsheet 下拉 ＋ 每位號一個已發布模型下拉。
+// 儲存＝先重 GET 場景「最新整份」→ 只改 flowsheet 與 equipment[].model →
+// PUT 整份寫回（其餘欄位原樣保留）→ 重載資料不重整頁面。
+// ============================================================================
+let MODEL_LIST = [];      // GET /agatha/find_model_list/?only_enabled=yes
+let FLOWSHEET_LIST = [];  // GET /agatha/flowsheet/
+let PENDING = {flowsheet: undefined, tagModel: {}};  // 抽屜內未儲存的變更（undefined＝未動）
+
+$('btn-bind').addEventListener('click', async () => {
+  PENDING = {flowsheet: undefined, tagModel: {}};   // 每次打開重置＝關閉即放棄未存變更
+  $('drawer').classList.add('open');
+  $('d-savemsg').textContent = ''; $('d-savemsg').className = 'dsavemsg';
+  await ensureDrawerData();
+  renderDrawer();
+});
+$('drawer-close').addEventListener('click', () => $('drawer').classList.remove('open'));
+
+async function ensureDrawerData() {
+  if (!FLOWSHEET_LIST.length) {
+    try {
+      const r = await fetch('/agatha/flowsheet/', {signal: AbortSignal.timeout(8000)});
+      FLOWSHEET_LIST = r.ok ? await r.json() : [];
+    } catch { FLOWSHEET_LIST = []; }
+  }
+  if (!MODEL_LIST.length) {
+    try {
+      const r = await fetch('/agatha/find_model_list/?only_enabled=yes', {signal: AbortSignal.timeout(8000)});
+      MODEL_LIST = r.ok ? await r.json() : [];
+    } catch { MODEL_LIST = []; }
+  }
+}
+
+// 位號去重：抽屜一列＝一個位號（同位號多台設備共用同一個綁定，儲存時全套用）
+function uniqueTags() {
+  const seen = new Map();   // tag → {tag, n, model}
+  EQUIPS.forEach(eq => {
+    const rec = seen.get(eq.tag);
+    if (rec) rec.n++;
+    else seen.set(eq.tag, {tag: eq.tag, n: 1, model: eq.model});
+  });
+  return [...seen.values()];
+}
+
+function renderDrawer() {
+  // --- 場景級 flowsheet 下拉（含「不綁定」） ---
+  const curFs = PENDING.flowsheet !== undefined ? PENDING.flowsheet : (SCENE.flowsheet || '');
+  $('d-flowsheet').innerHTML = `<option value="">（不綁定）</option>` +
+    FLOWSHEET_LIST.map(f => `<option value="${esc(f.flowsheet_id)}" ${f.flowsheet_id === curFs ? 'selected' : ''}>` +
+      `${esc(f.name || f.flowsheet_id)}（${+f.n_blocks || 0} blocks）</option>`).join('');
+  $('d-flowsheet').onchange = e => { PENDING.flowsheet = e.target.value; };
+
+  // --- 設備級模型下拉（每位號一列） ---
+  const tags = uniqueTags();
+  $('d-eqcount').textContent = tags.length;
+  if (!tags.length) {
+    $('d-eqlist').innerHTML = `<div class="dempty">此場景沒有設備。</div>`;
+    return;
+  }
+  const modelOpts = cur => `<option value="">（不綁定）</option>` + MODEL_LIST.map(m =>
+    `<option value="${esc(m.model_key)}" ${m.model_key === cur ? 'selected' : ''}>` +
+    `${esc(m.display_name || m.model_key)}｜${esc(m.product_type || '')}</option>`).join('');
+  $('d-eqlist').innerHTML = tags.map((t, ti) => {
+    const cur = Object.prototype.hasOwnProperty.call(PENDING.tagModel, t.tag)
+      ? PENDING.tagModel[t.tag] : ((t.model && t.model.model_key) || '');
+    return `<div class="deqrow">
+      <span class="eqtag" title="${esc(t.tag)}">${esc(t.tag)}${t.n > 1 ? ` <small>×${t.n}</small>` : ''}</span>
+      <select data-ti="${ti}">${modelOpts(cur)}</select>
+      <button class="clearbtn" data-ti="${ti}" title="清除此位號的模型綁定">清除</button>
+    </div>`;
+  }).join('');
+  if (!MODEL_LIST.length) {
+    $('d-eqlist').insertAdjacentHTML('afterbegin',
+      `<div class="dempty">⚠ 尚無已發布模型（或模型清單載入失敗）——先到模型 API 控制台發布模型。</div>`);
+  }
+  // 以列索引（data-ti）路由回位號，位號含任何特殊字元都不會出事（不用位號當 selector）
+  $('d-eqlist').querySelectorAll('select[data-ti]').forEach(sel => {
+    sel.addEventListener('change', () => { PENDING.tagModel[tags[+sel.dataset.ti].tag] = sel.value; });
+  });
+  $('d-eqlist').querySelectorAll('.clearbtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      PENDING.tagModel[tags[+btn.dataset.ti].tag] = '';
+      const sel = $('d-eqlist').querySelector(`select[data-ti="${btn.dataset.ti}"]`);
+      if (sel) sel.value = '';
+    });
+  });
+}
+
+$('d-save').addEventListener('click', saveBindings);
+
+async function saveBindings() {
+  const btn = $('d-save'), msg = $('d-savemsg');
+  btn.disabled = true;
+  msg.textContent = '儲存中…'; msg.className = 'dsavemsg';
+  try {
+    // 1) 先重 GET 最新整份場景（避免覆蓋這段時間別處的變更；PUT 是整份寫回不能只送 diff）
+    const freshR = await fetch(`/api/scenes/${encodeURIComponent(SID)}`, {signal: AbortSignal.timeout(8000)});
+    if (!freshR.ok) throw new Error('重新讀取場景失敗 HTTP ' + freshR.status);
+    const fresh = await freshR.json();
+
+    // 2) 只動兩件事：頂層 flowsheet、equipment[].model —— 其餘鍵原樣保留
+    if (PENDING.flowsheet !== undefined) {
+      if (PENDING.flowsheet) fresh.flowsheet = PENDING.flowsheet;
+      else delete fresh.flowsheet;
+    }
+    let nTouched = 0;   // 命中的設備數（綁定與清除都算，訊息才不會把「清除成功」講成 0 台）
+    const entries = Object.entries(PENDING.tagModel);
+    if (entries.length) {
+      for (const u of ((fresh.plant && fresh.plant.units) || [])) {
+        for (const eq of (u.equipment || [])) {
+          for (const [tag, mk] of entries) {
+            if (String(eq.tag) !== tag) continue;
+            nTouched++;
+            if (!mk) { delete eq.model; continue; }
+            const rec = MODEL_LIST.find(m => m.model_key === mk);
+            if (!rec) continue;
+            // 綁定形狀照 data/scenes/incinerator-plant.json 的 equipment.model 欄位；
+            // kind：anomaly → 'health'，其餘用 product_type（3D 檢視的 kindName 對照表吃這組值）
+            eq.model = {
+              model_key: rec.model_key,
+              product_type: rec.product_type,
+              task: rec.task,
+              kind: rec.task === 'anomaly' ? 'health' : rec.product_type,
+              title: eq.name || tag,
+              inputs: rec.features || [],
+              key_label: rec.task === 'anomaly' ? '健康度' : (rec.target || rec.display_name || rec.model_key),
+              capabilities: rec.capabilities || [],
+            };
+          }
+        }
+      }
+    }
+
+    // 3) PUT 整份寫回
+    const putR = await fetch(`/api/scenes/${encodeURIComponent(SID)}`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(fresh), signal: AbortSignal.timeout(10000)});
+    if (!putR.ok) {
+      const errBody = await putR.text().catch(() => '');
+      throw new Error(`儲存失敗 HTTP ${putR.status}${errBody ? '：' + errBody.slice(0, 200) : ''}`);
+    }
+    const fsNow = fresh.flowsheet || '（不綁定）';
+    msg.textContent = `✓ 已儲存：flowsheet ${fsNow}` +
+      (entries.length ? `｜模型綁定更新 ${entries.length} 個位號（命中 ${nTouched} 台設備）` : '');
+    msg.className = 'dsavemsg ok';
+    PENDING = {flowsheet: undefined, tagModel: {}};
+
+    // 4) 重載資料不重整頁面：重抓場景 → 重繪畫布 → 重跑 flowsheet 規格＋即時迴圈
+    const r2 = await fetch(`/api/scenes/${encodeURIComponent(SID)}`, {signal: AbortSignal.timeout(8000)});
+    if (r2.ok) SCENE = await r2.json();
+    applySceneToPage();
+    updateFootLinks();
+    await loadFlowsheetSpecAndStart();
+    renderDrawer();
+  } catch (e) {
+    msg.textContent = '✖ ' + (e.message || e);
+    msg.className = 'dsavemsg err';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+boot().catch(e => bootFail(String((e && e.message) || e)));
+</script>
+</body>
+</html>

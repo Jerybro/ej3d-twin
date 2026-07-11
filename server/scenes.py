@@ -72,7 +72,8 @@ def list_scenes() -> list:
             s = json.loads(p.read_text(encoding="utf-8"))
             n_eq = sum(len(u.get("equipment", [])) for u in s.get("plant", {}).get("units", []))
             out.append({"id": p.stem, "name": s.get("plant", {}).get("name", p.stem),
-                        "equipment": n_eq, "pipes": len(s.get("pipes", []))})
+                        "equipment": n_eq, "pipes": len(s.get("pipes", [])),
+                        "flowsheet": s.get("flowsheet")})  # 綁定的數據孿生方案（選擇頁對映 3D 入口用）
         except (ValueError, OSError):
             continue
     return out

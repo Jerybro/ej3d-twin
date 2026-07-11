@@ -104,6 +104,11 @@
   .result.ok{display:block;background:rgba(5,150,105,.08);color:#1d7a4f;}
   .result.err{display:block;background:rgba(192,57,43,.08);color:var(--red);}
   .result a{color:var(--blue);}
+
+  /* 驗證錯誤欄位高亮：紅框+光暈+輕微搖動；使用者一輸入即消除 */
+  @keyframes fe-shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+  .field-err{border-color:var(--red) !important;box-shadow:0 0 0 3px rgba(192,57,43,.16) !important;
+    animation:fe-shake .28s ease;border-radius:7px;}
 </style>
 </head>
 <body>
@@ -165,6 +170,31 @@
 // ============================================================================
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// ---------------- 驗證錯誤高亮：紅框＋捲到該欄＋聚焦，使用者一改就消除 ----------------
+function clearErrs(){document.querySelectorAll('.field-err').forEach(el=>el.classList.remove('field-err'));}
+function flagErr(el,msg,{focus=true}={}){
+  const R=$('result');
+  if(msg){R.className='result err';R.textContent=msg;}
+  if(!el)return;
+  el.classList.add('field-err');
+  el.scrollIntoView({block:'center',behavior:'smooth'});
+  if(focus&&el.focus)try{el.focus({preventScroll:true});}catch{}
+  const clear=()=>{el.classList.remove('field-err');el.removeEventListener('input',clear);el.removeEventListener('change',clear);};
+  el.addEventListener('input',clear);el.addEventListener('change',clear);
+}
+// 後端 422 detail → 盡力對回出錯欄位（找不到就只顯示訊息）
+function flagFromDetail(msg){
+  const m=String(msg||'');
+  if(/flowsheet_id|識別碼/.test(m))return flagErr($('m-fid'),m);
+  let mm=m.match(/block id 重複[：:]\s*([^\s，,]+)/)||m.match(/block\s+([^\s，,]+)\s+(缺|的模型)/);
+  if(mm){
+    const bad=[...document.querySelectorAll('.bcard .bid')].find(i=>i.value===mm[1]);
+    if(bad)return flagErr(bad,m);
+  }
+  if(/connection|連接|成環/.test(m))return flagErr(document.querySelector('.cols .panel:nth-child(3)'),m,{focus:false});
+  const R=$('result');R.className='result err';R.textContent=m;
+}
 
 // 與檢視頁同一套圖示鍵（檢視頁 ICONS）
 const ICON_OPTS={flame:'火焰（燃燒）',spray:'噴注（藥劑）',boiler:'鍋爐（蒸汽）',scrubber:'洗滌塔',
@@ -342,11 +372,14 @@ function fillFeatSelect(){
 }
 $('c-to').addEventListener('change',fillFeatSelect);
 $('c-add').addEventListener('click',()=>{
+  clearErrs();
   const from=$('c-from').value,to=$('c-to').value,ti=$('c-feat').value;
   const R=$('result');
-  if(!from||!to||!ti){R.className='result err';R.textContent='連接需要：上游、下游、下游輸入特徵。';return;}
-  if(from===to){R.className='result err';R.textContent='不可自迴接。';return;}
-  if(CONNS.some(c=>c.from===from&&c.to===to&&c.target_input===ti)){R.className='result err';R.textContent='這條連接已存在。';return;}
+  if(!from)return flagErr($('c-from'),'連接需要：先選上游 block（迴歸模型）。');
+  if(!to)return flagErr($('c-to'),'連接需要：選下游 block。');
+  if(!ti)return flagErr($('c-feat'),'連接需要：選要餵入下游的哪個輸入特徵。');
+  if(from===to)return flagErr($('c-to'),'不可自迴接：上下游是同一個 block。');
+  if(CONNS.some(c=>c.from===from&&c.to===to&&c.target_input===ti))return flagErr($('c-feat'),'這條連接已存在。');
   CONNS.push({from,to,target_input:ti,unit:findBlock(from)?.unit||''});
   R.className='result';R.textContent='';
   renderConns();
@@ -357,10 +390,20 @@ $('btn-addtrain').addEventListener('click',()=>{TRAINS.push([]);renderTrains();}
 
 // ---------------- 儲存 / 載入 ----------------
 $('btn-save').addEventListener('click',async()=>{
+  clearErrs();
   const R=$('result');
   const fid=$('m-fid').value.trim().toLowerCase();
-  if(!/^[a-z0-9][a-z0-9_-]{2,39}$/.test(fid)){R.className='result err';R.textContent='識別碼格式：小寫英數/連字號/底線，3~40 字，英數開頭。';return;}
-  if(!allBlocks().length){R.className='result err';R.textContent='至少加入一個 block。';return;}
+  if(!/^[a-z0-9][a-z0-9_-]{2,39}$/.test(fid))
+    return flagErr($('m-fid'),'識別碼格式不符：小寫英數/連字號/底線，3~40 字、英數開頭（例：my-plant-01）。請修正左上角「識別碼」欄。');
+  if(!allBlocks().length)
+    return flagErr(document.querySelector('.cols .panel:nth-child(1)'),'還沒有任何 block——先從左側「① 已發布模型庫」按「＋加入流程」。',{focus:false});
+  // block id 重複（後端也會擋，前端先標出是哪兩張卡）
+  const ids=allBlocks().map(b=>b.id), dup=ids.find((x,i)=>ids.indexOf(x)!==i);
+  if(dup){
+    const cards=[...document.querySelectorAll('.bcard .bid')].filter(i=>i.value===dup);
+    cards.forEach(c=>c.classList.add('field-err'));
+    return flagErr(cards[cards.length-1],`block 編號重複：${dup}——請改掉其中一個。`);
+  }
   const spec={
     flowsheet_id:fid, name:$('m-name').value.trim()||fid, desc:$('m-desc').value.trim(),
     trains:TRAINS.filter(t=>t.length).map(t=>t.map(b=>b.id)),
@@ -381,7 +424,7 @@ $('btn-save').addEventListener('click',async()=>{
       <a href="/static/incinerator_flowsheet.html?id=${encodeURIComponent(d.flowsheet_id)}" target="_blank">▶ 開啟檢視（每拍求解即時跑）</a>`;
     const v=$('btn-view');v.style.display='';v.href=`/static/incinerator_flowsheet.html?id=${encodeURIComponent(d.flowsheet_id)}`;
     loadList();
-  }catch(e){R.className='result err';R.textContent='儲存失敗：'+(e.message||e);}
+  }catch(e){flagFromDetail('儲存失敗：'+(e.message||e));}
   finally{$('btn-save').disabled=false;$('btn-save').textContent='儲存 flowsheet';}
 });
 

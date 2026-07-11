@@ -240,7 +240,7 @@
         <div class="jsteps">
           <a href="/static/flowsheet_builder.html"><span class="n">1</span><span data-i18n="j2.s1">Flowsheet 設計器：挑模型、拉連接</span></a>
           <a href="/static/incinerator_flowsheet.html"><span class="n">2</span><span data-i18n="j2.s2">工程檢視：每拍求解驗證</span></a>
-          <a href="/twin?scene=incinerator-plant&flow=1"><span class="n">3</span><span data-i18n="j2.s3">綁 3D 場景：智慧運轉</span></a>
+          <a href="/static/incinerator_flowsheet.html"><span class="n">3</span><span data-i18n="j2.s3">綁 3D 場景：智慧運轉（選方案）</span></a>
         </div>
       </div>
       <div class="jcard">
@@ -248,7 +248,7 @@
         <h2 data-i18n="j3.h">看運轉</h2>
         <p data-i18n="j3.p">每天回來看的那一頁。</p>
         <div class="jsteps">
-          <a href="/twin?scene=incinerator-plant&flow=1"><span class="n">›</span><span data-i18n="j3.s1">3D 廠區＋即時預測（智慧運轉）</span></a>
+          <a href="/static/incinerator_flowsheet.html"><span class="n">›</span><span data-i18n="j3.s1">3D 廠區＋即時預測（選方案進入）</span></a>
           <a href="/static/block_health.html"><span class="n">›</span><span data-i18n="j3.s2">設備健康預警（PHM）</span></a>
           <a href="/static/incinerator_flowsheet.html"><span class="n">›</span><span data-i18n="j3.s3">全廠指標與守門員（工程檢視）</span></a>
         </div>
@@ -362,7 +362,7 @@
 
     <div class="group-title" data-i18n="grp.dtwin">數據孿生</div>
     <div class="cards">
-      <a class="card" href="/twin?scene=incinerator-plant&flow=1">
+      <a class="card" href="/static/incinerator_flowsheet.html">
         <div class="head">
           <svg viewBox="0 0 24 24"><rect x="3" y="4" width="6" height="6" rx="1"/><rect x="15" y="4" width="6" height="6" rx="1"/><rect x="9" y="14" width="6" height="6" rx="1"/><path d="M6 10v2a2 2 0 0 0 2 2h1"/><path d="M18 10v2a2 2 0 0 1-2 2h-1"/></svg>
           <h2 data-i18n="c.flow.h">智慧運轉（3D 流程模擬）</h2>
@@ -521,14 +521,14 @@
     // 規則由「專門」到「通用」排序：先命中專門意圖（健康/最佳化/P&ID），再落到通用（上傳/建模）。
     const ROUTES = [
       { re: /健康|預警|PHM|異常|振動|軸承|劣化/i, url: '/static/block_health.html', t: '設備健康預警示範（壓縮機 K-101，模型由 API 供給）' },
-      { re: /最佳化|優化|优化|配方|藥劑|節省/i, url: '/twin?scene=incinerator-plant&flow=1', t: '3D 智慧運轉——點設備 →「⤢ 放大檢視」→ 此模型最佳化' },
+      { re: /最佳化|優化|优化|配方|藥劑|節省/i, url: '/static/incinerator_flowsheet.html', t: '先選方案 → 3D 智慧運轉——點設備 →「⤢ 放大檢視」→ 此模型最佳化；或監看卡「全廠聯合最佳化」' },
       { re: /P&?ID|圖面|圖紙/i, url: '/twin/pid', t: 'P&ID 工作流——上傳圖面，OCR 自動生成 3D 廠區草稿' },
       { re: /設計器|組.*孿生|flowsheet|串接|連接/i, url: '/static/flowsheet_builder.html', t: 'Flowsheet 設計器——從模型庫挑 block、拉連接、儲存即可運轉' },
       { re: /發布|API|服務|key/i, url: '/static/model_api.html', t: '模型 API 控制台（publish-registry）——發布、試呼叫、用量稽核' },
       { re: /建模|模型|訓練|迴歸|分類|時序/i, url: '/data?view=model', t: '模型工作區——自動比較演算法、交叉驗證排名' },
       { re: /上傳|資料|數據|CSV|Excel/i, url: '/data', t: '資料工作台——拖放上傳、探索清洗、資料健檢' },
-      { re: /3D|廠區|智慧運轉|即時|孿生/i, url: '/twin?scene=incinerator-plant&flow=1', t: '3D 智慧運轉（焚化爐示範）——模型輸出直接畫在廠區上' },
-      { re: /焚化|示範|demo/i, url: '/static/incinerator_flowsheet.html', t: '焚化爐 8-block 工程檢視——每拍求解、守門員、傳遞值' },
+      { re: /3D|廠區|智慧運轉|即時|孿生/i, url: '/static/incinerator_flowsheet.html', t: '選一個方案 → 3D 智慧運轉——模型輸出直接畫在廠區上' },
+      { re: /焚化|示範|demo/i, url: '/static/incinerator_flowsheet.html?id=incinerator-8b', t: '焚化爐 8-block 示範（明確指定）——每拍求解、守門員、傳遞值' },
       { re: /studio|編輯|工作室/i, url: '/studio', t: '3D 設計工作室——素材庫自建與精修場景' },
       { re: /教學|上手|怎麼|如何|新手/i, guide: true, t: '已展開下方「第一次使用」七步導覽 ↓' },
     ];

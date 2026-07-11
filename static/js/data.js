@@ -1,4 +1,4 @@
-// 產品2：資料前處理 — Tukey 實地對標版（欄位卡片牆）
+// 產品2：資料前處理（欄位卡片牆）
 // 資料集表格頁｜探索分析卡片牆｜二維分析｜卡片操作 popover｜編輯歷程 drawer
 let sid = null;
 let state = null;        // /state 回傳（steps/columns/n_view...）
@@ -613,7 +613,7 @@ function drawCard(canvas, card, big = false, selPx = null) {
   const px = (v) => M.l + ((v - xlo) / ((xhi - xlo) || 1)) * plotW;
   const py = (v) => h - M.b - ((v - ylo) / ((yhi - ylo) || 1)) * plotH;
 
-  // Y 軸刻度＋淺灰橫格線（Tukey 同款）
+  // Y 軸刻度＋淺灰橫格線
   const yAxis = (ticks) => {
     ctx.lineWidth = 1;
     ctx.textAlign = 'right';
@@ -626,7 +626,7 @@ function drawCard(canvas, card, big = false, selPx = null) {
     });
     ctx.textAlign = 'left';
   };
-  // X 軸多刻度；時間/擁擠標籤 45° 斜排（Tukey 同款）
+  // X 軸多刻度；時間/擁擠標籤 45° 斜排
   const xAxis = (isTime) => {
     if (xlo == null || !(xhi > xlo)) return;
     const ticks = isTime
@@ -1013,7 +1013,7 @@ bindBrush($('zoom-canvas'));
 $('zoom-close').addEventListener('click', () => $('zoom-modal').classList.remove('open'));
 $('zoom-modal').addEventListener('click', (e) => { if (e.target === $('zoom-modal')) $('zoom-modal').classList.remove('open'); });
 
-// ------------------------------------------------------------ 資料集表格（Tukey 多行欄頭）
+// ------------------------------------------------------------ 資料集表格（多行欄頭）
 async function renderTable() {
   const res = await api(`/rows?page=${tablePage}&per_page=${perTable}`);
   // 筆數縮減後頁碼可能超界
@@ -1103,7 +1103,7 @@ function renderColMgr() {
 }
 $('col-search').addEventListener('input', renderColMgr);
 
-// ------------------------------------------------------------ 模型（AutoML，對標 Tukey fitting）
+// ------------------------------------------------------------ 模型（AutoML）
 let ALGO_META = null;      // /api/automl/algos
 let modelPollTimer = null;
 const apiML = (path, opts) => fetch(`/api/automl/${sid}${path}`, opts).then((r) => {
@@ -1296,7 +1296,7 @@ async function openModelDetail(mid) {
       <div class="md-chart wide"><h4>${m.task === 'hybrid'
         ? `殘差修正重要變數${qi('殘差模型 r(x) 的變數重要性——AI 主要靠哪些變數修正「實際與模擬的差」。這裡排前面的變數，代表物理模擬在這些條件下與現場落差最大，值得回頭檢查模擬假設或現場儀器。')}`
         : '重要變數分析 Feature Importance'}</h4><canvas id="md-fi"></canvas></div>`;
-  // PHM 摘要卡（Tukey PHM Edge 同款：健康分數/故障事件/超標率）
+  // PHM 摘要卡：健康分數/故障事件/超標率
   const mcv = m.metrics_cv ?? {};
   const sumCards = isAn ? `
     <div class="sum-cards">
@@ -1317,7 +1317,7 @@ async function openModelDetail(mid) {
         <div class="sc-sub">風險門檻 ${mcv.threshold ?? '—'}</div>
       </div>
     </div>` : '';
-  // 故障事件列表（Tukey：FDC 管制圖下方整合型故障事件列表）
+  // 故障事件列表（管制圖下方整合型列表）
   const fmtEvT = (s) => new Date(s * 1000).toLocaleString('sv').slice(0, 16);
   const eventsTable = isAn && m.events?.length ? `
     <div class="md-chart wide" style="margin-top:20px"><h4>整合型故障事件列表</h4>
@@ -1338,6 +1338,11 @@ async function openModelDetail(mid) {
       <button class="mini" id="btn-rename" title="改名"
         style="width:auto;padding:2px 10px;font-size:12px;cursor:pointer">改名</button></h3>
     <div class="md-sub">${algoName}${qi(algoMeta?.desc)}｜${taskName}｜訓練資料 ${m.n_rows.toLocaleString()} 筆｜目標 ${m.target}</div>
+    <div id="md-pub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 12px">
+      <button class="mini" id="btn-publish" title="把這個模型發布成穩定的 model_key：統一 predict／評估／最佳化端點對外服務，數位孿生的 block 與 Flowsheet 設計器由此取用"
+        style="width:auto;padding:5px 14px;font-size:12.5px;cursor:pointer;color:#046AFB;border-color:#9db4d8">⚡ 發布成模型 API</button>
+      <span id="pub-out" class="hint" style="margin:0"></span>
+    </div>
     ${tuned}
     ${sumCards}
     <table class="md-metrics">
@@ -1580,7 +1585,7 @@ function _timeAxes(canvas, t, ylo, yhi, yTicks = 5) {
   return { ctx, M, w, h, px, py, isTime };
 }
 
-// 健康分數趨勢（0–100，Tukey PHM Edge 同款：綠正常/黃注意/紅危急區帶＋7 天預測虛線）
+// 健康分數趨勢（0–100：綠正常/黃注意/紅危急區帶＋7 天預測虛線）
 function drawHealth(canvas, hd, pred) {
   const tAll = pred?.t?.length ? hd.t.concat(pred.t) : hd.t;
   const g = _timeAxes(canvas, tAll, 0, 100, 5);
@@ -1806,7 +1811,41 @@ function drawTS(canvas, t, actual, pred) {
 
 function bindModelApps(m) {
   const cls = m.task === 'classification';
-  // 模型改名（Tukey ⋮ 對齊）：h3 內就地編輯，不用原生對話框（會凍 renderer）
+
+  // 發布成模型 API：把 (sid, mid) 發布成穩定 model_key——孿生 block／設計器由此取用。
+  // 一進來先查此資料集已發布幾個 API（讓使用者知道之前發過的還在）。
+  const pubOut = $('pub-out');
+  fetch(`/agatha/find_model_list/?dataset_id=${encodeURIComponent(sid)}&only_enabled=no`)
+    .then((r) => (r.ok ? r.json() : []))
+    .then((rows) => {
+      if (rows.length && !pubOut.textContent) pubOut.innerHTML =
+        `此資料集已發布 ${rows.length} 個 API　<a href="/static/model_api.html" target="_blank">開啟 API 控制台</a>`;
+    }).catch(() => {});
+  $('btn-publish').addEventListener('click', async () => {
+    const btn = $('btn-publish');
+    btn.disabled = true; btn.textContent = '發布中…';
+    try {
+      const r = await fetch('/agatha/model/publish/', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataset_id: sid, model_id: String(m.id), display_name: m.name }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+      pubOut.innerHTML = `✓ 已發布　model_key <code style="font-size:12px">${d.model_key}</code>
+        <button class="mini" id="pub-copy" style="width:auto;padding:2px 8px;font-size:11px;cursor:pointer">複製</button>
+        　<a href="/static/model_api.html" target="_blank">API 控制台</a>
+        　<a href="/static/flowsheet_builder.html" target="_blank">去設計器綁進孿生</a>`;
+      $('pub-copy').addEventListener('click', async (ev) => {
+        try { await navigator.clipboard.writeText(d.model_key); ev.target.textContent = '已複製'; } catch { /* no-op */ }
+      });
+    } catch (e) {
+      pubOut.innerHTML = `<span style="color:#C0392B">發布失敗：${escHtml(e.message || String(e))}</span>`;
+    } finally {
+      btn.disabled = false; btn.textContent = '⚡ 發布成模型 API';
+    }
+  });
+
+  // 模型改名：h3 內就地編輯，不用原生對話框（會凍 renderer）
   $('btn-rename').addEventListener('click', async () => {
     const span = $('md-name');
     if (span.querySelector('input')) return;

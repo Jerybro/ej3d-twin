@@ -4109,6 +4109,167 @@ function exportNzSchedule() {
 }
 document.getElementById('btn-nz-schedule').addEventListener('click', exportNzSchedule);
 
+// ------------------------------------------------------------ 通用條件查詢與篩選報表（Query / Filter）
+// 使用者選範圍（設備／管線／橋架風管／全部）＋一組 AND 條件（型別 type、service、DN/bore、spec、UDA 鍵=值），
+// 篩出符合元素成清單，點選定位（沿用 selectEquipment/selectPipe），可匯出 CSV（UTF-8 BOM，比照 MTO/排程樣式）。
+// 純讀 sceneData/eqObjects 現有資料，不改資料結構、不動幾何、不觸 render 疊層。
+let queryState = { scope: 'all', type: '', service: '', dn: '', spec: '', udaKey: '', udaVal: '' };
+let queryResults = [];   // [{ kind:'eq'|'pipe', tag, type, attrs, ref }]，ref = eq.tag 或 pipe index
+
+// 蒐集場景現有型別（設備 def.type ＋ 管線 profile），供下拉；型別以出現過者為準
+function queryTypeOptions() {
+  const typeName = new Map(ASSET_CATEGORIES.flatMap((c) => c.items.map((it) => [it.type, it.name])));
+  const set = new Set();
+  for (const eq of allEquipment()) set.add(eq.type);
+  const opts = [...set].sort().map((t) => `<option value="${t}" ${queryState.type === t ? 'selected' : ''}>${t}｜${typeName.get(t) ?? t}</option>`);
+  // 管線 profile 型別（pipe/duct/tray）
+  const prof = [['pipe', '管線 Pipe'], ['duct', '風管 Duct'], ['tray', '橋架 Tray']];
+  const profOpts = prof.map(([v, n]) => `<option value="${v}" ${queryState.type === v ? 'selected' : ''}>${v}｜${n}</option>`);
+  return { opts, profOpts };
+}
+
+// 執行篩選：依 scope + AND 條件回傳結果陣列
+function runQuery() {
+  const st = queryState;
+  const typeName = new Map(ASSET_CATEGORIES.flatMap((c) => c.items.map((it) => [it.type, it.name])));
+  const res = [];
+  const wantEq = st.scope === 'all' || st.scope === 'eq';
+  const wantPipe = st.scope === 'all' || st.scope === 'pipe' || st.scope === 'tray';
+  // 設備
+  if (wantEq) {
+    for (const eq of allEquipment()) {
+      if (st.type && eq.type !== st.type) continue;
+      if (st.service) continue;   // 設備無 service 概念，指定 service 時排除設備
+      if (st.dn) continue;        // 設備無 DN
+      if (st.spec && (eq.spec ?? '') !== st.spec) continue;
+      if (st.udaKey) { const v = eq.uda?.[st.udaKey]; if (v === undefined) continue; if (st.udaVal !== '' && String(v) !== st.udaVal) continue; }
+      const attrs = [eq.name ?? typeName.get(eq.type) ?? '', eq.material ?? eq.design?.['材質'] ?? '',
+        st.udaKey ? `${st.udaKey}=${eq.uda?.[st.udaKey] ?? ''}` : ''].filter(Boolean).join('｜');
+      res.push({ kind: 'eq', tag: eq.tag, type: eq.type, attrs, ref: eq.tag });
+    }
+  }
+  // 管線／橋架／風管
+  if (wantPipe) {
+    sceneData.pipes.forEach((p, i) => {
+      const prof = p.profile ?? 'pipe';
+      if (st.scope === 'tray' && !(prof === 'tray' || prof === 'duct')) return;   // 「橋架」範圍含 tray+duct
+      if (st.type) { if (['pipe', 'duct', 'tray'].includes(st.type)) { if (prof !== st.type) return; } else return; }   // 型別為設備類→管線一律不符
+      if (st.service && p.service !== st.service) return;
+      const dn = p.dn ?? `⌀${Math.round(p.r * 2000)}mm`;
+      if (st.dn && p.dn !== st.dn) return;
+      if (st.spec && (p.spec ?? '') !== st.spec) return;
+      if (st.udaKey) { const v = p.uda?.[st.udaKey]; if (v === undefined) return; if (st.udaVal !== '' && String(v) !== st.udaVal) return; }
+      const attrs = [p.spec ?? '—', dn, p.service ? (SERVICE_BY_CODE[p.service]?.name ?? p.service) : '',
+        fmtLen(pipeLength(p)), st.udaKey ? `${st.udaKey}=${p.uda?.[st.udaKey] ?? ''}` : ''].filter(Boolean).join('｜');
+      res.push({ kind: 'pipe', tag: `PIPE-${i + 1}`, type: prof, attrs, ref: i });
+    });
+  }
+  return res;
+}
+
+function renderQueryPanel() {
+  repaintPanel = renderQueryPanel;
+  document.getElementById('prop-title').textContent = '通用條件查詢';
+  const st = queryState;
+  const { opts, profOpts } = queryTypeOptions();
+  const udaKeys = udaKeysInScene();
+  const scopeOpts = [['all', '全部'], ['eq', '設備'], ['pipe', '管線'], ['tray', '橋架／風管']]
+    .map(([v, n]) => `<option value="${v}" ${st.scope === v ? 'selected' : ''}>${n}</option>`).join('');
+  const svcOpts = `<option value="">（不限）</option>` + PIPE_SERVICES.map((sv) =>
+    `<option value="${sv.code}" ${st.service === sv.code ? 'selected' : ''}>${sv.name}</option>`).join('');
+  const dnOpts = `<option value="">（不限）</option>` + PIPE_BORES.map((b) =>
+    `<option value="${b.dn}" ${st.dn === b.dn ? 'selected' : ''}>${b.dn}（⌀${Math.round(b.r * 2000)}mm）</option>`).join('');
+  const specOpts = `<option value="">（不限）</option>` + PIPE_SPECS.map((sp) =>
+    `<option value="${sp.code}" ${st.spec === sp.code ? 'selected' : ''}>${sp.code}｜${sp.name}</option>`).join('');
+  const udaKeyOpts = `<option value="">（不限）</option>` + udaKeys.map((k) =>
+    `<option value="${k}" ${st.udaKey === k ? 'selected' : ''}>${k}</option>`).join('');
+  const qrow = (label, ctrl) => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px"><span style="width:78px;color:var(--dim)">${label}</span>${ctrl}</div>`;
+  const esc = (s) => String(s ?? '').replace(/</g, '&lt;');
+  const resRows = queryResults.map((r, i) => `<div data-qr="${i}" style="display:flex;gap:8px;padding:6px 4px;border-bottom:1px solid var(--bdr);cursor:pointer;font-size:12px">
+      <span style="width:74px;color:var(--accent);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.tag)}</span>
+      <span style="width:64px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.type)}</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(r.attrs)}</span>
+    </div>`).join('');
+  propBody.innerHTML = `<div class="pg-section">通用條件查詢</div>
+    ${qrow('範圍', `<select data-q="scope" style="flex:1">${scopeOpts}</select>`)}
+    ${qrow('型別 Type', `<select data-q="type" style="flex:1"><option value="" ${!st.type ? 'selected' : ''}>（不限）</option><optgroup label="設備">${opts.join('')}</optgroup><optgroup label="管線類">${profOpts.join('')}</optgroup></select>`)}
+    ${qrow('Service', `<select data-q="service" style="flex:1">${svcOpts}</select>`)}
+    ${qrow('DN/Bore', `<select data-q="dn" style="flex:1">${dnOpts}</select>`)}
+    ${qrow('Spec', `<select data-q="spec" style="flex:1">${specOpts}</select>`)}
+    ${qrow('UDA 鍵', `<select data-q="udaKey" style="flex:1">${udaKeyOpts}</select>`)}
+    ${qrow('UDA 值', `<input data-q="udaVal" type="text" placeholder="留空＝有此鍵即可" value="${esc(st.udaVal)}" style="flex:1">`)}
+    <div style="display:flex;gap:6px;padding:8px 0 4px">
+      <button class="rbtn" id="q-run" style="flex:1"><span class="ric" data-ic="scan"></span>查詢</button>
+      <button class="rbtn" id="q-csv" style="flex:1" ${queryResults.length ? '' : 'disabled'}><span class="ric" data-ic="mto"></span>匯出 CSV</button>
+      <button class="rbtn" id="q-save" style="flex:1" ${queryResults.length ? '' : 'disabled'} title="把此查詢條件記到場景供重用"><span class="ric" data-ic="saveas"></span>存為集合</button>
+    </div>
+    <div class="pg-section">結果（${queryResults.length}）</div>
+    ${queryResults.length ? resRows : '<div style="color:var(--dim);font-size:12px;padding:8px 0">按「查詢」列出符合條件的元素</div>'}
+    ${sceneData.querySets?.length ? `<div class="pg-section">已存集合（${sceneData.querySets.length}）</div>` +
+      sceneData.querySets.map((qs, i) => `<div data-qs="${i}" style="display:flex;gap:8px;padding:6px 4px;border-bottom:1px solid var(--bdr);cursor:pointer;font-size:12px" title="載入此查詢集合"><span style="flex:1">${esc(qs.name)}</span><span style="color:var(--dim)">${esc(qs.scope)}</span></div>`).join('') : ''}`;
+  // 綁定條件輸入
+  propBody.querySelectorAll('[data-q]').forEach((el) => {
+    const k = el.dataset.q;
+    el.addEventListener('change', () => { queryState[k] = el.value; });
+  });
+  document.getElementById('q-run').addEventListener('click', () => {
+    // 先同步一次（未觸發 change 的 input 也吃到）
+    propBody.querySelectorAll('[data-q]').forEach((el) => { queryState[el.dataset.q] = el.value; });
+    queryResults = runQuery();
+    setHint(`查詢完成：符合 ${queryResults.length} 項`);
+    renderQueryPanel();
+  });
+  const csvBtn = document.getElementById('q-csv');
+  if (csvBtn && !csvBtn.disabled) csvBtn.addEventListener('click', exportQueryCsv);
+  const saveBtn = document.getElementById('q-save');
+  if (saveBtn && !saveBtn.disabled) saveBtn.addEventListener('click', saveQuerySet);
+  propBody.querySelectorAll('[data-qr]').forEach((row) => row.addEventListener('click', () => {
+    const r = queryResults[+row.dataset.qr];
+    if (!r) return;
+    if (r.kind === 'eq') selectEquipment(r.ref); else selectPipe(r.ref);
+    zoomToSelection();
+  }));
+  propBody.querySelectorAll('[data-qs]').forEach((row) => row.addEventListener('click', () => {
+    const qs = sceneData.querySets?.[+row.dataset.qs];
+    if (!qs) return;
+    queryState = { scope: qs.scope, type: qs.type ?? '', service: qs.service ?? '', dn: qs.dn ?? '', spec: qs.spec ?? '', udaKey: qs.udaKey ?? '', udaVal: qs.udaVal ?? '' };
+    queryResults = runQuery();
+    setHint(`已載入集合「${qs.name}」：符合 ${queryResults.length} 項`);
+    renderQueryPanel();
+  }));
+}
+
+function exportQueryCsv() {
+  const esc = (v) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const st = queryState;
+  const cond = [`範圍=${st.scope}`, st.type && `型別=${st.type}`, st.service && `service=${st.service}`,
+    st.dn && `DN=${st.dn}`, st.spec && `spec=${st.spec}`,
+    st.udaKey && `UDA ${st.udaKey}${st.udaVal !== '' ? '=' + st.udaVal : '（有此鍵）'}`].filter(Boolean).join('；') || '（無條件）';
+  const rows = [];
+  rows.push(['J.S_3D Studio 條件查詢報表（Query）', sceneData.plant?.name ?? sceneId ?? '']);
+  rows.push(['輸出時間', new Date().toLocaleString('zh-TW', { hour12: false })]);
+  rows.push(['查詢條件', cond]);
+  rows.push([]);
+  rows.push(['Tag', '型別 Type', '種類', '關鍵屬性']);
+  for (const r of queryResults) rows.push([r.tag, r.type, r.kind === 'eq' ? '設備' : '管線類', r.attrs]);
+  rows.push([]);
+  rows.push(['[統計]', `符合 ${queryResults.length} 項`]);
+  const csv = '﻿' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
+  saveBlob(`${sceneId ?? 'scene'}-Query.csv`, csv, 'text/csv;charset=utf-8', false);
+  setHint(`條件查詢報表已輸出：符合 ${queryResults.length} 項（CSV）`);
+}
+
+// 另存為集合：把目前查詢條件記到 sceneData.querySets 供重用（純 metadata、與單位無關、隨場景 JSON 存讀）
+function saveQuerySet() {
+  const name = (prompt('集合名稱', `查詢 ${(sceneData.querySets?.length ?? 0) + 1}`) ?? '').trim();
+  if (!name) return;
+  sceneData.querySets = sceneData.querySets ?? [];
+  sceneData.querySets.push({ name, ...queryState });
+  setHint(`已存為集合「${name}」`);
+  renderQueryPanel();
+}
+document.getElementById('btn-query').addEventListener('click', renderQueryPanel);
+
 // ------------------------------------------------------------ 出圖工具：制式圖框彈窗＋批次打包 ZIP
 let dwgLastBy = '';
 let dwgOnOk = null;

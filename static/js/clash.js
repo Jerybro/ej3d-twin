@@ -191,8 +191,14 @@ function obbToAABB(obb) {
   return new THREE.Box3(obb.center.clone().sub(ext), obb.center.clone().add(ext));
 }
 
-export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL) {
+// 本輪某筆碰撞的比對 key（與 clashStatus 命名一致：soft 前綴 S|；lifecycle 用）
+const lifeKey = (o) => (o.soft ? 'S|' : '') + clashKey(o.a, o.b);
+
+export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL, prevKeys = sceneData.lastClashKeys) {
   const status = sceneData.clashStatus ?? {};
+  // prevKeys 可能是 Set、陣列、或（經 JSON 序列化/還原後）非可迭代物件 → 安全轉 Set
+  const prev = prevKeys instanceof Set ? prevKeys
+    : new Set(Array.isArray(prevKeys) ? prevKeys : []);
   const out = [];
   const entries = [];
   const envelopes = [];   // 維修/抽出包絡（軟障礙）
@@ -213,7 +219,9 @@ export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL) {
   }
   const push = (o) => {
     o.code = o.code ?? 'HH';
-    o.status = status[o.soft ? 'S|' + clashKey(o.a, o.b) : clashKey(o.a, o.b)] ?? 'new';   // 軟碰撞(包絡)與硬碰撞分開命名空間
+    const key = lifeKey(o);
+    o.status = status[key] ?? 'new';   // 軟碰撞(包絡)與硬碰撞分開命名空間
+    o.lifecycle = prev.has(key) ? 'persistent' : 'new';   // 跨執行比對：上輪也有→persistent，否則本輪新增
     out.push(o);
   };
 
@@ -234,7 +242,7 @@ export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL) {
         push({ type: cls, a: A.tag, b: B.tag, code: obstCode(A.def) + obstCode(B.def),
                point: A.obb.center.clone().lerp(B.obb.center, 0.5) });
       }
-      if (out.length >= MAX_RESULTS) return finish(out, true);
+      if (out.length >= MAX_RESULTS) return finish(out, true, prev, status, sceneData);
     }
   }
 
@@ -243,26 +251,32 @@ export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL) {
   sceneData.pipes.forEach((pipe, pi) => {
     if (pipe.bridge) return;
     const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
+    // 保溫層納入碰撞：有保溫時碰撞包絡用「保溫外半徑」(裸管半徑+保溫厚)，命中標記為保溫碰撞。
+    const insul = pipe.insul > 0 ? pipe.insul : 0;
+    const encR = (pipe.r ?? 0) + insul;
     for (const E of entries) {
       const r = E.def.dims?.r ?? Math.max(E.def.dims?.w ?? 2, E.def.dims?.d ?? 2) / 2;
       const cx = E.def.pos[0], cz = E.def.pos[2];
       const endOk = [pts[0], pts[pts.length - 1]].some(
         (p) => Math.hypot(p.x - cx, p.z - cz) < r + 2.5);
       if (endOk) continue;
-      // 廣相位：膨脹 AABB 快速排除整條管
-      const boxGrown = E.box.clone().expandByScalar(pipe.r + 0.05);
+      // 廣相位：膨脹 AABB 快速排除整條管（用含保溫外半徑）
+      const boxGrown = E.box.clone().expandByScalar(encR + 0.05);
       let hit = null;
       for (let s = 0; s < pts.length - 1 && !hit; s++) {
         for (let k = 0; k <= 8; k++) {
           v.lerpVectors(pts[s], pts[s + 1], k / 8);
           if (!boxGrown.containsPoint(v)) continue;   // 廣相位未過不進窄相位
-          // 窄相位：點轉 OBB 本地座標，以管半徑為容差比 half-size
-          if (pointInOBB(v, E.obb, pipe.r + 0.05)) { hit = v.clone(); break; }
+          // 窄相位：點轉 OBB 本地座標，以（含保溫）外半徑為容差比 half-size
+          if (pointInOBB(v, E.obb, encR + 0.05)) { hit = v.clone(); break; }
         }
       }
       if (hit) {
+        // 命中若落在裸管半徑外、僅因保溫外緣才相交 → 保溫碰撞（碼首 I）；否則硬碰撞。
+        const isInsul = insul > 0 && !pointInOBB(hit, E.obb, (pipe.r ?? 0) + 0.05);
         push({ type: 'physical', a: `PIPE #${pi + 1}`, b: E.tag,
-               code: 'H' + obstCode(E.def), point: hit, pipeIndex: pi });
+               code: (isInsul ? 'I' : 'H') + obstCode(E.def), point: hit, pipeIndex: pi,
+               insul: isInsul });
         if (out.length >= MAX_RESULTS) return;
       }
     }
@@ -287,7 +301,7 @@ export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL) {
           push({ type: soft, a: EN.tag, b: E.tag,
                  code: 'S' + obstCode(E.def),
                  point: EN.obb.center.clone().lerp(E.obb.center, 0.5), soft: true });
-          if (out.length >= MAX_RESULTS) return finish(out, true);
+          if (out.length >= MAX_RESULTS) return finish(out, true, prev, status, sceneData);
         }
       }
     }
@@ -297,33 +311,40 @@ export function runClash(sceneData, eqObjects, hiddenTags, tol = CLASH_TOL) {
       const pipe = sceneData.pipes[pi];
       if (pipe.bridge) continue;
       const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
+      const encR = (pipe.r ?? 0) + (pipe.insul > 0 ? pipe.insul : 0);   // 含保溫外半徑
       for (const EN of envelopes) {
-        const boxGrown = EN.box.clone().expandByScalar((pipe.r ?? 0) + 0.05);
+        const boxGrown = EN.box.clone().expandByScalar(encR + 0.05);
         let hit = null;
         for (let s = 0; s < pts.length - 1 && !hit; s++) {
           for (let k = 0; k <= 8; k++) {
             vv.lerpVectors(pts[s], pts[s + 1], k / 8);
             if (!boxGrown.containsPoint(vv)) continue;
-            if (pointInOBB(vv, EN.obb, (pipe.r ?? 0) + 0.05)) { hit = vv.clone(); break; }
+            if (pointInOBB(vv, EN.obb, encR + 0.05)) { hit = vv.clone(); break; }
           }
         }
         if (hit) {
           push({ type: 'touch', a: EN.tag, b: `PIPE #${pi + 1}`,
                  code: 'SH', point: hit, pipeIndex: pi, soft: true });
-          if (out.length >= MAX_RESULTS) return finish(out, true);
+          if (out.length >= MAX_RESULTS) return finish(out, true, prev, status, sceneData);
         }
       }
     }
   }
 
-  return finish(out, out.length >= MAX_RESULTS);
+  return finish(out, out.length >= MAX_RESULTS, prev, status, sceneData);
 }
 
-function finish(list, capped) {
+function finish(list, capped, prev, status, sceneData) {
   const order = { physical: 0, pipe: 1, touch: 2, clearance: 3 };
   // 未處理優先、Approved 沉底；同狀態內依嚴重度
   const sOrder = { new: 0, held: 1, approved: 2 };
   list.sort((a, b) => (sOrder[a.status] - sOrder[b.status]) || (order[a.type] - order[b.type]));
   const open = list.filter((c) => c.status !== 'approved').length;
-  return { clashes: list.slice(0, MAX_RESULTS), capped, open, total: list.length };
+  const clashes = list.slice(0, MAX_RESULTS);
+  // 跨執行比對：本輪 key 集合、以及上輪有本輪消失者（cleared）
+  const curKeys = new Set(clashes.map((o) => (o.soft ? 'S|' : '') + clashKey(o.a, o.b)));
+  const cleared = [];
+  if (prev) for (const k of prev) if (!curKeys.has(k)) cleared.push(k);
+  if (sceneData) sceneData.lastClashKeys = [...curKeys];   // 存回供下一輪比對（陣列，利於 JSON 序列化）
+  return { clashes, capped, open, total: list.length, cleared, keys: [...curKeys] };
 }

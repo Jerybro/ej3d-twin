@@ -7,7 +7,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
-import { std, markShadow, builders, detailedBuilders, dm, dFlange, mergeByMaterial, labelHeight, buildPipeComponent } from './plant-builders.js';
+import { std, markShadow, builders, detailedBuilders, dm, dFlange, mergeByMaterial, labelHeight, buildPipeComponent, buildTrayBody, PIPE_SERVICES } from './plant-builders.js';
 import { initSprite } from './sprite.js';
 import { initTwinFlow, flowAlarm, flowInfoSection } from './twinflow.js';
 
@@ -440,34 +440,103 @@ for (const unit of plantData.plant.units) {
 }
 
 // 管線（裝飾用，串接設備）
-// P&ID 自動抽取的管線可達數千段——合併成單一 BufferGeometry（一次 draw call），
+// P&ID 自動抽取的管線可達數千段——依材質分桶合併 BufferGeometry（每材質一次 draw call），
 // 手繪少量管線走原路徑（個別 mesh 保留陰影品質）
+// 孿生與編輯器同表現：profile='duct' 矩形/圓/橢圓風管、profile='tray' U 型托盤、
+// pipe.service 服務色、pipe.insul 半透明保溫殼（渲染規格比照 editor.js）
 const pipeMat = std(0x646f7b);
 const bridgeMat = std(0x2e8ba8); // 跨圖橋接管：主題青，一眼辨識「這條是縫合線」
+const ductMat = std(0xaeb6bf, { metalness: 0.5, roughness: 0.35 });   // HVAC 風管灰（同 editor）
+const insulMat = new THREE.MeshStandardMaterial({ color: 0xcdd6df, transparent: true, opacity: 0.26, roughness: 1 });
 {
   const manyPipes = plantData.pipes.length > 60;
-  const geos = [];
-  const bridgeGeos = [];
   const up = new THREE.Vector3(0, 1, 0);
+  const fwd = new THREE.Vector3(0, 0, 1);
+  // 服務別著色：每 code 一個共用材質（無 service / 未知 code 維持現況灰；bridge 優先青色）
+  const SERVICE_BY_CODE = Object.fromEntries(PIPE_SERVICES.map((s) => [s.code, s]));
+  const serviceMats = new Map();
+  const baseMatOf = (pipe) => {
+    if (pipe.bridge) return bridgeMat;
+    const svc = SERVICE_BY_CODE[pipe.service];
+    if (!svc) return pipeMat;
+    if (!serviceMats.has(pipe.service)) serviceMats.set(pipe.service, std(svc.color));
+    return serviceMats.get(pipe.service);
+  };
+  // 合併路徑：材質→幾何桶（多管時每材質合併成單一 mesh，維持一材質一 draw call）
+  const geoBuckets = new Map();
+  const bucketOf = (mat) => { let b = geoBuckets.get(mat); if (!b) { b = []; geoBuckets.set(mat, b); } return b; };
+  // 幾何就地轉到世界位（合併與個別 mesh 共用；軸 axis 對齊段向 dir）
+  const orient = (geo, axis, a, dir) => {
+    geo.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(axis, dir.clone().normalize()));
+    const mid = a.clone().addScaledVector(dir, 0.5);
+    geo.translate(mid.x, mid.y, mid.z);
+    return geo;
+  };
+  const emit = (geo, mat, shadow = true) => {
+    if (manyPipes) { bucketOf(mat).push(geo); return; }
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = shadow;
+    plantGroup.add(mesh);
+  };
+  // 風管直段幾何（比照 editor buildDuctBody：rect 沿 Z、circ/oval 沿 Y 對齊流向）
+  const ductSeg = (pipe, len) => {
+    const w = pipe.duct?.w ?? 0.8, h = pipe.duct?.h ?? 0.5;
+    const shape = pipe.duct?.shape ?? 'rect';
+    const d = pipe.duct?.d ?? w;                        // 圓形直徑（公尺），舊資料沿用 w
+    const rad = manyPipes ? 10 : 20;
+    if (shape === 'circ') return { geo: new THREE.CylinderGeometry(d / 2, d / 2, len, rad), axis: up };
+    if (shape === 'oval') { const g = new THREE.CylinderGeometry(0.5, 0.5, len, rad); g.scale(w, 1, h); return { geo: g, axis: up }; }
+    return { geo: new THREE.BoxGeometry(w, h, len), axis: fwd };
+  };
   for (const pipe of plantData.pipes) {
     const pts = pipe.pts.map((p) => new THREE.Vector3(...p));
+    if (pipe.profile === 'tray') {
+      // 電纜橋架：復用 plant-builders U 型托盤（ladder/solid/perforated 同 editor 表現）
+      const g = new THREE.Group();
+      buildTrayBody(pipe, -1, g, pts);
+      if (manyPipes) g.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+      plantGroup.add(g);
+      continue;
+    }
+    if (pipe.profile === 'duct') {
+      // 風管：斷面直段＋轉角（矩形→彎頭盒、圓/橢圓→球形接續）
+      const w = pipe.duct?.w ?? 0.8, h = pipe.duct?.h ?? 0.5;
+      const shape = pipe.duct?.shape ?? 'rect';
+      const d = pipe.duct?.d ?? w;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i], b = pts[i + 1];
+        const dir = b.clone().sub(a), len = dir.length();
+        if (len < 0.01) continue;
+        const { geo, axis } = ductSeg(pipe, len);
+        emit(orient(geo, axis, a, dir), ductMat);
+        if (i < pts.length - 2) {                        // 轉角接續（同 editor：世界軸對齊）
+          let el;
+          if (shape === 'rect') {
+            el = new THREE.BoxGeometry(w * 1.06, h * 1.06, Math.max(w, h) * 1.06);
+          } else {
+            const r = shape === 'circ' ? d / 2 : Math.max(w, h) / 2;
+            el = new THREE.SphereGeometry(r * 1.06, 14, 12);
+            if (shape === 'oval') el.scale(w / Math.max(w, h), 1, h / Math.max(w, h));
+          }
+          el.translate(pts[i + 1].x, pts[i + 1].y, pts[i + 1].z);
+          emit(el, ductMat);
+        }
+      }
+      continue;   // 風管元件（三通/風門等）非圓管件，孿生僅呈現管體
+    }
+    const baseMat = baseMatOf(pipe);
     for (let i = 0; i < pts.length - 1; i++) {
       const a = pts[i], b = pts[i + 1];
       const dir = b.clone().sub(a);
       const len = dir.length();
       if (len < 0.01) continue;
-      const cylGeo = new THREE.CylinderGeometry(pipe.r, pipe.r, len, manyPipes ? 6 : 12);
-      const q = new THREE.Quaternion().setFromUnitVectors(up, dir.clone().normalize());
-      const mid = a.clone().addScaledVector(dir, 0.5);
-      cylGeo.applyQuaternion(q);
-      cylGeo.translate(mid.x, mid.y, mid.z);
-      if (manyPipes) {
-        (pipe.bridge ? bridgeGeos : geos).push(cylGeo);
-      } else {
-        const cyl = new THREE.Mesh(cylGeo, pipe.bridge ? bridgeMat : pipeMat);
-        cyl.castShadow = true;
-        plantGroup.add(cyl);
-        const joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), pipeMat);
+      emit(orient(new THREE.CylinderGeometry(pipe.r, pipe.r, len, manyPipes ? 6 : 12), up, a, dir), baseMat);
+      if (pipe.insul > 0) {   // 保溫殼：外半徑＝管半徑＋保溫厚（公尺），半透明同 editor
+        const rIns = pipe.r + pipe.insul;
+        emit(orient(new THREE.CylinderGeometry(rIns, rIns, len, manyPipes ? 6 : 12), up, a, dir), insulMat, false);
+      }
+      if (!manyPipes) {
+        const joint = new THREE.Mesh(new THREE.SphereGeometry(pipe.r * 1.3, 10, 8), baseMat);
         joint.position.copy(b);
         plantGroup.add(joint);
       }
@@ -494,7 +563,7 @@ const bridgeMat = std(0x2e8ba8); // 跨圖橋接管：主題青，一眼辨識�
       }
     }
   }
-  for (const [gs, mat] of [[geos, pipeMat], [bridgeGeos, bridgeMat]]) {
+  for (const [mat, gs] of geoBuckets) {
     if (!gs.length) continue;
     const merged = new THREE.Mesh(BufferGeometryUtils.mergeGeometries(gs, false), mat);
     merged.castShadow = false; // 數千段的陰影貼圖成本不值得

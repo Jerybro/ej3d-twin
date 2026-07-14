@@ -847,6 +847,7 @@ function setHint(html) {
 }
 
 function setMode(m) {
+  if (m !== 'idle') clearMultiSel();   // 進入繪製/放置工具前清多選，避免殭屍 pivot/helper（Esc 路徑自行清除）
   mode = m;
   document.querySelectorAll('.asset-btn').forEach((b) => b.classList.remove('active'));
   document.getElementById('pipe-btn').classList.remove('active');

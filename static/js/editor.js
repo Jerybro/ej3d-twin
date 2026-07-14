@@ -919,6 +919,7 @@ function selectNone() {
 }
 
 function selectEquipment(tag, { attach = true } = {}) {
+  clearMultiSel();   // 任何進入單選的路徑（右鍵選單/樹/搜尋/報表定位）先解散多選，防殭屍 pivot/helper
   selectNone();
   const entry = eqObjects.get(tag);
   if (!entry) return;
@@ -934,6 +935,7 @@ function selectEquipment(tag, { attach = true } = {}) {
 }
 
 function selectPipe(index) {
+  clearMultiSel();   // 同 selectEquipment：進單選先解散多選
   selectNone();
   selected = { kind: 'pipe', index };
   const p = pipeObjects[index];
@@ -2018,6 +2020,12 @@ function toggleHidden(tag) {
   else {
     hiddenTags.add(tag);
     if (selected?.kind === 'eq' && selected.def.tag === tag) transform.detach();
+    if (multiSel.has(tag)) {   // 隱藏的成員移出多選：BoxHelper 不隨 group.visible 消失，且不該再被群組拖動
+      multiSel.delete(tag);
+      removeMultiHelper(tag);
+      if (multiSel.size < 2) clearMultiSel();
+      else { attachMultiPivot(); updateMultiStatus(); }
+    }
   }
   entry.group.visible = !hiddenTags.has(tag) && eqLayerOn(entry.def);
   rebuildTree();
@@ -5731,6 +5739,7 @@ function deleteSelected() {
     }
     const entry = eqObjects.get(tag);
     transform.detach();
+    entry.group.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); });   // 清 tag/管嘴標籤 DOM，防孤兒殘影（與群組刪除一致）
     disposeEnvelope(entry.group);   // 包絡幾何/材質 dispose，防 GPU 洩漏
     scene.remove(entry.group);
     eqObjects.delete(tag);
@@ -5841,6 +5850,7 @@ document.getElementById('btn-save').addEventListener('click', () => saveScene(fa
 document.getElementById('btn-saveas').addEventListener('click', () => saveScene(true));
 document.getElementById('btn-new').addEventListener('click', () => {
   if (!confirm('清空目前場景？（未儲存的變更會遺失）')) return;
+  clearDraft(sceneId);   // 使用者已同意放棄變更 → 刪掉草稿，否則 __new__ 場景清空後會被草稿復原提示救回
   loadSceneData(emptyScene('未命名場景'), null);
   onSceneLoaded();
 });
@@ -5854,6 +5864,7 @@ document.getElementById('btn-open').addEventListener('click', async () => {
   modal.classList.add('show');
   document.querySelectorAll('.scene-item').forEach((el) => {
     el.addEventListener('click', async () => {
+      saveDraft();   // 切場景前補寫舊場景草稿（sceneId 仍指舊場景），免掉最近 30 秒內的編輯
       const data = await fetch(`/api/scenes/${el.dataset.id}`).then((r) => r.json());
       loadSceneData(data, el.dataset.id);
       modal.classList.remove('show');

@@ -272,6 +272,7 @@ function undo() {
   if (!undoStack.length) return;
   redoStack.push(JSON.stringify(sceneData));
   loadSceneData(JSON.parse(undoStack.pop()), sceneId);
+  draftDirty = true;   // 復原後內容與上次存檔不同（自動草稿/關頁警告用）
   updateUndoButtons();
 }
 
@@ -279,6 +280,7 @@ function redo() {
   if (!redoStack.length) return;
   undoStack.push(JSON.stringify(sceneData));
   loadSceneData(JSON.parse(redoStack.pop()), sceneId);
+  draftDirty = true;   // 重做後內容與上次存檔不同（自動草稿/關頁警告用）
   updateUndoButtons();
 }
 

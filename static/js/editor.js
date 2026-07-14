@@ -785,6 +785,7 @@ function updateBranchPipes() {
 
 // ------------------------------------------------------------ 載入場景
 function loadSceneData(data, id) {
+  clearMultiSel();   // 多選 helper/pivot 引用舊 group，undo/redo/換場景前先清
   transform.detach();
   clearNodeHandles();
   resetReviewRender();   // 換場景前清掉 X-ray/線框 override 記錄，避免持有舊 mesh 參照
@@ -909,6 +910,169 @@ function selectPipe(index) {
   renderPipeProps(index);
   document.getElementById('st-sel').textContent = `選取：管線 #${index + 1}`;
   if (mode === 'pipenode') buildNodeHandles(index);
+}
+
+// ------------------------------------------------------------ 多選（Ctrl+點選；疊加模式，只支援設備，不動既有單選流程）
+// 高亮用每設備一個 BoxHelper（獨立 LineSegments，絕不改共用材質）；群組移動用臨時 pivot Group。
+const multiSel = new Set();      // 設備 tag；恆為 0 或 ≥2（降到 1 台即轉回單選）
+const multiHelpers = new Map();  // tag → THREE.BoxHelper
+let multiPivot = null;           // 群組移動臨時 pivot（放選中設備幾何中心）
+let multiPivotStart = null;      // pivot 拖動起點（Vector3，算位移差用）
+
+function addMultiHelper(tag) {
+  const entry = eqObjects.get(tag);
+  if (!entry || multiHelpers.has(tag)) return;
+  const h = new THREE.BoxHelper(entry.group, 0xffaa3c);
+  scene.add(h);
+  multiHelpers.set(tag, h);
+}
+function removeMultiHelper(tag) {
+  const h = multiHelpers.get(tag);
+  if (!h) return;
+  scene.remove(h);
+  h.geometry.dispose();
+  h.material.dispose();
+  multiHelpers.delete(tag);
+}
+function detachMultiPivot() {
+  if (!multiPivot) return;
+  if (transform.object === multiPivot) transform.detach();
+  scene.remove(multiPivot);
+  multiPivot = null;
+  multiPivotStart = null;
+}
+function attachMultiPivot() {
+  detachMultiPivot();
+  if (multiSel.size < 2) return;
+  const c = new THREE.Vector3();
+  let n = 0;
+  for (const tag of multiSel) {
+    const entry = eqObjects.get(tag);
+    if (entry) { c.add(entry.group.position); n++; }
+  }
+  if (!n) return;
+  c.divideScalar(n).setY(0);
+  multiPivot = new THREE.Group();
+  multiPivot.position.copy(c);
+  scene.add(multiPivot);
+  multiPivotStart = c.clone();
+  transform.attach(multiPivot);
+  setTransformMode('translate');   // 群組僅支援平移
+}
+function updateMultiStatus() {
+  document.getElementById('st-sel').textContent = `已選 ${multiSel.size} 台`;
+}
+function clearMultiSel() {
+  if (!multiSel.size && !multiPivot) return;
+  detachMultiPivot();
+  for (const tag of [...multiHelpers.keys()]) removeMultiHelper(tag);
+  for (const tag of multiSel) {
+    const entry = eqObjects.get(tag);
+    if (entry) entry.group.position.set(...entry.def.pos);   // 防拖動中途取消殘留視覺位移
+  }
+  multiSel.clear();
+}
+function toggleMultiSel(tag) {
+  if (!eqObjects.has(tag)) return;
+  if (multiSel.has(tag)) {
+    multiSel.delete(tag);
+    removeMultiHelper(tag);
+  } else {
+    // Ctrl+第二台：把目前單選設備一併納入，自然形成群組
+    if (!multiSel.size && selected?.kind === 'eq' && selected.def.tag !== tag) {
+      multiSel.add(selected.def.tag);
+      addMultiHelper(selected.def.tag);
+    }
+    multiSel.add(tag);
+    addMultiHelper(tag);
+  }
+  if (multiSel.size >= 2) {
+    selectNone();          // 清單選（detach/面板），再掛群組 pivot
+    attachMultiPivot();
+    updateMultiStatus();
+  } else {
+    // 剩 0/1 台：退出多選；剩 1 台時轉回單選
+    detachMultiPivot();
+    const rest = [...multiSel][0];
+    for (const t of [...multiHelpers.keys()]) removeMultiHelper(t);
+    multiSel.clear();
+    if (rest) selectEquipment(rest); else selectNone();
+  }
+}
+// pivot 拖動中：各設備群組即時跟隨（純視覺，def.pos 於 mouseUp 才寫回）
+transform.addEventListener('objectChange', () => {
+  if (!multiPivot || transform.object !== multiPivot || !multiPivotStart) return;
+  multiPivot.position.y = 0;
+  const dx = multiPivot.position.x - multiPivotStart.x;
+  const dz = multiPivot.position.z - multiPivotStart.z;
+  for (const tag of multiSel) {
+    const entry = eqObjects.get(tag);
+    if (!entry) continue;
+    entry.group.position.set(entry.def.pos[0] + dx, 0, entry.def.pos[2] + dz);
+    multiHelpers.get(tag)?.update();
+  }
+});
+// pivot 拖動結束：位移差寫回每台 def.pos（roundMM、y=0）＋管端跟走；pivot 重新置中
+function commitMultiMove() {
+  if (!multiPivot || !multiPivotStart) return;
+  multiPivot.position.y = 0;
+  if (snapOn) multiPivot.position.set(snapVal(multiPivot.position.x), 0, snapVal(multiPivot.position.z));
+  const dx = roundMM(multiPivot.position.x - multiPivotStart.x);
+  const dz = roundMM(multiPivot.position.z - multiPivotStart.z);
+  for (const tag of multiSel) {
+    const entry = eqObjects.get(tag);
+    if (!entry) continue;
+    entry.def.pos = [roundMM(entry.def.pos[0] + dx), 0, roundMM(entry.def.pos[2] + dz)];
+    entry.group.position.set(...entry.def.pos);
+    updateConnectedPipes(tag);
+    multiHelpers.get(tag)?.update();
+  }
+  attachMultiPivot();
+  updateMultiStatus();
+}
+// 群組刪除（一次 pushUndo；比照單刪流程，另清 CSS2D 標籤 DOM 防孤兒）
+function deleteMultiSelected() {
+  if (multiSel.size < 2) return;
+  pushUndo();
+  const tags = [...multiSel];
+  clearMultiSel();   // 先卸 pivot/helper（引用即將移除的 group）
+  transform.detach();
+  for (const tag of tags) {
+    const entry = eqObjects.get(tag);
+    if (!entry) continue;
+    entry.group.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); });
+    disposeEnvelope(entry.group);
+    scene.remove(entry.group);
+    eqObjects.delete(tag);
+    hiddenTags.delete(tag);
+    for (const u of sceneData.plant.units) {
+      u.equipment = u.equipment.filter((e) => e.tag !== tag);
+    }
+  }
+  rebuildTree();
+  updateTopbar();
+  selectNone();
+}
+// 群組複製（一次 pushUndo；各偏移 +2,+2，複本群成為新的多選）
+function duplicateMultiSelected() {
+  if (multiSel.size < 2) return;
+  pushUndo();
+  const newTags = [];
+  for (const tag of [...multiSel]) {
+    const src = eqObjects.get(tag)?.def;
+    if (src) newTags.push(duplicateOneDef(src).tag);
+  }
+  rebuildTree();
+  updateTopbar();
+  clearMultiSel();
+  for (const t of newTags) { multiSel.add(t); addMultiHelper(t); }
+  if (multiSel.size >= 2) {
+    attachMultiPivot();
+    updateMultiStatus();
+  } else if (newTags.length === 1) {
+    clearMultiSel();
+    selectEquipment(newTags[0]);
+  }
 }
 
 // ------------------------------------------------------------ 管嘴選取（點嘴選嘴，非母設備）
@@ -1623,7 +1787,7 @@ function rebuildTree(filter = document.getElementById('tree-search').value.trim(
       if (hiddenTags.has(eq.tag)) row.classList.add('hidden-eq');
       row.innerHTML = `<span class="mt-dbtype">EQUI</span><span class="mt-ico">${TYPE_ICON[eq.type] ?? '▪'}</span>
         <span class="mt-tag">${eq.tag}</span><span class="mt-name">${eq.name}</span>`;
-      row.addEventListener('click', () => selectEquipment(eq.tag));
+      row.addEventListener('click', () => { clearMultiSel(); selectEquipment(eq.tag); });
       row.addEventListener('dblclick', () => { selectEquipment(eq.tag); zoomToSelection(); });
       row.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -1647,7 +1811,7 @@ function rebuildTree(filter = document.getElementById('tree-search').value.trim(
       row.dataset.pipe = i;
       row.innerHTML = `<span class="mt-dbtype">PIPE</span><span class="mt-tag">#${i + 1}</span>
         <span class="mt-name">${sceneData.pipes[i].bridge ? '橋接' : `${sceneData.pipes[i].pts.length} 節點`}</span>`;
-      row.addEventListener('click', () => selectPipe(i));
+      row.addEventListener('click', () => { clearMultiSel(); selectPipe(i); });
       det.appendChild(row);
     }
     if (sceneData.pipes.length > max) {
@@ -1764,11 +1928,19 @@ function eqCtxItems(tag) {
   ];
 }
 
-// 複製設備（tag 依前綴遞增、位置偏移 +2,+2）
+// 複製設備（tag 依前綴遞增、位置偏移 +2,+2）；多選成員→轉群組複製
 function duplicateEquipment(tag) {
+  if (multiSel.size >= 2 && multiSel.has(tag)) { duplicateMultiSelected(); return; }
   const src = eqObjects.get(tag)?.def;
   if (!src) return;
   pushUndo();
+  const def = duplicateOneDef(src);
+  rebuildTree();
+  updateTopbar();
+  selectEquipment(def.tag);
+}
+// 複製內核（不 pushUndo，單台/群組共用）
+function duplicateOneDef(src) {
   const prefix = (src.tag.match(/^[A-Z]+/i)?.[0] ?? 'X').toUpperCase();
   const def = JSON.parse(JSON.stringify(src));
   def.tag = nextTag(prefix);
@@ -1777,9 +1949,7 @@ function duplicateEquipment(tag) {
   const unit = sceneData.plant.units.find((u) => u.equipment.includes(src)) ?? sceneData.plant.units[0];
   unit.equipment.push(def);
   buildEquipment(def);
-  rebuildTree();
-  updateTopbar();
-  selectEquipment(def.tag);
+  return def;
 }
 
 // 對齊到…（E3D Align with Feature 簡化版）：點目標設備 → 選對齊軸
@@ -2471,11 +2641,13 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     const o = hit.obj;
     if (o.userData.routeDir !== undefined) return; // 箭頭點擊不改選取
     if (o.userData.nodeIndex !== undefined) { selectNodeHandle(o.userData.nodeIndex, o.userData.mid); return; }
-    if (o.userData.nzId && mode !== 'pipenode' && mode !== 'nozzle') { selectNozzle(o.userData.eqTag, o.userData.nzId); return; }
-    if (o.userData.eqTag) { if (mode !== 'pipenode') selectEquipment(o.userData.eqTag); return; }
-    if (o.userData.pipeIndex !== undefined) { selectPipe(o.userData.pipeIndex); return; }
+    // Ctrl+點選設備 → 多選 toggle（僅設備；管線/托盤維持單選）
+    if ((e.ctrlKey || e.metaKey) && o.userData.eqTag && mode !== 'pipenode') { toggleMultiSel(o.userData.eqTag); return; }
+    if (o.userData.nzId && mode !== 'pipenode' && mode !== 'nozzle') { clearMultiSel(); selectNozzle(o.userData.eqTag, o.userData.nzId); return; }
+    if (o.userData.eqTag) { if (mode !== 'pipenode') { clearMultiSel(); selectEquipment(o.userData.eqTag); } return; }
+    if (o.userData.pipeIndex !== undefined) { clearMultiSel(); selectPipe(o.userData.pipeIndex); return; }
   }
-  if (mode !== 'pipenode') selectNone();
+  if (mode !== 'pipenode') { clearMultiSel(); selectNone(); }
 });
 
 // ------------------------------------------------------------ PowerWheel（E3D 3D 視圖右鍵放射選單）
@@ -2620,6 +2792,7 @@ function updatePipePreview(cursor) {
 // TransformControls 變換寫回 def
 transform.addEventListener('mouseUp', () => {
   if (nodeDrag) { commitNodeDrag(); return; }
+  if (multiPivot && transform.object === multiPivot) { commitMultiMove(); return; }  // 多選群組移動
   if (!selected || selected.kind !== 'eq') return;
   const def = selected.def;
   const g = eqObjects.get(def.tag).group;
@@ -5407,6 +5580,7 @@ addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (walk.on) exitWalk();  // pointer lock 失敗/headless 時的保險退出
     setMode('idle');
+    clearMultiSel();          // Esc＝清空多選
     selectNone();
   }
   else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
@@ -5418,6 +5592,10 @@ addEventListener('keydown', (e) => {
   } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) {
     e.preventDefault();
     redo();
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
+    e.preventDefault();   // Ctrl+D＝複製（多選→全部；單選設備→單台）
+    if (multiSel.size >= 2) duplicateMultiSelected();
+    else if (selected?.kind === 'eq') duplicateEquipment(selected.def.tag);
   } else if (e.key === 'Enter' && mode === 'pipe' && pipeDraft.length >= 2) {
     pushUndo();
     const ptsOut = pipeDraft.map((p) => [roundMM(p.x), roundMM(p.y), roundMM(p.z)]);
@@ -5493,7 +5671,7 @@ document.getElementById('btn-redo').addEventListener('click', redo);
 document.getElementById('btn-del').addEventListener('click', deleteSelected);
 
 function deleteSelected() {
-  if (!selected) return;
+  if (!selected) { if (multiSel.size >= 2) deleteMultiSelected(); return; }  // 多選狀態（無單選）→ 群組刪除
   pushUndo();
   if (selected.kind === 'nozzle') {
     const def = selected.def;
@@ -5505,6 +5683,11 @@ function deleteSelected() {
   }
   if (selected.kind === 'eq') {
     const tag = selected.def.tag;
+    if (multiSel.has(tag)) {   // 單刪多選成員 → 清該成員高亮，群組不足 2 台即解散
+      multiSel.delete(tag);
+      removeMultiHelper(tag);
+      if (multiSel.size < 2) clearMultiSel(); else detachMultiPivot();
+    }
     const entry = eqObjects.get(tag);
     transform.detach();
     disposeEnvelope(entry.group);   // 包絡幾何/材質 dispose，防 GPU 洩漏
@@ -5523,6 +5706,7 @@ function deleteSelected() {
   rebuildTree();
   updateTopbar();
   selectNone();
+  if (multiSel.size >= 2) { attachMultiPivot(); updateMultiStatus(); }  // 殘餘多選群組重掛 pivot
 }
 
 // ------------------------------------------------------------ 存檔/開啟

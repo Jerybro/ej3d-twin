@@ -264,6 +264,7 @@ function pushUndo() {
   undoStack.push(JSON.stringify(sceneData));
   if (undoStack.length > UNDO_LIMIT) undoStack.shift();
   redoStack.length = 0;
+  draftDirty = true;   // 自上次成功儲存後有變更（自動草稿/關頁警告用）
   updateUndoButtons();
 }
 
@@ -271,6 +272,7 @@ function undo() {
   if (!undoStack.length) return;
   redoStack.push(JSON.stringify(sceneData));
   loadSceneData(JSON.parse(undoStack.pop()), sceneId);
+  draftDirty = true;   // 復原後內容與上次存檔不同（自動草稿/關頁警告用）
   updateUndoButtons();
 }
 
@@ -278,6 +280,7 @@ function redo() {
   if (!redoStack.length) return;
   undoStack.push(JSON.stringify(sceneData));
   loadSceneData(JSON.parse(redoStack.pop()), sceneId);
+  draftDirty = true;   // 重做後內容與上次存檔不同（自動草稿/關頁警告用）
   updateUndoButtons();
 }
 
@@ -5527,6 +5530,7 @@ function deleteSelected() {
 
 // ------------------------------------------------------------ 存檔/開啟
 async function saveScene(asNew = false) {
+  const prevId = sceneId;   // 儲存前的草稿 key 來源（新場景為 null → __new__）
   let id = sceneId;
   if (asNew || !id) {
     id = prompt('場景 id（小寫英數、-、_）：', id ?? 'my-plant');
@@ -5546,15 +5550,77 @@ async function saveScene(asNew = false) {
     return;
   }
   sceneId = id;
+  // 正式儲存成功 → 清 dirty、刪對應草稿（含另存前舊 key）
+  draftDirty = false;
+  lastDraftStr = null;
+  clearDraft(prevId);
+  clearDraft(id);
   updateTopbar();
   setHint(`已儲存 <b>${id}</b>`);
 }
+
+// ------------------------------------------------------------ 自動草稿（localStorage 每 30 秒）＋復原＋關頁警告
+let draftDirty = false;        // 自上次成功儲存後 pushUndo 是否有新增
+let lastDraftStr = null;       // 上次寫入草稿的 sceneData 序列化字串（相同則略過）
+let draftSizeWarned = false;   // 過大/寫入失敗僅提示一次
+const DRAFT_MAX_LEN = 4 * 1024 * 1024;   // localStorage 保守上限（字元數）
+
+function draftKey(id) { return 'ej3d-draft:' + (id ?? '__new__'); }
+
+function clearDraft(id) {
+  try { localStorage.removeItem(draftKey(id)); } catch { /* ignore */ }
+}
+
+function saveDraft() {
+  if (!draftDirty) return;
+  let str;
+  try { str = JSON.stringify(sceneData); } catch { return; }
+  if (str === lastDraftStr) return;   // 與上次草稿相同 → 略過
+  const payload = `{"t":${Date.now()},"data":${str}}`;
+  if (payload.length > DRAFT_MAX_LEN) {
+    if (!draftSizeWarned) { draftSizeWarned = true; setHint('場景過大（>4MB），自動草稿已略過'); }
+    return;
+  }
+  try {
+    localStorage.setItem(draftKey(sceneId), payload);
+    lastDraftStr = str;
+  } catch {
+    if (!draftSizeWarned) { draftSizeWarned = true; setHint('瀏覽器儲存空間不足，自動草稿已略過'); }
+  }
+}
+setInterval(saveDraft, 30000);
+
+// 場景載入完成（開啟/新建/初始）→ 重置 dirty，並詢問是否復原較新草稿
+function onSceneLoaded() {
+  draftDirty = false;
+  lastDraftStr = null;
+  let rec = null;
+  try { rec = JSON.parse(localStorage.getItem(draftKey(sceneId)) ?? 'null'); } catch { /* ignore */ }
+  if (!rec || typeof rec.t !== 'number' || !rec.data) return;
+  const d = new Date(rec.t);
+  const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  // 草稿於正式儲存成功時即刪除 → 尚存在者必晚於目前資料
+  if (confirm(`偵測到較新的未儲存草稿（${hhmm}），要復原嗎？`)) {
+    loadSceneData(rec.data, sceneId);
+    draftDirty = true;   // 復原內容尚未正式儲存
+  } else {
+    clearDraft(sceneId);
+  }
+}
+
+addEventListener('beforeunload', (e) => {
+  if (!draftDirty) return;
+  saveDraft();          // 關頁前補寫一次草稿，供下次開啟復原
+  e.preventDefault();
+  e.returnValue = '';   // 觸發原生離開確認
+});
 
 document.getElementById('btn-save').addEventListener('click', () => saveScene(false));
 document.getElementById('btn-saveas').addEventListener('click', () => saveScene(true));
 document.getElementById('btn-new').addEventListener('click', () => {
   if (!confirm('清空目前場景？（未儲存的變更會遺失）')) return;
   loadSceneData(emptyScene('未命名場景'), null);
+  onSceneLoaded();
 });
 
 const modal = document.getElementById('open-modal');
@@ -5569,6 +5635,7 @@ document.getElementById('btn-open').addEventListener('click', async () => {
       const data = await fetch(`/api/scenes/${el.dataset.id}`).then((r) => r.json());
       loadSceneData(data, el.dataset.id);
       modal.classList.remove('show');
+      onSceneLoaded();
     });
   });
 });
@@ -5578,7 +5645,9 @@ document.getElementById('modal-close').addEventListener('click', () => modal.cla
 const initId = new URLSearchParams(location.search).get('scene');
 if (initId) {
   fetch(`/api/scenes/${initId}`).then((r) => { if (r.ok) return r.json(); throw 0; })
-    .then((d) => loadSceneData(d, initId)).catch(() => {});
+    .then((d) => { loadSceneData(d, initId); onSceneLoaded(); }).catch(() => {});
+} else {
+  onSceneLoaded();   // 初始空場景：檢查 __new__ 草稿
 }
 updateTopbar();
 rebuildTree();

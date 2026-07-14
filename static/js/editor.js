@@ -191,6 +191,24 @@ function applySnapSettings() {
   transform.setRotationSnap(snapOn ? THREE.MathUtils.degToRad(15) : null);
 }
 
+// ------------------------------------------------------------ 按需渲染（dirty-flag，省 GPU/電池）
+// rAF 主迴圈仍每幀跑，但只有 needsRender 時才真正 render；閒置時 render 呼叫趨近 0。
+// 原則：寧可過度標記（多畫幾幀）也不可漏標（畫面停格）。
+let needsRender = true;
+function invalidate() { needsRender = true; }
+controls.addEventListener('change', invalidate);            // 旋轉/平移/縮放；damping 衰減期間 update() 仍持續發 change
+transform.addEventListener('change', invalidate);           // gizmo 拖曳中
+transform.addEventListener('dragging-changed', invalidate); // 拖曳開始/結束
+// 廣撒網：任何使用者輸入（視埠拖曳/滾輪、面板改值、按鈕、快捷鍵）一律標記重繪。
+// capture 掛 window，涵蓋所有 UI 面板與 canvas；閒置（無輸入）時不觸發，不影響省電目標。
+for (const evName of ['pointerdown', 'pointermove', 'pointerup', 'wheel',
+                      'keydown', 'keyup', 'click', 'dblclick', 'contextmenu',
+                      'change', 'input']) {
+  window.addEventListener(evName, invalidate, { capture: true, passive: true });
+}
+// 非同步資源（底圖貼圖等走 THREE 預設 LoadingManager 的載入）完成時重繪
+THREE.DefaultLoadingManager.onLoad = invalidate;
+
 // 圖紙底圖（P&ID 地毯）：載入場景時重建
 const underlayMeshes = [];
 const texLoader = new THREE.TextureLoader();
@@ -219,6 +237,7 @@ function rebuildUnderlays(list) {
     underlayMeshes.push(sheet);
     scene.add(sheet);
   }
+  invalidate();   // 底圖重建（貼圖非同步到貨另由 DefaultLoadingManager.onLoad 補標）
 }
 
 // 地坪自適應：場景範圍超出預設 80×60 時放大（P&ID 整廠合併場景會很大）
@@ -266,6 +285,7 @@ function pushUndo() {
   redoStack.length = 0;
   draftDirty = true;   // 自上次成功儲存後有變更（自動草稿/關頁警告用）
   updateUndoButtons();
+  invalidate();   // 存快照＝即將有場景變更
 }
 
 function undo() {
@@ -320,6 +340,7 @@ function applyLayers() {
     const svcKey = pipeServiceKey(pipe);   // 風管→null（不受服務篩選）；管線→service code 或 '__none__'
     p.group.visible = layerOn && !(svcKey && hiddenServices.has(svcKey));   // 服務圖例篩選：隱藏該服務別
   });
+  invalidate();   // 圖層/可見性變更
 }
 
 function emptyScene(name) {
@@ -401,6 +422,7 @@ function rebuildEquipment(def) {
   renderNozzles(entry.group, def);
   entry.group.children.find((c) => c.isCSS2DObject)?.position.set(0, labelHeight(def), 0);
   if (udaColorKey || xrayOn || wireframeOn) refreshRenderLayers(true);   // 重建後統一重組兩層 override（UDA 著色＋X-ray/線框），不搶屬性面板
+  invalidate();   // 設備幾何重建
 }
 
 // ------------------------------------------------------------ 管線渲染
@@ -728,6 +750,7 @@ function rebuildAllPipes() {
   sceneData.pipes.forEach((pipe, i) => buildPipe(pipe, i));
   applyLayers();
   if (udaColorKey || xrayOn || wireframeOn) refreshRenderLayers(true);   // 管線重建後重套 UDA 著色/X-ray，避免掉色/不一致
+  invalidate();   // 全管線重建
 }
 
 // 單條管重建：dispose 舊 group 幾何後重繪，index 對齊不變。
@@ -746,6 +769,7 @@ function rebuildPipe(index) {
   buildPipe(sceneData.pipes[index], index);
   applyLayers();
   if (udaColorKey || xrayOn || wireframeOn) refreshRenderLayers(true);   // 管線重建後重套 UDA 著色/X-ray
+  invalidate();   // 單管重建
 }
 
 // 設備移動/旋轉後，帶 head/tail 參考該設備的管線端點跟動（沿用 nozzle 現在世界座標）。
@@ -812,6 +836,7 @@ function loadSceneData(data, id) {
   updateTopbar();
   rebuildTree();
   selectNone();
+  invalidate();   // 整場景載入（含 URL ?scene=、undo/redo 等程式路徑）
 }
 
 function updateTopbar() {
@@ -888,6 +913,7 @@ function selectNone() {
   renderPropEmpty();
   syncTreeSelection();
   document.getElementById('st-sel').textContent = '選取：無';
+  invalidate();   // 取消選取（高亮還原）
 }
 
 function selectEquipment(tag, { attach = true } = {}) {
@@ -902,6 +928,7 @@ function selectEquipment(tag, { attach = true } = {}) {
   renderPropPanel(entry.def);
   syncTreeSelection();
   document.getElementById('st-sel').textContent = `選取：${entry.def.tag}（${entry.def.name}）`;
+  invalidate();   // 選取設備（gizmo attach／高亮）
 }
 
 function selectPipe(index) {
@@ -912,6 +939,7 @@ function selectPipe(index) {
   renderPipeProps(index);
   document.getElementById('st-sel').textContent = `選取：管線 #${index + 1}`;
   if (mode === 'pipenode') buildNodeHandles(index);
+  invalidate();   // 選取管線（高亮材質）
 }
 
 // ------------------------------------------------------------ 管嘴選取（點嘴選嘴，非母設備）
@@ -2238,6 +2266,7 @@ function clearPointCloud(keepMeta = false) {
   }
   if (!keepMeta && sceneData.scan_models) sceneData.scan_models.length = 0;
   pcButtons();
+  invalidate();   // 點雲卸載
 }
 
 async function handlePointCloudFile(file) {
@@ -2259,6 +2288,7 @@ async function handlePointCloudFile(file) {
     setHint(`點雲載入失敗：${err?.message ?? err}`);
   } finally {
     URL.revokeObjectURL(url);
+    invalidate();   // 點雲非同步載入完成（成功或失敗都重繪一次）
   }
 }
 
@@ -2912,6 +2942,7 @@ function addMeasurePoint(pt) {
     measurePts = [];
     setHint('角度完成。繼續點三點量下一組（第一點＝頂點），Esc 結束');
   }
+  invalidate();   // 量測點/線/標註增加
 }
 
 // 淨空量測（nearest-surface clearance）：resolve 命中物件 → 頂層 group＋標籤，取世界 AABB
@@ -3151,6 +3182,7 @@ function clipStart(mode, box) {
   setHint(mode === 'box'
     ? '剖切盒啟用：拖曳<b>面手柄</b>調整範圍；VIEW > 清除 結束'
     : '六平面剖切啟用：右側屬性面板逐面開關/滑動；VIEW > 清除 結束');
+  invalidate();   // 剖切啟用
 }
 
 function clipClear() {
@@ -3160,6 +3192,7 @@ function clipClear() {
   renderer.clippingPlanes = [];
   if (document.querySelector('.pg-clip')) renderPropEmpty();
   setHint('剖切已清除');
+  invalidate();   // 剖切清除
 }
 
 // 六平面情境面板（占用右側 Properties——E3D 情境編輯面板行為）
@@ -3243,6 +3276,7 @@ function frameBox(box, dir) {
   controls.target.copy(center);
   camera.far = Math.max(300, dist * 3);
   camera.updateProjectionMatrix();
+  invalidate();   // 視角跳轉（fitAll/視角預設/縮放至選取）
 }
 
 function fitAll() { frameBox(sceneBounds(), camera.position.clone().sub(controls.target).normalize()); }
@@ -5205,6 +5239,7 @@ function refreshRenderLayers(skipLegend) {
   restoreRenderOverride();                            // 拆 X-ray（還原被記錄的材質實例、清 map）
   applyUdaColor(skipLegend);                          // 內部先 restoreUdaColor；UDA 關＝只還原，有開＝在乾淨 base 重套
   if (xrayOn || wireframeOn) applyRenderOverride();   // 再把 X-ray/線框疊到當前材質
+  invalidate();   // 材質層重組（UDA 著色/X-ray/線框）
 }
 
 function syncReviewButtons() {
@@ -5279,6 +5314,7 @@ function flyTo(pos, target) {
     fromT: controls.target.clone(), toT: new THREE.Vector3(...target),
     t: 0,
   };
+  invalidate();   // 視角書籤飛行開始（tween 期間 animate 內持續保持 dirty）
 }
 
 function renderViewsPanel() {
@@ -5355,6 +5391,7 @@ function exitWalk() {
   controls.enabled = true;
   document.getElementById('btn-walk').classList.remove('active');
   setHint('已離開漫遊');
+  invalidate();   // 離開漫遊（FOV/target 復原後補繪一幀）
 }
 document.getElementById('btn-walk').addEventListener('click', enterWalk);
 addEventListener('keydown', (e) => { if (walk.on) walk.keys.add(e.key.toLowerCase()); });
@@ -5687,6 +5724,7 @@ function onResize() {
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
   labelRenderer.setSize(w, h);
+  invalidate();   // 視窗/面板尺寸變更
 }
 addEventListener('resize', onResize);
 new ResizeObserver(onResize).observe(viewport);
@@ -5696,7 +5734,12 @@ const tmpQ = new THREE.Quaternion();
 const tmpDir = new THREE.Vector3();
 function animate() {
   requestAnimationFrame(animate);
-  controls.update();
+  controls.update();   // damping 衰減有位移時會發 'change' → invalidate 保持 dirty
+  // Walk 漫遊／視角書籤飛行期間恢復連續渲染（每幀都在移動相機）
+  if (walk.on || camTween) needsRender = true;
+  walkStep();          // 漫遊移動積分＋書籤飛行補間（需在 render 前，當幀反映位移）
+  if (!needsRender) return;   // 按需渲染：無變化幀直接跳過，省 GPU/電池
+  needsRender = false;
   renderer.render(scene, camera);
   labelRenderer.render(scene, camera);
   // 三軸指示同步相機方位
@@ -5707,8 +5750,6 @@ function animate() {
   camera.getWorldDirection(tmpDir);
   const yaw = Math.atan2(tmpDir.x, -tmpDir.z) * 180 / Math.PI;
   compassRose.setAttribute('transform', `rotate(${-yaw} 48 48)`);
-  // Walk 漫遊移動積分
-  walkStep();
 }
 animate();
 
@@ -5752,5 +5793,6 @@ window.EJ3D_EDITOR = {
   selectEquipment, selectPipe, fitAll, setViewPreset,
   startMeasure, addMeasurePoint, clipStart, clipClear, enterNodeMode,
   duplicateEquipment,
+  forceRender: () => { needsRender = true; },   // 逃生門：console/自動化強制重繪一幀
   V3: (x, y, z) => new THREE.Vector3(x, y, z),
 };

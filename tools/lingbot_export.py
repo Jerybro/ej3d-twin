@@ -88,7 +88,7 @@ def parse_args():
                         "flashinfer is unavailable)")
     # Export
     p.add_argument("--out", type=str, default=None,
-                   help="Output .ply (default static/scans/scan_<timestamp>.ply)")
+                   help="Output .ply (default scans/scan_<timestamp>.ply)")
     p.add_argument("--conf", type=float, default=50.0,
                    help="Confidence percentile filter 0-100: keep points whose "
                         "world_points_conf is above this percentile (default 50)")
@@ -339,7 +339,7 @@ def main():
     if args.out is None:
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         stamp = time.strftime("%Y%m%d_%H%M%S")
-        args.out = os.path.join(repo_root, "static", "scans", f"scan_{stamp}.ply")
+        args.out = os.path.join(repo_root, "scans", f"scan_{stamp}.ply")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type != "cuda":

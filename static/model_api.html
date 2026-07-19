@@ -118,26 +118,26 @@
     </header>
     <h1>模型 API 控制台</h1>
     <p class="tagline">
-      發布制模型註冊表（publish-registry）：把訓練好的模型發布成穩定 <code>model_key</code>，
-      以統一契約對外提供 predict／評估／最佳化端點；數位孿生的每個 block 即由此取用模型，並附使用量與稽核。
+      發布制模型註冊表：把訓練好的模型發布成穩定 <span class="tm" data-t="model_key"><code>model_key</code></span>，
+      以統一契約對外提供 <span class="tm" data-t="predict">predict</span>／評估／最佳化端點；數位孿生的每個 <span class="tm" data-t="block">block</span> 由此取用模型，並附使用量與稽核。
     </p>
 
     <div class="group-title">三層架構</div>
     <div class="layers">
       <div class="layer">
-        <span class="tag">L1 · 資料</span>
+        <span class="tag"><span class="tm" data-t="L1">L1</span> · 資料</span>
         <h3>資料 API</h3>
         <p>資料集與欄位的統一存取層（<code>/agatha/data</code>），模型輸入特徵的單一來源。</p>
       </div>
       <div class="layer">
-        <span class="tag">L2 · 發布註冊</span>
+        <span class="tag"><span class="tm" data-t="L2">L2</span> · 發布註冊</span>
         <h3>模型註冊 API</h3>
-        <p>本頁。把 (dataset_id, model_id) 發布成穩定 <code>model_key</code>，脫鉤後仍可統一 predict／治理開關。</p>
+        <p>本頁。把 (<span class="tm" data-t="dataset_id">dataset_id</span>, <span class="tm" data-t="model_id">model_id</span>) 發布成穩定 <span class="tm" data-t="model_key"><code>model_key</code></span>，脫鉤後仍可統一 <span class="tm" data-t="predict">predict</span>／治理開關。</p>
       </div>
       <div class="layer">
-        <span class="tag">L3 · 孿生綁定</span>
-        <h3>Block 取用</h3>
-        <p>孿生流程的每個 block 以 <code>model_key</code> 呼叫 predict，把模型接進即時模擬與健康度預警。</p>
+        <span class="tag"><span class="tm" data-t="L3">L3</span> · 孿生綁定</span>
+        <h3><span class="tm" data-t="block">Block</span> 取用</h3>
+        <p>孿生流程的每個 <span class="tm" data-t="block">block</span> 以 <span class="tm" data-t="model_key"><code>model_key</code></span> 呼叫 <span class="tm" data-t="predict">predict</span>，把模型接進即時模擬與健康度預警。</p>
       </div>
     </div>
 
@@ -158,33 +158,33 @@
       </div>
     </div>
 
-    <div class="group-title">線上試呼叫 · predict</div>
+    <div class="group-title">線上試呼叫 · <span class="tm" data-t="predict">predict</span></div>
     <div class="tester">
       <div class="tcol">
         <h3>輸入</h3>
-        <div class="sub">選一個模型，填入特徵值後送出（統一 predict 契約）。</div>
+        <div class="sub">選一個模型，填入特徵值後送出（統一 <span class="tm" data-t="predict">predict</span> 契約）。</div>
         <select id="model-select"><option value="">— 選擇模型 —</option></select>
         <div id="feature-inputs"></div>
         <button class="go-btn" id="predict-btn" disabled>送出 predict</button>
-        <div class="hint" id="tester-hint">L3 block 綁定時，只需 <code>model_key</code> ＋ inputs 即可呼叫，無需知道底層 (sid, mid)。</div>
+        <div class="hint" id="tester-hint">孿生 <span class="tm" data-t="block">block</span> 綁定時，只需 <span class="tm" data-t="model_key"><code>model_key</code></span> ＋ <span class="tm" data-t="inputs">inputs</span> 即可呼叫，無需知道底層資料集。</div>
       </div>
       <div class="tcol">
         <h3>回應</h3>
-        <div class="sub">回傳依模型 task 而定（品質→預測值、異常→風險值/門檻）。</div>
+        <div class="sub">回傳依模型 <span class="tm" data-t="task">task</span> 而定（品質→預測值、異常→風險值／門檻）。</div>
         <div id="result-headline"></div>
         <pre class="out" id="result-out">尚未呼叫。</pre>
       </div>
     </div>
 
-    <div class="group-title">API 端點（namespace <code>/agatha</code>）</div>
+    <div class="group-title">API 端點（命名空間 <code>/agatha</code>）</div>
     <div class="panel" style="margin-bottom:18px">
-      <div class="ep"><span class="m post">POST</span><span class="path">/agatha/model/publish/</span><span class="desc">發布 (dataset_id, model_id) → model_key</span></div>
-      <div class="ep"><span class="m get">GET</span><span class="path">/agatha/find_model_list/</span><span class="desc">模型清單（?include_usage=yes 附使用量）</span></div>
-      <div class="ep"><span class="m get">GET</span><span class="path">/agatha/model/{model_key}/capability/</span><span class="desc">能力與 input/output schema（綁定前查）</span></div>
-      <div class="ep"><span class="m post">POST</span><span class="path">/agatha/model/{model_key}/predict/</span><span class="desc">統一推論（L3 核心）</span></div>
+      <div class="ep"><span class="m post">POST</span><span class="path">/agatha/model/publish/</span><span class="desc">發布模型 → 取得模型金鑰</span></div>
+      <div class="ep"><span class="m get">GET</span><span class="path">/agatha/find_model_list/</span><span class="desc">模型清單（可附使用量）</span></div>
+      <div class="ep"><span class="m get">GET</span><span class="path">/agatha/model/{model_key}/capability/</span><span class="desc">能力與輸入／輸出規格（綁定前查）</span></div>
+      <div class="ep"><span class="m post">POST</span><span class="path">/agatha/model/{model_key}/predict/</span><span class="desc">統一推論（孿生區塊綁這支）</span></div>
       <div class="ep"><span class="m post">POST</span><span class="path">/agatha/model/{model_key}/evaluate/</span><span class="desc">評估指標</span></div>
-      <div class="ep"><span class="m post">POST</span><span class="path">/agatha/model/{model_key}/optimize/</span><span class="desc">配方最佳化（reg/hybrid）</span></div>
-      <div class="ep"><span class="m post">POST</span><span class="path">/agatha/model/{model_key}/threshold/</span><span class="desc">異常門檻試算（anomaly）</span></div>
+      <div class="ep"><span class="m post">POST</span><span class="path">/agatha/model/{model_key}/optimize/</span><span class="desc">配方最佳化（迴歸／混合模型）</span></div>
+      <div class="ep"><span class="m post">POST</span><span class="path">/agatha/model/{model_key}/threshold/</span><span class="desc">風險門檻試算（異常偵測）</span></div>
       <div class="ep"><span class="m patch">PATCH</span><span class="path">/agatha/model/{model_key}/enabled/</span><span class="desc">啟用/停用（治理開關）</span></div>
       <div class="ep"><span class="m get">GET</span><span class="path">/agatha/model/{model_key}/usage/</span><span class="desc">單模型使用量與稽核</span></div>
       <div class="ep"><span class="m del">DEL</span><span class="path">/agatha/model/{model_key}/</span><span class="desc">移出註冊表（不刪底層）</span></div>
@@ -193,13 +193,13 @@
     <div class="group-title">呼叫範例</div>
     <div class="example">
       <button class="cp" id="copy-example">複製</button>
-      <pre id="example-code">// L3 block 綁定 — 只需 model_key + inputs
+      <pre id="example-code">// 孿生區塊綁定——只需模型金鑰與輸入值
 const r = await fetch('/agatha/model/&lt;MODEL_KEY&gt;/predict/', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ inputs: { feature_a: 1.23, feature_b: 4.56 } })
 });
-const out = await r.json();   // → 預測值 / 風險值（依 task）</pre>
+const out = await r.json();   // → 預測值／風險值（依模型任務）</pre>
     </div>
 
     <footer class="site">
@@ -208,6 +208,7 @@ const out = await r.json();   // → 預測值 / 風險值（依 task）</pre>
     </footer>
   </div>
 
+  <script src="/static/js/term.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const API = '/agatha';
@@ -237,7 +238,7 @@ const out = await r.json();   // → 預測值 / 風險值（依 task）</pre>
       if (!MODELS.length) {
         tb.innerHTML = `<tr><td colspan="8" class="empty">
           尚無已發布模型。<br>請到「模型工作區」訓練模型後，以 <code>POST /agatha/model/publish/</code> 發布，
-          發布後即會出現在此並可供孿生 block 綁定。</td></tr>`;
+          發布後即會出現在此，並可供孿生區塊（block）綁定。</td></tr>`;
         return;
       }
       tb.innerHTML = MODELS.map((m) => {
@@ -284,18 +285,27 @@ const out = await r.json();   // → 預測值 / 風險值（依 task）</pre>
         const r = await fetch(`${API}/model/${encodeURIComponent(key)}/capability/`);
         cap = await r.json();
       } catch (e) { box.innerHTML = `<div class="hint">無法讀取能力：${esc(e.message)}</div>`; return; }
-      const feats = (cap.input_schema?.features || []).map((f) => f.name);
+      const feats = cap.input_schema?.features || [];
       if (!feats.length) { box.innerHTML = '<div class="hint">此模型無宣告特徵。</div>'; }
       else {
-        box.innerHTML = feats.map((f) =>
-          `<div class="feat-row"><label>${esc(f)}</label><input class="fv" data-feat="${esc(f)}" type="number" step="any" placeholder="0" /></div>`
-        ).join('');
+        // 預填訓練中位數（p50）＋顯示合理範圍（p1~p99）——所有特徵都是必填，
+        // 使用者不必猜值：直接送出就是一筆「典型運轉點」，再自行微調做 what-if。
+        box.innerHTML = feats.map((f) => {
+          const has = f.p50 != null;
+          const rng = (f.p1 != null && f.p99 != null)
+            ? `<span style="color:var(--text2);font-size:10.5px;margin-left:6px">${(+f.p1).toFixed(2)} ~ ${(+f.p99).toFixed(2)}</span>` : '';
+          return `<div class="feat-row"><label>${esc(f.name)}${rng}</label>
+            <input class="fv" data-feat="${esc(f.name)}" type="number" step="any"
+              value="${has ? (+f.p50).toFixed(3) : ''}" placeholder="${has ? '' : '必填'}" /></div>`;
+        }).join('');
       }
       const canPredict = (cap.capabilities || []).includes('predict');
+      const hasStats = feats.some((f) => f.p50 != null);
       $('predict-btn').disabled = false;
-      $('tester-hint').innerHTML = canPredict
+      $('tester-hint').innerHTML = (canPredict
         ? `能力：${(cap.capabilities || []).map((c) => chip(c)).join('')}`
-        : `此模型能力為 ${(cap.capabilities || []).map((c) => chip(c)).join('')}，predict 可能回 409；仍可送出觀察回應。`;
+        : `此模型能力為 ${(cap.capabilities || []).map((c) => chip(c)).join('')}，predict 可能回 409；仍可送出觀察回應。`)
+        + (hasStats ? '<div style="margin-top:6px">欄位已預填訓練中位數（灰字為訓練範圍 P1~P99）——全部特徵皆必填，缺任一項模型無法計算。</div>' : '');
     }
 
     async function doPredict() {

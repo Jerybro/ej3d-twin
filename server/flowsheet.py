@@ -227,6 +227,11 @@ def save_flowsheet(body: dict = Body(...)) -> dict:
             "warn": b.get("warn"),
             "crit": b.get("crit"),
             "ico": str(b.get("ico") or ""),
+            # 拼圖畫布座標（設計器 PI Vision 式擺位）；非法或缺 → None（檢視頁不依賴它）
+            "pos": ({"x": float(b["pos"]["x"]), "y": float(b["pos"]["y"])}
+                    if isinstance(b.get("pos"), dict)
+                    and isinstance(b["pos"].get("x"), (int, float))
+                    and isinstance(b["pos"].get("y"), (int, float)) else None),
             "defaults": {},
         })
 
@@ -287,6 +292,34 @@ def save_flowsheet(body: dict = Body(...)) -> dict:
 
     _topo_order(blocks, conns)  # 成環 → 422
 
+    # --- scenarios（運轉情境）：客戶自訂的具名輸入覆蓋組 {name, overrides:{bid:{feat:val}}} ---
+    # 只收合法 block/feature 與可轉數值的覆蓋；情境是方案的一部分（落盤、全使用者共用）。
+    # 呼叫端沒帶 scenarios 欄位（如設計器只存流程）→ 保留檔上既有情境；明給 [] 才是清空。
+    scen_in = spec.get("scenarios")
+    if scen_in is None and _spec_path(fid).exists():
+        try:
+            scen_in = json.loads(_spec_path(fid).read_text(encoding="utf-8")).get("scenarios")
+        except Exception:  # noqa: BLE001
+            scen_in = None
+    scens: list = []
+    for s in (scen_in or [])[:24]:
+        nm = str((s or {}).get("name") or "").strip()[:24]
+        ov_in = (s or {}).get("overrides") or {}
+        ov: dict = {}
+        if isinstance(ov_in, dict):
+            for bid, fmap in ov_in.items():
+                if bid not in seen_ids or not isinstance(fmap, dict):
+                    continue
+                for f, v in fmap.items():
+                    if f not in feats_of.get(bid, []) or v is None or v == "":
+                        continue
+                    try:
+                        ov.setdefault(bid, {})[f] = float(v)
+                    except (TypeError, ValueError):
+                        continue
+        if nm and ov:
+            scens.append({"name": nm, "overrides": ov})
+
     out = {
         "flowsheet_id": fid,
         "name": str(spec.get("name") or fid),
@@ -294,6 +327,7 @@ def save_flowsheet(body: dict = Body(...)) -> dict:
         "trains": trains,
         "blocks": blocks,
         "connections": conns,
+        "scenarios": scens,
     }
     _spec_path(fid).write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"ok": True, "flowsheet_id": fid, "n_blocks": len(blocks),

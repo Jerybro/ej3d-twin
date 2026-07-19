@@ -153,6 +153,8 @@ def publish_model(request: Request, body: dict = Body(...)) -> dict:
         "capabilities": rec["capabilities"],
         "enabled": rec["enabled"],
         "features": rec["features"],
+        # 同一 (dataset, model) 重複發布 → 沿用既有 key（見 registry.publish 發布索引）
+        "already_published": bool(rec.get("already_published")),
     }
 
 

@@ -105,6 +105,46 @@
   .result.err{display:block;background:rgba(192,57,43,.08);color:var(--red);}
   .result a{color:var(--blue);}
 
+  /* 拼圖畫布（PI Vision 式擺位＋拉線） */
+  .viewseg2{display:inline-flex;border:1px solid var(--bdr);border-radius:7px;overflow:hidden;}
+  .viewseg2 button{border:none;background:var(--white);color:var(--text2);font-size:11.5px;padding:4px 10px;cursor:pointer;font-family:inherit;}
+  .viewseg2 button.on{background:rgba(4,106,251,.08);color:var(--blue);font-weight:700;}
+  #canvas-wrap{position:relative;height:560px;overflow:auto;border:1px solid var(--bdr);border-radius:10px;
+    background:#E9ECF0;}
+  #cv-inner{position:relative;min-width:100%;min-height:100%;
+    background-image:radial-gradient(#D3D8DE 1px,transparent 1px);background-size:16px 16px;}
+  #cv-svg{position:absolute;left:0;top:0;pointer-events:none;}
+  .ctile{position:absolute;width:172px;background:var(--white);border:1px solid var(--bdr);border-radius:10px;
+    padding:8px 10px 9px;box-shadow:0 2px 8px rgba(6,16,39,.08);cursor:grab;user-select:none;touch-action:none;}
+  .ctile.sel{border-color:var(--blue);box-shadow:0 0 0 3px rgba(4,106,251,.15);}
+  .ctile .ct-id{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--blue);}
+  .ctile .ct-kind{float:right;font-size:9.5px;padding:1px 6px;border-radius:5px;background:rgba(4,106,251,.09);color:var(--blue);font-weight:700;}
+  .ctile .ct-kind.an{background:rgba(5,150,105,.1);color:var(--green);}
+  .ctile .ct-nm{font-size:12.5px;font-weight:600;margin-top:3px;line-height:1.35;}
+  .ctile .ct-tg{font-size:10px;color:var(--text2);margin-top:2px;}
+  .ctile .ct-acts{position:absolute;top:-11px;right:6px;display:none;gap:3px;}
+  .ctile:hover .ct-acts{display:flex;}
+  .ctile .ct-acts button{border:1px solid var(--bdr);background:var(--white);border-radius:5px;font-size:10px;
+    cursor:pointer;padding:1px 5px;color:var(--text2);font-family:inherit;box-shadow:0 2px 5px rgba(6,16,39,.1);}
+  .ctile .ct-acts button:hover{color:var(--blue);border-color:var(--blue);}
+  .cport{position:absolute;width:12px;height:12px;border-radius:50%;top:50%;margin-top:-6px;border:2px solid var(--white);
+    box-shadow:0 0 0 1px var(--bdr);}
+  .cport.out{right:-6px;background:var(--green);cursor:crosshair;}
+  .cport.in{left:-6px;background:#C9CFD6;}
+  .ctile:hover .cport.out{transform:scale(1.3);}
+  .cvlbl{position:absolute;transform:translate(-50%,-50%);font-size:10px;background:var(--white);
+    border:1px solid var(--bdr);border-radius:20px;padding:1px 7px;font-family:var(--mono);color:var(--text2);
+    white-space:nowrap;cursor:default;box-shadow:0 2px 6px rgba(6,16,39,.08);}
+  .cvlbl button{border:none;background:none;color:var(--text2);cursor:pointer;font-size:10px;padding:0 0 0 3px;}
+  .cvlbl button:hover{color:var(--red);}
+  .cpick{position:absolute;z-index:20;background:var(--white);border:1px solid var(--bdr);border-radius:9px;
+    box-shadow:0 10px 26px rgba(6,16,39,.16);padding:8px;font-size:12px;max-height:220px;overflow:auto;min-width:210px;}
+  .cpick .ph{font-size:10.5px;color:var(--text2);margin-bottom:5px;line-height:1.6;}
+  .cpick button{display:block;width:100%;text-align:left;border:1px solid transparent;background:none;
+    border-radius:6px;padding:5px 7px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text);}
+  .cpick button:hover{background:rgba(4,106,251,.06);border-color:var(--bdr);}
+  .cv-hint{font-size:11px;color:var(--text2);margin-top:8px;line-height:1.7;}
+
   /* 驗證錯誤欄位高亮：紅框+光暈+輕微搖動；使用者一輸入即消除 */
   @keyframes fe-shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
   .field-err{border-color:var(--red) !important;box-shadow:0 0 0 3px rgba(192,57,43,.16) !important;
@@ -141,8 +181,14 @@
       <div class="phint">模型先在「資料工作台」訓練並發布（<span style="font-family:var(--mono)">POST /agatha/model/publish/</span>）後，就會出現在這裡。</div>
     </div>
     <div class="panel">
-      <h2>② 流程設計（主線與支線，由上而下、由左而右）</h2>
-      <div id="trains-edit"><div class="empty">從左側「＋加入流程」挑模型開始。<br>每個 block 可改編號、名稱、圖示、單位與警戒值。</div></div>
+      <h2 style="display:flex;align-items:center;gap:8px">② 流程設計
+        <span class="viewseg2" style="margin-left:auto">
+          <button id="md-canvas" class="on">⊞ 拼圖畫布</button><button id="md-form">☰ 表單</button>
+        </span>
+      </h2>
+      <div id="canvas-wrap"></div>
+      <div class="cv-hint" id="cv-hint">拖動拼圖擺位（座標會存進方案）；從<b style="color:var(--green)">綠色輸出埠</b>拉線到另一塊＝建立連接（放開後選要餵的輸入特徵）；連接標籤上的 ✕ 可移除；✎ 開表單改名稱／警戒值。</div>
+      <div id="trains-edit"><div class="empty">從左側「＋加入流程」挑模型開始。<br>每個區塊（block）都可改編號、名稱、圖示、單位與警戒值。</div></div>
       <button class="addtrain" id="btn-addtrain">＋ 新增支線</button>
     </div>
     <div class="panel">
@@ -161,6 +207,7 @@
 </div>
 
 <script src="/static/js/tour.js"></script>
+<script src="/static/js/term.js"></script>
 <script>
 // ============================================================================
 // Flowsheet 設計器 — 客戶自組數據孿生流程：
@@ -205,7 +252,9 @@ let MODELS=[];                        // 已發布模型清單
 let TRAINS=[[]];
 let CONNS=[];                         // {from,to,target_input,unit}
 
-function allBlocks(){return TRAINS.flat();}
+// 唯一 block 清單（物件身分去重）：同一塊可出現在多條 train（檢視頁畫成「同主線」參照卡），
+// 但儲存/畫布/驗證都只算一次；兩個「不同物件、相同 id」仍會被重複檢查抓到。
+function allBlocks(){const seen=new Set(),out=[];for(const b of TRAINS.flat()){if(seen.has(b))continue;seen.add(b);out.push(b);}return out;}
 function findBlock(id){return allBlocks().find(b=>b.id===id);}
 
 // ---------------- 模型庫 ----------------
@@ -253,14 +302,14 @@ function addBlock(m){
     id:nextId(), model_key:m.model_key, name:m.display_name||m.model_key,
     ico:guessIcon(m), unit:anom?'/100':'', warn:'', crit:'',
     better:anom?'high':'low', kind:anom?'anomaly':'regression',
-    target:m.target, features:m.features||[], defaults:{},
+    target:m.target, features:m.features||[], defaults:{}, pos:null,
   });
-  renderTrains(); renderConnForm();
+  renderTrains(); renderConnForm(); refreshCanvas();
 }
 function removeBlock(id){
   TRAINS=TRAINS.map(t=>t.filter(b=>b.id!==id));
   CONNS=CONNS.filter(c=>c.from!==id&&c.to!==id);
-  renderTrains(); renderConns(); renderConnForm();
+  renderTrains(); renderConns(); renderConnForm(); refreshCanvas();
 }
 function moveBlock(id,dir){
   for(const t of TRAINS){
@@ -281,7 +330,7 @@ function moveToTrain(id,ti){
 
 function renderTrains(){
   const wrap=$('trains-edit');
-  if(!allBlocks().length){wrap.innerHTML='<div class="empty">從左側「＋加入流程」挑模型開始。<br>每個 block 可改編號、名稱、圖示、單位與警戒值。</div>';return;}
+  if(!allBlocks().length){wrap.innerHTML='<div class="empty">從左側「＋加入流程」挑模型開始。<br>每個區塊（block）都可改編號、名稱、圖示、單位與警戒值。</div>';return;}
   wrap.innerHTML=TRAINS.map((t,ti)=>`
     <div class="train">
       <div class="thead">${ti===0?'主線':'支線 '+ti}
@@ -356,6 +405,7 @@ function renderConns(){
     <button class="cx" data-i="${i}" title="移除連接">✕</button></div>`).join('')
     :'<div class="empty">尚無連接</div>';
   $('conns').querySelectorAll('.cx').forEach(b=>b.onclick=()=>{CONNS.splice(+b.dataset.i,1);renderConns();});
+  if(MODE==='canvas'&&$('cv-paths'))drawPaths();   // 畫布顯示中 → 連線同步重畫
 }
 function renderConnForm(){
   const blocks=allBlocks();
@@ -388,6 +438,162 @@ $('c-add').addEventListener('click',()=>{
 // ---------------- 支線 ----------------
 $('btn-addtrain').addEventListener('click',()=>{TRAINS.push([]);renderTrains();});
 
+// ---------------- 拼圖畫布（PI Vision 式，預設模式） ----------------
+// 與表單共用同一份狀態（TRAINS/CONNS）：畫布管「擺位＋連線」，屬性編輯跳表單卡。
+// 座標存在 block.pos、隨規格檔落盤——客戶的廠區佈局是設計的一部分，全使用者一致。
+let MODE='canvas', SEL=null, DRAG=null, LINK=null;
+const TILE_W=172;
+function setMode(m){
+  MODE=m;
+  $('md-canvas').classList.toggle('on',m==='canvas');
+  $('md-form').classList.toggle('on',m==='form');
+  $('canvas-wrap').style.display=m==='canvas'?'':'none';
+  $('cv-hint').style.display=m==='canvas'?'':'none';
+  $('trains-edit').style.display=m==='form'?'':'none';
+  $('btn-addtrain').style.display=m==='form'?'':'none';
+  if(m==='canvas')drawCanvas(); else renderTrains();
+}
+$('md-canvas').addEventListener('click',()=>setMode('canvas'));
+$('md-form').addEventListener('click',()=>setMode('form'));
+function refreshCanvas(){if(MODE==='canvas')drawCanvas();}
+function ensurePos(){
+  // 沒座標的 block → 依 trains 自動排（列＝train、行＝順序）；之後全由拖曳決定
+  TRAINS.forEach((t,ti)=>t.forEach((b,i)=>{
+    if(!b.pos||!isFinite(+b.pos.x)||!isFinite(+b.pos.y))b.pos={x:34+i*208,y:34+ti*138};
+    else b.pos={x:+b.pos.x,y:+b.pos.y};
+  }));
+}
+function portR(b){return{x:b.pos.x+TILE_W,y:b.pos.y+42};}
+function portL(b){return{x:b.pos.x,y:b.pos.y+42};}
+function connPath(c){
+  const f=findBlock(c.from),t=findBlock(c.to);
+  if(!f||!t||!f.pos||!t.pos)return null;   // 尚未擺位（ensurePos 未跑）→ 先不畫這條
+  const a=portR(f),z=portL(t),dx=Math.max(40,Math.abs(z.x-a.x)/2);
+  return{d:`M${a.x},${a.y} C${a.x+dx},${a.y} ${z.x-dx},${z.y} ${z.x},${z.y}`,mx:(a.x+z.x)/2,my:(a.y+z.y)/2};
+}
+function tileHtml(b){
+  const an=b.kind==='anomaly';
+  return `<div class="ctile${SEL===b.id?' sel':''}" data-bid="${esc(b.id)}" style="left:${b.pos.x}px;top:${b.pos.y}px">
+    <span class="ct-id">${esc(b.id)}</span><span class="ct-kind${an?' an':''}">${an?'健康預警':'預測'}</span>
+    <div class="ct-nm">${esc(b.name)}</div>
+    <div class="ct-tg">${an?'無監督（健康基準）':'目標 '+esc(b.target||'—')}</div>
+    <span class="ct-acts"><button data-cact="edit" title="編輯屬性（開表單卡）">✎</button><button data-cact="del" title="移除此 block">✕</button></span>
+    <span class="cport in" title="輸入端"></span>
+    ${an?'':'<span class="cport out" title="從這裡拉線到另一塊＝建立連接"></span>'}
+  </div>`;
+}
+function drawCanvas(){
+  ensurePos();
+  const blocks=allBlocks();
+  const W=Math.max(640,...blocks.map(b=>b.pos.x+TILE_W+70),0),H=Math.max(510,...blocks.map(b=>b.pos.y+160),0);
+  $('canvas-wrap').innerHTML=`<div id="cv-inner" style="width:${W}px;height:${H}px">
+    <svg id="cv-svg" width="${W}" height="${H}">
+      <defs><marker id="cv-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0L10 5L0 10z" fill="#046AFB"/></marker></defs>
+      <g id="cv-paths"></g>
+      <path id="cv-temp" fill="none" stroke="#046AFB" stroke-dasharray="5 4" stroke-width="2"/>
+    </svg>
+    ${blocks.length?blocks.map(tileHtml).join(''):'<div class="empty" style="padding-top:130px">從左側「＋加入流程」挑模型，拼圖會出現在這裡。</div>'}
+  </div>`;
+  drawPaths();
+  bindCanvas();
+}
+function drawPaths(){
+  const g=$('cv-paths'),inner=$('cv-inner');
+  if(!g||!inner)return;
+  document.querySelectorAll('.cvlbl').forEach(x=>x.remove());
+  g.innerHTML=CONNS.map(c=>{
+    const p=connPath(c);
+    return p?`<path d="${p.d}" fill="none" stroke="#046AFB" stroke-width="2" opacity=".8" marker-end="url(#cv-arr)"/>`:'';
+  }).join('');
+  CONNS.forEach((c,i)=>{
+    const p=connPath(c); if(!p)return;
+    const l=document.createElement('span');l.className='cvlbl';
+    l.style.left=p.mx+'px';l.style.top=p.my+'px';
+    l.innerHTML=`→ ${esc(c.target_input)}<button data-cdel="${i}" title="移除這條連接">✕</button>`;
+    inner.appendChild(l);
+  });
+}
+const snap10=v=>Math.max(0,Math.round(v/10)*10);
+function cvPos(e){const r=$('cv-inner').getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+function bindCanvas(){
+  const inner=$('cv-inner'); if(!inner)return;
+  inner.addEventListener('pointerdown',e=>{
+    closePick();
+    const tile=e.target.closest('.ctile');
+    if(!tile)return;
+    if(e.target.closest('.cport.out')){LINK={from:tile.dataset.bid};e.preventDefault();return;}
+    if(e.target.closest('.ct-acts'))return;
+    const b=findBlock(tile.dataset.bid); if(!b)return;
+    const p=cvPos(e);
+    DRAG={id:b.id,offx:p.x-b.pos.x,offy:p.y-b.pos.y,el:tile};
+    SEL=b.id;
+    document.querySelectorAll('.ctile').forEach(t=>t.classList.toggle('sel',t===tile));
+    e.preventDefault();
+  });
+  inner.addEventListener('click',e=>{
+    const cd=e.target.closest('[data-cdel]');
+    if(cd){CONNS.splice(+cd.dataset.cdel,1);renderConns();drawPaths();return;}
+    const act=e.target.closest('[data-cact]');
+    if(act){
+      const id=e.target.closest('.ctile').dataset.bid;
+      if(act.dataset.cact==='del')removeBlock(id);
+      else gotoFormCard(id);
+    }
+  });
+}
+document.addEventListener('pointermove',e=>{
+  if(DRAG){
+    const b=findBlock(DRAG.id); if(!b)return;
+    const p=cvPos(e);
+    b.pos.x=snap10(p.x-DRAG.offx); b.pos.y=snap10(p.y-DRAG.offy);
+    DRAG.el.style.left=b.pos.x+'px'; DRAG.el.style.top=b.pos.y+'px';
+    drawPaths();
+  }else if(LINK){
+    const f=findBlock(LINK.from); if(!f)return;
+    const a=portR(f),p=cvPos(e);
+    $('cv-temp')?.setAttribute('d',`M${a.x},${a.y} C${a.x+50},${a.y} ${p.x-50},${p.y} ${p.x},${p.y}`);
+  }
+});
+document.addEventListener('pointerup',e=>{
+  if(DRAG)DRAG=null;
+  if(LINK){
+    $('cv-temp')?.setAttribute('d','');
+    const t=document.elementFromPoint(e.clientX,e.clientY)?.closest('.ctile');
+    if(t&&t.dataset.bid!==LINK.from){const p=cvPos(e);openPick(LINK.from,t.dataset.bid,p.x,p.y);}
+    LINK=null;
+  }
+});
+function openPick(from,to,x,y){
+  closePick();
+  const tb=findBlock(to);
+  if(!tb||!(tb.features||[]).length)return;
+  const pk=document.createElement('div');pk.className='cpick';pk.id='cv-pick';
+  const inner=$('cv-inner');
+  pk.style.left=Math.max(4,Math.min(x,inner.clientWidth-220))+'px';
+  pk.style.top=Math.max(4,y)+'px';
+  pk.innerHTML=`<div class="ph"><b>${esc(from)}</b> 的輸出要餵進 <b>${esc(to)}</b> 的哪個輸入特徵？</div>`+
+    tb.features.map(f=>`<button data-pf="${esc(f)}">${esc(f)}</button>`).join('');
+  inner.appendChild(pk);
+  pk.addEventListener('click',e=>{
+    const bt=e.target.closest('[data-pf]'); if(!bt)return;
+    const ti=bt.dataset.pf;
+    if(!CONNS.some(c=>c.from===from&&c.to===to&&c.target_input===ti))
+      CONNS.push({from,to,target_input:ti,unit:findBlock(from)?.unit||''});
+    closePick();renderConns();drawPaths();
+    e.stopPropagation();
+  });
+}
+function closePick(){const p=$('cv-pick');if(p)p.remove();}
+function gotoFormCard(id){
+  setMode('form');
+  requestAnimationFrame(()=>{
+    const el=[...document.querySelectorAll('.bcard .bid')].find(i=>i.value===id);
+    if(el){el.scrollIntoView({block:'center',behavior:'smooth'});
+      el.classList.add('field-err');setTimeout(()=>el.classList.remove('field-err'),1600);}
+  });
+}
+
 // ---------------- 儲存 / 載入 ----------------
 $('btn-save').addEventListener('click',async()=>{
   clearErrs();
@@ -409,7 +615,8 @@ $('btn-save').addEventListener('click',async()=>{
     trains:TRAINS.filter(t=>t.length).map(t=>t.map(b=>b.id)),
     blocks:allBlocks().map(b=>({id:b.id,model_key:b.model_key,name:b.name,ico:b.ico,unit:b.unit,
       warn:b.warn===''?null:+b.warn, crit:b.crit===''?null:+b.crit, better:b.better,
-      output_label:b.kind==='anomaly'?'健康分數':(b.target||''), defaults:b.defaults||{}})),
+      output_label:b.kind==='anomaly'?'健康分數':(b.target||''), defaults:b.defaults||{},
+      pos:(b.pos&&isFinite(+b.pos.x)&&isFinite(+b.pos.y))?{x:+b.pos.x,y:+b.pos.y}:null})),
     connections:CONNS,
   };
   $('btn-save').disabled=true;$('btn-save').textContent='儲存中…';
@@ -449,7 +656,8 @@ $('m-load').addEventListener('change',async()=>{
         unit:b.unit||'',warn:b.warn??'',crit:b.crit??'',better:b.better||'low',
         kind:b.kind||( (m.task==='anomaly')?'anomaly':'regression'),
         target:m.target||b.output_label||'',features:m.features||Object.keys(b.feature_ranges||{}),
-        defaults:b.defaults||{}};
+        defaults:b.defaults||{},
+        pos:(b.pos&&isFinite(+b.pos.x)&&isFinite(+b.pos.y))?{x:+b.pos.x,y:+b.pos.y}:null};
     };
     const blkmap={};(spec.blocks||[]).forEach(b=>blkmap[b.id]=mkBlock(b));
     TRAINS=(spec.trains&&spec.trains.length?spec.trains:[Object.keys(blkmap)]).map(t=>t.map(id=>blkmap[id]).filter(Boolean));
@@ -457,7 +665,7 @@ $('m-load').addEventListener('change',async()=>{
     const rest=Object.values(blkmap).filter(b=>!placed.has(b.id));
     if(rest.length)TRAINS[0].push(...rest);
     CONNS=(spec.connections||[]).map(c=>({from:c.from,to:c.to,target_input:c.target_input,unit:c.unit||''}));
-    renderTrains();renderConns();renderConnForm();
+    renderTrains();renderConns();renderConnForm();refreshCanvas();
     const v=$('btn-view');v.style.display='';v.href=`/static/incinerator_flowsheet.html?id=${encodeURIComponent(fid)}`;
     R.className='result ok';R.textContent=`✓ 已載入 ${fid}，可編輯後重新儲存（同識別碼＝覆存）。`;
   }catch(e){R.className='result err';R.textContent='載入失敗：'+(e.message||e);}
@@ -465,15 +673,16 @@ $('m-load').addEventListener('change',async()=>{
 
 // ?id= 直接進編輯模式
 (async function(){
+  setMode('canvas');                    // 預設拼圖畫布（PI Vision 式）；表單模式保留可切
   await loadModels(); await loadList();
   const qid=new URLSearchParams(location.search).get('id');
   if(qid){$('m-load').value=qid;$('m-load').dispatchEvent(new Event('change'));}
   // 首次進頁導覽（spotlight）
   if(window.Tour)Tour.auto('builder',[
-    {el:'.cols .panel:nth-child(1)',title:'① 模型庫',text:'已發布的模型都在這；按「＋加入流程」變成一個 block。'},
-    {el:'.cols .panel:nth-child(2)',title:'② 流程設計',text:'排主線與支線、改編號名稱圖示、設警戒值——這就是你的廠。'},
-    {el:'.cols .panel:nth-child(3)',title:'③ 模型輸出傳遞',text:'把上游模型的輸出接到下游的輸入特徵——「A 算完、B 跟著變」。'},
-    {el:'.save-btn',title:'儲存即運轉',text:'存檔後後端會驗證並自動補訓練中位數預設值，馬上就能開檢視頁跑。'},
+    {el:'.cols .panel:nth-child(1)',title:'① 模型庫',text:'已發布的模型都在這；按「＋加入流程」變成一張拼圖。'},
+    {el:'#canvas-wrap',title:'② 拼圖畫布',text:'拖動拼圖擺出你的廠；從綠色輸出埠拉線到別塊＝建立連接。要改名稱／警戒值按 ✎ 開表單（右上可切「☰ 表單」回由上而下模式）。'},
+    {el:'.cols .panel:nth-child(3)',title:'③ 模型輸出傳遞',text:'連接也可以用下拉建立——把上游模型的輸出接到下游的輸入特徵，「A 算完、B 跟著變」。'},
+    {el:'.save-btn',title:'儲存即運轉',text:'存檔後後端會驗證並自動補訓練中位數預設值（拼圖座標也一起存），馬上就能開檢視頁跑。'},
   ]);
 })();
 </script>

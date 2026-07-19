@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
+import tempfile
 import urllib.request
 from pathlib import Path
 
@@ -77,6 +80,173 @@ def status() -> dict:
         return {"ok": True}
     except Exception:  # noqa: BLE001
         return {"ok": False, "reason": "本機 AI 引擎未啟動"}
+
+
+# ------------------------------------------------------ 供應商層（嚮導問答用）
+# 架構：介面固定、腦可換——四層擇優：
+#   anthropic（API 金鑰）＞ claude_cli（本機 Claude Code 訂閱登入，免金鑰）
+#   ＞ local（地端 OpenAI 相容端點）＞ none（規則 FAQ 兜底）。
+# 走同一個 ask 契約；預設用「快、便宜」的小模型秒回，深度分析才升級大模型。
+# 金鑰不進版控：ANTHROPIC_API_KEY 放 repo 根 .env（auth._load_dotenv 已會載入）。
+
+_ANTHROPIC_FAST = "claude-haiku-4-5-20251001"   # 快答（嚮導預設）
+_ANTHROPIC_DEEP = "claude-sonnet-5"             # 深度資料分析才用
+
+
+def _anthropic_key() -> str | None:
+    return os.environ.get("ANTHROPIC_API_KEY") or None
+
+
+def _chat_anthropic(system: str, user_msg: str, *, deep: bool = False,
+                    max_tokens: int = 700) -> str:
+    body = {
+        "model": _ANTHROPIC_DEEP if deep else _ANTHROPIC_FAST,
+        "max_tokens": max_tokens,
+        "system": system,
+        "messages": [{"role": "user", "content": user_msg}],
+    }
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(body).encode(), method="POST",
+        headers={"x-api-key": _anthropic_key(), "anthropic-version": "2023-06-01",
+                 "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            out = json.loads(r.read())
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"Claude 無回應（{type(e).__name__}）") from None
+    return "".join(b.get("text", "") for b in out.get("content", [])).strip()
+
+
+# 本機 Claude Code CLI：使用者這台機器已登入的 claude 指令（訂閱額度、免 API 金鑰），
+# 以無頭模式（-p）回答。找不到執行檔或 CLAUDE_CLI=0 → 不啟用；登入過期 → ask 端優雅降級。
+_CLI_UNRESOLVED = ("unresolved",)
+_cli_cmd: tuple[str, ...] | None = _CLI_UNRESOLVED
+
+
+def _claude_cli() -> list[str] | None:
+    global _cli_cmd
+    if os.environ.get("CLAUDE_CLI", "").strip() == "0":
+        return None
+    if _cli_cmd is not _CLI_UNRESOLVED:
+        return list(_cli_cmd) if _cli_cmd else None
+    cand: list[str] | None = None
+    w = shutil.which("claude")
+    if w and not w.lower().endswith((".cmd", ".bat", ".ps1")):
+        cand = [w]                                   # 原生執行檔，直接叫
+    else:
+        # npm 殼層（.cmd/.ps1）不適合 subprocess——改叫殼層背後的真執行檔
+        base = Path(w).parent if w else Path(os.environ.get("APPDATA", "")) / "npm"
+        exe = base / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+        if exe.exists():
+            cand = [str(exe)]
+        elif w:
+            cand = ["cmd", "/c", w]
+    _cli_cmd = tuple(cand) if cand else None
+    return cand
+
+
+def _chat_claude_cli(system: str, user_msg: str, *, deep: bool = False,
+                     timeout: int = 120) -> str:
+    cmd = _claude_cli()
+    if not cmd:
+        raise HTTPException(503, "本機 Claude CLI 不可用")
+    prompt = f"{system}\n\n請直接回答，不要使用任何工具、不要讀寫任何檔案。\n\n{user_msg}"
+    env = {**os.environ}
+    env.pop("ANTHROPIC_API_KEY", None)               # 一律走 CLI 自己的訂閱登入
+    env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    try:
+        r = subprocess.run(
+            cmd + ["-p", prompt, "--output-format", "text",
+                   "--model", "sonnet" if deep else "haiku"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL, timeout=timeout, env=env,
+            cwd=tempfile.gettempdir())
+    except subprocess.TimeoutExpired:
+        raise HTTPException(503, "Claude（本機）回答逾時") from None
+    out = (r.stdout or "").strip()
+    if r.returncode != 0 or not out:
+        err = (r.stderr or r.stdout or "").strip()
+        if "authenticate" in err.lower() or "oauth" in err.lower():
+            raise HTTPException(503, "本機 Claude 登入已過期——在終端機執行 claude、輸入 /login 重新登入即可恢復")
+        raise HTTPException(503, f"Claude（本機）呼叫失敗：{err[-200:] or '無輸出'}")
+    return out
+
+
+def ai_provider() -> str:
+    """目前可用的問答供應商：anthropic ＞ claude_cli ＞ local ＞ none（規則 FAQ 兜底）。"""
+    if _anthropic_key():
+        return "anthropic"
+    if _claude_cli():
+        return "claude_cli"
+    if _api_key():
+        return "local"
+    return "none"
+
+
+# 規則 FAQ 兜底：沒有任何 AI 金鑰時，常見術語仍給得出白話答案（與 term.js 字典同源語意）
+_FAQ = {
+    "r2": "R²（判定係數）：模型解釋目標變異的比例，1 為完美、0 為毫無解釋力。0.95 以上極佳、0.85 以上良好、0.7 以下建議換演算法或補資料。",
+    "rmse": "RMSE（均方根誤差）：預測值與實際值的平均誤差量，單位與目標欄相同——越小越好，直接跟目標的正常波動幅度比。",
+    "mae": "MAE（平均絕對誤差）：預測平均差多少，單位與目標欄相同，比 RMSE 不易被離群值放大。",
+    "相關": "相關強度 |r|：兩欄一起變動的程度，0＝無關、1＝完全同步。目標欄被其他欄解釋得越多，通常越好預測。",
+    "model_key": "模型金鑰：模型發布後取得的固定識別碼，孿生區塊與 API 呼叫都以它指名模型，原始資料刪除也不影響推論。",
+    "守門員": "守門員：檢查每個輸入是否落在模型的訓練域（P1~P99）內；超出即為外插、預測不可信，會以橘／紅警示。",
+    "異常": "異常偵測（健康監測）：以健康運轉資料為基準，計算目前運轉點的偏離程度（風險值）與健康分數，不需要目標欄。",
+    "什麼是目標": "目標欄＝你要模型預測的那一欄（例：產量、品質、排放）。其餘數值欄會當成解釋它的輸入特徵。",
+}
+
+
+def _faq_answer(q: str) -> str | None:
+    ql = q.lower().replace("²", "2")   # 「R²」上標打法也要命中 r2
+    for k, v in _FAQ.items():
+        if k in ql:
+            return v
+    return None
+
+
+_ASK_SYSTEM = (
+    "你是 J.S Process Intelligence（製程數據孿生平台）的建模嚮導助教。"
+    "使用者是製程工程師，可能不懂統計與機器學習。規則："
+    "1) 繁體中文、白話，最多 6 行；2) 先直接回答，再給一個下一步建議；"
+    "3) 只依提供的 context 陳述事實，不編造欄位或數字；不確定就說不確定並指路"
+    "（資料工作台看分布、模型工作區看指標）；4) 不用 markdown 標題與粗體。"
+)
+
+
+@router.post("/ask")
+def ask(body: dict) -> dict:
+    """嚮導問答：body={question, context?, depth?}。
+    context 由前端組（step/檔名/欄位/指標/最近錯誤——結構化餵給模型，這是之後
+    擴充成 MCP 工具層的同一份契約）。depth='deep' 才用大模型。
+    無任何金鑰 → 規則 FAQ 兜底（誠實標示 provider='none'）。"""
+    q = str(body.get("question") or "").strip()
+    if not q:
+        raise HTTPException(422, "需要 question")
+    ctx = body.get("context") or {}
+    provider = ai_provider()
+    if provider == "none":
+        ans = _faq_answer(q)
+        return {"provider": "none",
+                "answer": ans or "這題我需要 AI 引擎才能回答。三種開法：伺服器 .env 加 ANTHROPIC_API_KEY（雲端）；或在這台機器登入 Claude Code（終端機跑 claude → /login）；或啟動地端引擎（AI_API_KEY）。常見術語可以直接問：R²、RMSE、相關、守門員、model_key。"}
+    ctx_lines = [f"{k}: {json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v}"
+                 for k, v in ctx.items() if v not in (None, "", [])]
+    user = ("目前情境：\n" + "\n".join(ctx_lines[:14]) + "\n\n使用者問題：" + q) if ctx_lines else q
+    deep = body.get("depth") == "deep"
+    if provider == "anthropic":
+        return {"provider": "anthropic", "model": _ANTHROPIC_DEEP if deep else _ANTHROPIC_FAST,
+                "answer": _chat_anthropic(_ASK_SYSTEM, user, deep=deep)}
+    if provider == "claude_cli":
+        try:
+            return {"provider": "claude_cli", "model": "sonnet" if deep else "haiku",
+                    "answer": _chat_claude_cli(_ASK_SYSTEM, user, deep=deep)}
+        except HTTPException as e:
+            # 登入過期等狀況 → 不擋使用者：FAQ 兜底並誠實附上修復方法
+            ans = _faq_answer(q)
+            base = ans or "這題需要 AI 引擎才能完整回答。常見術語可以直接問：R²、RMSE、相關、守門員、model_key。"
+            return {"provider": "none", "answer": f"{base}\n（{e.detail}）"}
+    # 地端（OpenAI 相容）：沿用既有 _chat（qwen 白話助教 SYSTEM 由 _ASK_SYSTEM 取代語境）
+    return {"provider": "local", "answer": _chat(user, max_tokens=500)}
 
 
 # ------------------------------------------------------ context 構建

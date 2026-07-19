@@ -231,7 +231,7 @@ export function flowInfoSection(eq) {
   return `
     <div class="info-section">AI 模型（模型服務 L3）</div>
     <table class="info-table">
-      <tr><td>model_key</td><td class="mono">${m.model_key}</td></tr>
+      <tr><td><span class="tm" data-t="model_key">model_key</span></td><td class="mono">${m.model_key}</td></tr>
       <tr><td>類型</td><td>${kindName}（${m.task}）</td></tr>
       ${liveRows}
       <tr><td>能力</td><td style="font-size:11px;color:var(--text-dim)">${(m.capabilities || []).join(' · ')}</td></tr>
@@ -280,7 +280,7 @@ function buildWs(blk) {
         <table class="ws-inputs" id="ws-inputs"></table>
       </div>
       <div>
-        <div class="info-section">what-if 旋鈕（拉動或輸入＝鎖定，下一拍生效）</div>
+        <div class="info-section"><span class="tm" data-t="what-if">what-if</span> 旋鈕（拉動或輸入＝鎖定，下一拍生效）</div>
         <div id="ws-knobs"></div>
         ${canOpt ? `
         <div class="info-section">此模型最佳化</div>
@@ -294,7 +294,7 @@ function buildWs(blk) {
         </div>
         <button class="fo-run" id="ws-run">⚙ 執行最佳化（勾選的變數）</button>
         <div id="ws-out"></div>` : `
-        <div class="panel-hint" style="margin-top:10px">此模型類型（${anom ? '健康預警' : blk.kind}）不提供最佳化；可用上方旋鈕做 what-if。</div>`}
+        <div class="panel-hint" style="margin-top:10px">此模型類型（${anom ? '健康預警' : '預測'}）不提供最佳化；可用上方旋鈕做 <span class="tm" data-t="what-if">what-if</span>。</div>`}
       </div>
     </div>`;
   // 旋鈕
@@ -615,7 +615,7 @@ function setOn(v) {
       { el: '#flow-toggle', title: '智慧運轉', text: '這顆開關把 flowsheet 求解器疊上 3D：每 2 秒全廠重算一次。' },
       { el: '.eq-label.flow-badge', title: '設備即時徽章', text: '標籤直接顯示模型預測值；出訓練域的設備會整台紅色脈動。' },
       { el: '#flow-panel', title: '監看卡', text: '常用旋鈕、全廠 KPI、模型輸出傳遞值都在這張小卡。' },
-      { el: '#left-panel', title: '設備樹', text: '點任一設備開資訊卡，再按「⤢ 放大檢視」進入該 block 的完整工作面（what-if＋最佳化）。' },
+      { el: '#left-panel', title: '設備樹', text: '點任一設備開資訊卡，再按「⤢ 放大檢視」進入該區塊的完整工作面（假設試算＋最佳化）。' },
     ]), 3200);
   }
   else {

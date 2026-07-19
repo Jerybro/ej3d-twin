@@ -225,6 +225,12 @@ def publish(
 
     with _LOCK:
         data = _read()
+        # 發布索引：同一顆 (sid, mid) 已發布過 → 不重複產 key，回既有 record。
+        # （同一訓練成品發兩把 key 只會製造混亂；已發布旗標讓前端能明講「沿用」。）
+        for r in data["models"].values():
+            o = r.get("origin") or {}
+            if o.get("sid") == sid and o.get("mid") == mid:
+                return {**r, "already_published": True}
         model_id = int(data["next_model_id"])
         data["next_model_id"] = model_id + 1
         model_key = f"{h}_{model_id}"
@@ -342,9 +348,16 @@ def capability(model_key: str) -> dict:
     rec = get(model_key)
     task = rec.get("task")
     features = rec.get("features", [])
-    # anomaly 為無監督：required＝全部特徵；其餘一樣依 features 排序全需
+    # anomaly 為無監督：required＝全部特徵；其餘一樣依 features 排序全需。
+    # 附發布時快照的訓練統計（p1/p50/p99）——呼叫端（API 控制台/設計器）可預填
+    # 中位數、顯示合理範圍，使用者不必猜每個特徵該填什麼。
+    stats = rec.get("feature_stats") or {}
     input_schema = {
-        "features": [{"name": f} for f in features],
+        "features": [
+            {"name": f, **({"p1": stats[f].get("p1"), "p50": stats[f].get("p50"),
+                            "p99": stats[f].get("p99")} if f in stats else {})}
+            for f in features
+        ],
         "required": list(features),
     }
     output_schema = _output_schema_of(task)

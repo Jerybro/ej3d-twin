@@ -257,7 +257,7 @@ function optGather() {
 function optRenderResult(r) {
   const kv = (k, v) => `<span class="kv">${escHtml(k)}：<b>${v}</b></span>`;
   const head = `<div class="md-sub" style="margin-bottom:10px">精準度 ${
-    { low: '低', med: '中', high: '高' }[r.precision]}｜可行樣本 ${r.feasible_count.toLocaleString()}${
+    { low: '低', med: '中', high: '高' }[r.precision]}${qi('搜尋預算檔位：低／中／高對應不同的抽樣與細化點數——越高越準、越慢。在上方精準度按鈕切換。')}｜可行樣本 ${r.feasible_count.toLocaleString()}${qi('抽樣的參數組合中，所有目標預測有效、且「落在範圍」目標全數達標的數量。數字很小＝條件太緊或參數搜尋範圍太窄，建議放寬。')}${
     r.warning ? `｜<span style="color:#B8860B">${escHtml(r.warning)}</span>` : ''}</div>`;
   const note = r.note ? `<div class="opt2-note">${escHtml(r.note)}</div>` : '';
   const cards = r.recommendations.map((rec) => {
@@ -274,10 +274,10 @@ function optRenderResult(r) {
     }).join('');
     return `<div class="opt2-rec${rec.rank === 1 ? ' best' : ''}">
       <div class="opt2-rec-head"><span class="opt2-rank">${rec.rank}</span>
-        <span class="opt2-score">綜合分 <b>${(rec.score * 100).toFixed(0)}</b>／100</span>
+        <span class="opt2-score">綜合分 <b>${(rec.score * 100).toFixed(0)}</b>／100${qi('各目標「滿意度」的加權平均（×100）——權重在「選擇最佳化目標」設定。這是推薦組合的排序依據；右側「全目標達標」表示所有範圍條件皆滿足。')}</span>
         <span class="opt2-badge ${rec.feasible ? 'ok' : 'bad'}">${rec.feasible ? '全目標達標' : '未全達標'}</span></div>
       <div class="opt2-kv">${Object.entries(rec.knobs).map(([k, v]) => kv(k, v)).join('')}</div>
-      <table class="opt2-otbl"><tr><th>目標</th><th>條件</th><th>預測值</th><th>滿意度</th><th>達標</th></tr>${rows}</table>
+      <table class="opt2-otbl"><tr><th>目標</th><th>條件</th><th>預測值</th><th>滿意度${qi('單一目標的滿意度（0～100%）：最大化＝預測值落在該目標歷史分佈 P1～P99 的相對位置（越靠 P99 越接近 100%）；最小化反向；落在範圍＝區間內 100%、往兩側坡道遞減、超出資料範圍歸零。')}</th><th>達標${qi('僅對「落在範圍」條件有意義：✓＝預測值在範圍內、✗ 並顯示差距；最大化／最小化沒有達標概念，顯示 —。')}</th></tr>${rows}</table>
     </div>`;
   }).join('');
   // 起始值對照
@@ -285,9 +285,9 @@ function optRenderResult(r) {
   const bRows = b.objectives.map((ob) => `<tr><td>${escHtml(ob.name)}</td><td><b>${ob.pred}</b></td><td>${(ob.desirability * 100).toFixed(0)}%</td></tr>`).join('');
   const baseline = `<div class="opt2-rec" style="opacity:.85">
     <div class="opt2-rec-head"><span class="opt2-score" style="font-weight:600">起始值（目前操作點）</span>
-      <span class="opt2-score" style="margin-left:auto">綜合分 <b>${(b.score * 100).toFixed(0)}</b>／100</span></div>
+      <span class="opt2-score" style="margin-left:auto">綜合分 <b>${(b.score * 100).toFixed(0)}</b>／100${qi('各目標「滿意度」的加權平均（×100）——權重在「選擇最佳化目標」設定。這是推薦組合的排序依據；右側「全目標達標」表示所有範圍條件皆滿足。')}</span></div>
     <div class="opt2-kv">${Object.entries(b.knobs).map(([k, v]) => kv(k, v)).join('')}</div>
-    <table class="opt2-otbl"><tr><th>目標</th><th>預測值</th><th>滿意度</th></tr>${bRows}</table></div>`;
+    <table class="opt2-otbl"><tr><th>目標</th><th>預測值</th><th>滿意度${qi('單一目標的滿意度（0～100%）：最大化＝預測值落在該目標歷史分佈 P1～P99 的相對位置（越靠 P99 越接近 100%）；最小化反向；落在範圍＝區間內 100%、往兩側坡道遞減、超出資料範圍歸零。')}</th></tr>${bRows}</table></div>`;
   $('opt2-out').innerHTML = head + note + cards + baseline;
 }
 $('opt2-add-obj').addEventListener('click', () => { optAddObj(); optRefreshUnion(); });
@@ -301,9 +301,18 @@ $('opt2-run').addEventListener('click', async () => {
   const body = optGather();
   if (!body.objectives.length) { $('opt2-out').innerHTML = '<p class="hint" style="padding:20px">請至少新增一個最佳化目標。</p>'; return; }
   // 前端先擋範圍條件缺值
-  for (const o of body.objectives) {
+  for (const [oi, o] of body.objectives.entries()) {
     if (o.condition.type === 'range' && (Number.isNaN(o.condition.min) || Number.isNaN(o.condition.max))) {
-      $('opt2-out').innerHTML = `<p class="hint" style="padding:20px;color:var(--danger)">目標「${o.name}」的範圍條件需要填下限與上限。</p>`; return;
+      const tr = $('opt2-obj-table').querySelectorAll('tr[data-row]')[oi];
+      tr?.querySelectorAll('[data-obj-min],[data-obj-max]').forEach((inp) => {
+        if (inp.value !== '') return;
+        inp.style.borderColor = 'var(--danger)';
+        inp.style.boxShadow = '0 0 0 3px rgba(192,57,43,.15)';
+        const clear = () => { inp.style.borderColor = ''; inp.style.boxShadow = ''; inp.removeEventListener('input', clear); };
+        inp.addEventListener('input', clear);
+      });
+      tr?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      $('opt2-out').innerHTML = `<p class="hint" style="padding:20px;color:var(--danger)">目標「${o.name}」的範圍條件需要填下限與上限（已標紅）。若只想「越高越好」，把條件改成「最大化」即可。</p>`; return;
     }
   }
   $('opt2-run').disabled = true;
@@ -1831,7 +1840,7 @@ function bindModelApps(m) {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-      pubOut.innerHTML = `✓ 已發布　model_key <code style="font-size:12px">${d.model_key}</code>
+      pubOut.innerHTML = `${d.already_published ? '✓ 之前就發布過——沿用同一把金鑰（不重複產 key）' : '✓ 已發布'}　model_key <code style="font-size:12px">${d.model_key}</code>
         <button class="mini" id="pub-copy" style="width:auto;padding:2px 8px;font-size:11px;cursor:pointer">複製</button>
         　<a href="/static/model_api.html" target="_blank">API 控制台</a>
         　<a href="/static/flowsheet_builder.html" target="_blank">去設計器綁進孿生</a>`;

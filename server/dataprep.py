@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -180,7 +180,11 @@ FORMAT_SPEC = ("上傳格式規定：CSV（UTF-8）或 Excel，第一列為欄�
 
 
 @router.post("/upload")
-async def upload(request: Request, file: UploadFile = File(...)) -> dict:
+async def upload(request: Request, file: UploadFile = File(...),
+                 skiprows: int = Form(0), autoclean: int = Form(0)) -> dict:
+    """skiprows：跳過表頭之後的前 N 列資料（單一「標註列」情境）。
+    autoclean=1：報表救援——剔除所有「非數據列」（重複欄名、段標題、標註列），
+    適用 DCS／最佳化工具匯出的多段報表版面。兩者處理後都做數值修復。"""
     name = (file.filename or "").lower()
     raw = await file.read()
     if len(raw) > 50 * 1024 * 1024:
@@ -194,6 +198,25 @@ async def upload(request: Request, file: UploadFile = File(...)) -> dict:
         raise HTTPException(422, f"解析失敗（{type(e).__name__}）。{FORMAT_SPEC}") from None
     if df.empty:
         raise HTTPException(422, f"檔案無資料。{FORMAT_SPEC}")
+    if skiprows and skiprows > 0:
+        df = df.iloc[int(skiprows):].reset_index(drop=True)
+        if df.empty:
+            raise HTTPException(422, f"跳過 {skiprows} 列後沒有資料了。{FORMAT_SPEC}")
+    if autoclean:
+        # 報表救援：DCS／最佳化工具常匯出「多段報表」（重複欄名列、段標題、標註列
+        # 夾在數據中）。逐列計算「可解析為數字的格子比例」，< 50% 的列視為非數據列
+        # 全部剔除——只留真正的運轉數據列。
+        num_frac = df.apply(lambda row: pd.to_numeric(row, errors="coerce").notna().mean(), axis=1)
+        df = df[num_frac >= 0.5].reset_index(drop=True)
+        if df.empty:
+            raise HTTPException(422, f"智慧清理後沒有可用的數據列——這張表可能全是報表版面。{FORMAT_SPEC}")
+    if (skiprows and skiprows > 0) or autoclean:
+        # 剔除污染來源後做數值修復（≥90% 可解析才轉，避免真文字欄被誤轉）
+        for c in df.columns:
+            if df[c].dtype == object:
+                num = pd.to_numeric(df[c], errors="coerce")
+                if num.notna().mean() >= 0.9:
+                    df[c] = num
 
     # 時間欄偵測與驗證：優先名為 time 的欄，否則前 3 欄中找可解析者
     time_col = None
@@ -218,6 +241,14 @@ async def upload(request: Request, file: UploadFile = File(...)) -> dict:
     # 系統欄 __id__（流水號，Tukey 同款）
     if "__id__" not in df.columns:
         df.insert(0, "__id__", range(1, len(df) + 1))
+
+    # 混型物件欄（同一欄同時有字串與數字——常見於含「標註列」的 DCS 匯出）
+    # 會讓 parquet 落盤直接炸 500。一律轉字串保存（NaN 保留、資料不遺失）；
+    # 使用者之後用 skiprows 跳過標註列重讀時，上方的數值修復會把欄轉回數字。
+    for c in df.columns:
+        if df[c].dtype == object:
+            df[c] = df[c].map(
+                lambda v: v if v is None or (isinstance(v, float) and pd.isna(v)) else str(v))
 
     sid = uuid.uuid4().hex[:8]
     df.to_parquet(DATA_DIR / f"{sid}.parquet")

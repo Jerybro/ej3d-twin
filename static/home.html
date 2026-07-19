@@ -228,6 +228,7 @@
         <h2 data-i18n="j1.h">建模型</h2>
         <p data-i18n="j1.p">從製程數據到可用的模型服務。</p>
         <div class="jsteps">
+          <a href="/static/wizard.html" style="border-color:var(--blue);background:rgba(4,106,251,.04)"><span class="n">✨</span><span data-i18n="j1.s0"><b>AI 嚮導帶你做完（建議）</b></span></a>
           <a href="/data"><span class="n">1</span><span data-i18n="j1.s1">上傳數據（CSV／Excel）</span></a>
           <a href="/data?view=model"><span class="n">2</span><span data-i18n="j1.s2">自動建模與評估</span></a>
           <a href="/static/model_api.html"><span class="n">3</span><span data-i18n="j1.s3">發布成模型 API</span></a>
@@ -423,7 +424,7 @@
           <svg viewBox="0 0 24 24"><path d="M8 3L4 7l4 4"/><path d="M16 3l4 4-4 4"/><path d="M13 15l-2 6"/></svg>
           <h2 data-i18n="c.mapi.h">模型 API 控制台</h2>
         </div>
-        <p data-i18n="c.mapi.p">發布制模型註冊表（publish-registry）：訓練好的模型發布成穩定 model_key，統一 predict／評估／最佳化端點對外服務，附使用量與稽核。數據孿生的每個 block 即由此取用（L3）。</p>
+        <p data-i18n="c.mapi.p">發布制模型註冊表：訓練好的模型發布成穩定 <span class="tm" data-t="model_key">model_key</span>，統一 <span class="tm" data-t="predict">predict</span>／評估／最佳化端點對外服務，附使用量與稽核。數據孿生的每個 <span class="tm" data-t="block">block</span> 由此取用。</p>
         <span class="go" data-i18n="c.mapi.go">進入 API 控制台</span>
       </a>
     </div>
@@ -437,6 +438,7 @@
   </div>
   <script src="/static/js/i18n.js"></script>
   <script src="/static/js/tour.js"></script>
+  <script src="/static/js/term.js"></script>
   <script>
     // 首頁字典（zh 直接取 DOM 原文為預設，這裡只提供 en）
     JSI18N.register({
@@ -461,7 +463,7 @@
       'ai.ph': { en: 'Tell me what you want to do — e.g. "I have compressor data and want health early-warning"' },
       'ai.go': { en: 'Take me there' },
       'j1.h': { en: 'Build models' }, 'j1.p': { en: 'From process data to a served model.' },
-      'j1.s1': { en: 'Upload data (CSV / Excel)' }, 'j1.s2': { en: 'Auto-model and evaluate' }, 'j1.s3': { en: 'Publish as model API' },
+      'j1.s0': { en: 'AI wizard walks you through (recommended)' }, 'j1.s1': { en: 'Upload data (CSV / Excel)' }, 'j1.s2': { en: 'Auto-model and evaluate' }, 'j1.s3': { en: 'Publish as model API' },
       'j2.h': { en: 'Compose a twin' }, 'j2.p': { en: 'Assemble models into a running plant.' },
       'j2.s1': { en: 'Flowsheet builder: pick models, wire connections' }, 'j2.s2': { en: 'Engineering view: solve every tick' }, 'j2.s3': { en: 'Bind a 3D scene: smart operation' },
       'j3.h': { en: 'Operate & watch' }, 'j3.p': { en: 'The page you come back to daily.' },
@@ -520,6 +522,7 @@
     // ---- AI 引導列（階段 1：規則路由——零成本、不會胡說；階段 2 再接 LLM+RAG） ----
     // 規則由「專門」到「通用」排序：先命中專門意圖（健康/最佳化/P&ID），再落到通用（上傳/建模）。
     const ROUTES = [
+      { re: /嚮導|帶我|一路|不會|新手|怎麼開始|從頭/i, url: '/static/wizard.html', t: 'AI 建模嚮導——上傳資料，我一步步帶你做到可呼叫的模型服務' },
       { re: /健康|預警|PHM|異常|振動|軸承|劣化/i, url: '/static/block_health.html', t: '設備健康預警示範（壓縮機 K-101，模型由 API 供給）' },
       { re: /最佳化|優化|优化|配方|藥劑|節省/i, url: '/static/incinerator_flowsheet.html', t: '先選方案 → 3D 智慧運轉——點設備 →「⤢ 放大檢視」→ 此模型最佳化；或監看卡「全廠聯合最佳化」' },
       { re: /P&?ID|圖面|圖紙/i, url: '/twin/pid', t: 'P&ID 工作流——上傳圖面，OCR 自動生成 3D 廠區草稿' },

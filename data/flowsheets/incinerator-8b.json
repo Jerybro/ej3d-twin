@@ -23,12 +23,16 @@
    "name": "爐排燃燒爐",
    "model_key": "1058a8d8_10013",
    "kind": "regression",
-   "output_label": "生成 NOx",
+   "output_label": "raw_NOx_mg_Nm3",
    "unit": "mg/Nm³",
    "better": "low",
    "warn": 340,
    "crit": 385,
-   "ico": "🔥",
+   "ico": "flame",
+   "pos": {
+    "x": 34.0,
+    "y": 34.0
+   },
    "defaults": {
     "waste_feed_t_h": 20.03,
     "waste_LHV_kJ_kg": 9456.5,
@@ -43,12 +47,16 @@
    "name": "SNCR 脫硝",
    "model_key": "d99cf30d_10014",
    "kind": "regression",
-   "output_label": "出口 NOx",
+   "output_label": "outlet_NOx_mg_Nm3",
    "unit": "mg/Nm³",
    "better": "low",
    "warn": 230,
    "crit": 300,
-   "ico": "💨",
+   "ico": "spray",
+   "pos": {
+    "x": 360.0,
+    "y": 120.0
+   },
    "defaults": {
     "urea_inject_L_h": 121.4,
     "furnace_temp_C": 928.65,
@@ -60,12 +68,16 @@
    "name": "餘熱鍋爐",
    "model_key": "22dbd537_10015",
    "kind": "regression",
-   "output_label": "蒸汽流量",
+   "output_label": "steam_flow_t_h",
    "unit": "t/h",
    "better": "high",
    "warn": 52,
    "crit": 46,
-   "ico": "♨️",
+   "ico": "flame",
+   "pos": {
+    "x": 450.0,
+    "y": 34.0
+   },
    "defaults": {
     "heat_release_MW": 52.675,
     "feedwater_t_h": 61.865,
@@ -78,12 +90,16 @@
    "name": "半乾式洗煙塔",
    "model_key": "f56b7b69_10016",
    "kind": "regression",
-   "output_label": "出口 HCl",
+   "output_label": "outlet_HCl_mg_Nm3",
    "unit": "mg/Nm³",
    "better": "low",
    "warn": 340,
    "crit": 420,
-   "ico": "🌫️",
+   "ico": "scrubber",
+   "pos": {
+    "x": 658.0,
+    "y": 34.0
+   },
    "defaults": {
     "lime_slurry_kg_h": 180.65,
     "water_inject_m3_h": 4.02,
@@ -97,12 +113,16 @@
    "name": "活性碳吸附",
    "model_key": "6f2e592c_10017",
    "kind": "regression",
-   "output_label": "出口 Hg",
+   "output_label": "outlet_Hg_ug_Nm3",
    "unit": "µg/Nm³",
    "better": "low",
    "warn": 15,
    "crit": 25,
-   "ico": "⚫",
+   "ico": "carbon",
+   "pos": {
+    "x": 866.0,
+    "y": 34.0
+   },
    "defaults": {
     "carbon_inject_kg_h": 12.08,
     "inlet_Hg_ug_Nm3": 40.5,
@@ -117,7 +137,13 @@
    "output_label": "健康分數",
    "unit": "/100",
    "better": "high",
-   "ico": "🧹",
+   "warn": null,
+   "crit": null,
+   "ico": "bag",
+   "pos": {
+    "x": 1074.0,
+    "y": 34.0
+   },
    "defaults": {
     "bag_dP_mbar": 17.82,
     "collection_eff_pct": 99.909,
@@ -133,7 +159,13 @@
    "output_label": "健康分數",
    "unit": "/100",
    "better": "high",
-   "ico": "🌀",
+   "warn": null,
+   "crit": null,
+   "ico": "fan",
+   "pos": {
+    "x": 1282.0,
+    "y": 34.0
+   },
    "defaults": {
     "fan_motor_current_A": 113.9,
     "fan_vibration_mm_s": 2.995,
@@ -146,12 +178,16 @@
    "name": "汽輪發電機",
    "model_key": "facdf2a4_10020",
    "kind": "regression",
-   "output_label": "發電量",
+   "output_label": "power_MW",
    "unit": "MW",
    "better": "high",
    "warn": 14,
    "crit": 11,
-   "ico": "⚡",
+   "ico": "turbine",
+   "pos": {
+    "x": 242.0,
+    "y": 172.0
+   },
    "defaults": {
     "inlet_steam_temp_C": 395.4,
     "condenser_vac_kPa": -91.97
@@ -173,5 +209,6 @@
    "target_input": "inlet_steam_t_h",
    "unit": "t/h"
   }
- ]
+ ],
+ "scenarios": []
 }

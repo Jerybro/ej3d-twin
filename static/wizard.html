@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI 建模嚮導｜J.S Process Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --blue:#046AFB; --bg:#F6F7FA; --white:#fff; --bdr:#DBDDE0;
+    --text:#061027; --text2:#555; --green:#059669; --green-deep:#052E22;
+    --amber:#B45309; --red:#C0392B;
+    --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-size:14px;
+       font-family:Inter,"Noto Sans TC","Microsoft JhengHei",sans-serif;}
+  .wrap{max-width:820px;margin:0 auto;padding:22px 24px 120px;}
+  header.site{display:flex;align-items:center;gap:12px;margin-bottom:4px;}
+  .brand{display:inline-flex;align-items:center;justify-content:center;height:30px;padding:0 10px;
+         border-radius:8px;background:var(--green-deep);color:#fff;font-size:13px;font-weight:600;letter-spacing:.5px;}
+  .logo{font-size:19px;font-weight:600;}
+  .site-sub{color:var(--text2);font-size:13px;}
+  .hbtn{margin-left:auto;font-size:13px;color:var(--text);text-decoration:none;border:1px solid var(--bdr);
+        border-radius:7px;padding:7px 12px;background:var(--white);}
+  .hbtn:hover{border-color:var(--blue);color:var(--blue);}
+  h1{font-size:21px;font-weight:600;margin:12px 0 3px;}
+  .sub{color:var(--text2);font-size:13px;margin-bottom:14px;line-height:1.8;}
+
+  /* 進度列＋回上一步 */
+  .stepbar{display:flex;gap:10px;align-items:center;margin-bottom:16px;}
+  .steps{flex:1;display:flex;gap:6px;align-items:center;background:var(--white);border:1px solid var(--bdr);
+         border-radius:10px;padding:10px 16px;font-size:12.5px;color:var(--text2);flex-wrap:wrap;}
+  .steps .st{display:flex;align-items:center;gap:6px;}
+  .steps .st .dot{width:20px;height:20px;border-radius:50%;background:var(--bg);border:1px solid var(--bdr);
+       display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--text2);}
+  .steps .st.on .dot{background:var(--blue);border-color:var(--blue);color:#fff;}
+  .steps .st.done .dot{background:rgba(5,150,105,.12);border-color:var(--green);color:var(--green);}
+  .steps .st.on{color:var(--blue);font-weight:700;}
+  .steps .sep{color:#C9CFD6;}
+  #btn-back{border:1px solid var(--bdr);border-radius:10px;background:var(--white);color:var(--text2);
+       font-size:12.5px;padding:10px 14px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+  #btn-back:hover:not(:disabled){border-color:var(--blue);color:var(--blue);}
+  #btn-back:disabled{opacity:.4;cursor:default;}
+
+  /* 對話卡 */
+  #flow{display:flex;flex-direction:column;gap:12px;}
+  .ai{background:var(--white);border:1px solid var(--bdr);border-radius:12px;padding:15px 17px;
+      display:flex;gap:11px;animation:fadein .25s ease;}
+  @keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .ai .ic{width:30px;height:30px;border-radius:9px;background:rgba(4,106,251,.08);flex:none;
+      display:flex;align-items:center;justify-content:center;}
+  .ai .ic svg{width:17px;height:17px;stroke:var(--blue);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+  .ai .bd{flex:1;min-width:0;}
+  .ai .tx{font-size:14px;line-height:1.85;}
+  .ai .tx b{color:var(--blue);}
+  .ai .tx code{font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--bdr);
+      border-radius:5px;padding:1px 6px;}
+  .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px;}
+  .acts button,.acts label.upl{border:1px solid var(--bdr);border-radius:8px;background:var(--white);color:var(--text);
+      font-size:13px;padding:8px 15px;cursor:pointer;font-family:inherit;}
+  .acts button.pri{border-color:var(--blue);color:var(--blue);background:rgba(4,106,251,.05);font-weight:600;}
+  .acts button.stop{border-color:rgba(192,57,43,.5);color:var(--red);}
+  .acts button:hover,.acts label.upl:hover{border-color:var(--blue);color:var(--blue);}
+  .acts button:disabled{opacity:.5;cursor:default;}
+  .acts select,.acts input[type=text]{border:1px solid var(--bdr);border-radius:8px;padding:8px 10px;
+      font-size:13px;font-family:inherit;color:var(--text);background:var(--white);max-width:280px;}
+  .me{align-self:flex-end;background:rgba(4,106,251,.07);border:1px solid rgba(4,106,251,.2);
+      border-radius:11px;padding:7px 14px;font-size:12.5px;color:var(--blue);animation:fadein .2s ease;}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(4,106,251,.25);
+      border-top-color:var(--blue);border-radius:50%;animation:sp 1s linear infinite;vertical-align:-2px;margin-right:6px;}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .metric{display:inline-block;background:var(--bg);border:1px solid var(--bdr);border-radius:7px;
+      padding:3px 10px;font-size:12px;margin:2px 4px 2px 0;font-variant-numeric:tabular-nums;}
+  .metric b{font-size:13px;}
+  .ok{color:var(--green);} .warn{color:var(--amber);} .bad{color:var(--red);}
+  .keybox{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--bdr);
+      border-radius:8px;padding:8px 12px;margin-top:9px;font-family:var(--mono);font-size:13px;}
+  .keybox button{border:none;background:none;color:var(--blue);cursor:pointer;font-size:12px;font-family:inherit;text-decoration:underline;}
+  .fmt{background:var(--bg);border:1px solid var(--bdr);border-radius:8px;padding:9px 12px;
+      font-size:12.5px;line-height:1.9;margin-top:9px;color:var(--text2);}
+
+  /* 皮爾森相關熱力圖（選目標卡內嵌） */
+  .heat{margin-top:10px;background:var(--bg);border:1px solid var(--bdr);border-radius:8px;
+      padding:10px;overflow:auto;}
+  .heat .lg{font-size:11.5px;color:var(--text2);margin-top:6px;line-height:1.8;}
+  #heat-tip{position:fixed;z-index:99998;background:#061027;color:#F2F5F9;font-size:11.5px;
+      padding:5px 9px;border-radius:6px;pointer-events:none;display:none;
+      font-variant-numeric:tabular-nums;box-shadow:0 6px 18px rgba(6,16,39,.3);}
+
+  /* 問答列（固定底部） */
+  #askbar{position:fixed;left:0;right:0;bottom:0;background:rgba(255,255,255,.96);border-top:1px solid var(--bdr);
+      backdrop-filter:blur(6px);z-index:30;}
+  #askbar .in{max-width:820px;margin:0 auto;padding:10px 24px;display:flex;gap:9px;align-items:center;}
+  #askbar svg{width:16px;height:16px;stroke:var(--blue);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none;}
+  #ask-q{flex:1;border:1px solid var(--bdr);border-radius:8px;padding:9px 12px;font:inherit;font-size:13.5px;color:var(--text);}
+  #ask-go{border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:13px;font-weight:600;
+      padding:9px 16px;cursor:pointer;font-family:inherit;}
+  #ask-go:disabled{background:#9db4d8;}
+  #askbar .hint{max-width:820px;margin:0 auto;padding:0 24px 8px;font-size:11px;color:var(--text2);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="site">
+    <span class="brand">J.S</span>
+    <span class="logo">Process Intelligence</span>
+    <span class="site-sub">AI 建模嚮導</span>
+    <a class="hbtn" href="/">← 回首頁</a>
+  </header>
+  <h1>AI 建模嚮導</h1>
+  <div class="sub">從資料到會運轉的模型服務。</div>
+
+  <div class="stepbar">
+    <div class="steps" id="steps"></div>
+    <button id="btn-back" disabled>↩ 回上一步</button>
+  </div>
+  <div id="flow"></div>
+</div>
+
+<div id="askbar">
+  <div class="in">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+    <input id="ask-q" placeholder="有看不懂的隨時問我——例：R² 是什麼？我的資料為什麼不能建模？" />
+    <button id="ask-go">問</button>
+  </div>
+  <div class="hint" id="ask-hint">由 AI 助教回答（雲端金鑰或本機 Claude 登入皆可；都沒有時以內建說明兜底）</div>
+</div>
+
+<script src="/static/js/term.js"></script>
+<script>
+// ============================================================================
+// AI 建模嚮導 v3 — 「先問目的，再談資料」：
+//   ① 想做什麼（意圖最先：預測／健康監測／找最佳條件／還不確定）
+//   → ② 讀資料（上傳/選現有；引導語隨意圖客製；壞格式可一鍵智慧清理重讀）
+//   → ③ 選目標（讀得懂標註列就直接建議；健康監測不需目標、自動跳過；
+//                「還不確定」的人在這裡帶著資料摘要回頭補答意圖）
+//   → ④ 建模（可停止等待）→ ⑤ 發布 → ⑥ 綁孿生
+// 每一步可「回上一步」；底部問答列隨時解惑
+//（/api/ai/ask：API 金鑰 Claude／本機 Claude CLI／地端／FAQ 四層擇優）。
+// 決策為規則啟發式——之後換 LLM 只動「建議產生器」，介面契約不變。
+// ============================================================================
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const SPARK='<svg viewBox="0 0 24 24"><path d="M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 15.6l-1.7-4.6L6 9.3l4.3-1.7z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>';
+
+const STEPS=['想做什麼','讀資料','選目標','建模','發布','綁孿生'];
+let stepNow=0;
+function renderSteps(){
+  // done 除了「走過的」（i<stepNow）還含 W.done——「還不確定」的人先讀資料、
+  // 再回頭補答意圖時，讀資料要保持 ✓ 而意圖回到進行中
+  const isDone=i=>i<stepNow||(W.done||[]).includes(i);
+  $('steps').innerHTML=STEPS.map((s,i)=>`
+    <span class="st ${i===stepNow?'on':isDone(i)?'done':''}"><span class="dot">${i===stepNow?i+1:isDone(i)?'✓':i+1}</span>${s}</span>
+    ${i<STEPS.length-1?'<span class="sep">—</span>':''}`).join('');
+}
+function setStep(i){stepNow=i;renderSteps();}
+
+// ---------------- 對話卡工具 ----------------
+function aiCard(html){
+  const d=document.createElement('div');d.className='ai';
+  d.innerHTML=`<div class="ic">${SPARK}</div><div class="bd"><div class="tx">${html}</div><div class="acts"></div></div>`;
+  $('flow').appendChild(d);d.scrollIntoView({block:'end',behavior:'smooth'});
+  return d;
+}
+function acts(card,btns){
+  const box=card.querySelector('.acts');box.innerHTML='';
+  for(const b of btns){
+    if(b.el){box.appendChild(b.el);continue;}
+    const el=document.createElement('button');
+    if(b.pri)el.className='pri';
+    if(b.stop)el.className='stop';
+    el.textContent=b.label;
+    el.addEventListener('click',()=>{
+      if(b.keep!==true){[...box.querySelectorAll('button,select,label,input')].forEach(x=>x.disabled=true);}
+      b.onClick(el,card);
+    });
+    box.appendChild(el);
+  }
+  return card;
+}
+function said(text){const d=document.createElement('div');d.className='me';d.textContent=text;$('flow').appendChild(d);}
+function setTx(card,html){card.querySelector('.tx').innerHTML=html;}
+
+// ---------------- 全域狀態＋回上一步（歷史堆疊） ----------------
+const W={sid:null,meta:null,pendingFile:null,cols:[],corr:null,hints:null,intent:null,
+        target:null,task:null,features:[],mid:null,model:null,modelKey:null,algos:null,lastError:null,done:[]};
+const HIST=[];   // [{fn,args,flowLen,snap}]：每步進入時快照，back=truncate+還原+重跑
+let pollStop=false;
+function snapW(){const{algos,pendingFile,...rest}=W;return JSON.parse(JSON.stringify(rest));}
+function enter(fn,args){
+  HIST.push({fn,args:args??null,flowLen:$('flow').children.length,snap:snapW()});
+  $('btn-back').disabled=HIST.length<2;
+  fn(args);
+}
+$('btn-back').addEventListener('click',()=>{
+  if(HIST.length<2)return;
+  pollStop=true;                       // 建模輪詢中回上一步＝停止等待
+  HIST.pop();
+  const prev=HIST.pop();
+  while($('flow').children.length>prev.flowLen)$('flow').lastChild.remove();
+  Object.assign(W,prev.snap);
+  enter(prev.fn,prev.args);
+});
+
+// ============================================================ ① 想做什麼（意圖最先）
+function stepIntent0(){
+  setStep(0);
+  const card=aiCard('嗨，我是建模嚮導。先聊一下<b>你想達成什麼</b>——方向定了，後面每一步我都照它幫你安排（資料下一步再給我）。用人話選就好：');
+  acts(card,[
+    {label:'📈 預測一個數值（產量、品質、排放…）',pri:true,onClick:()=>{
+      said('我要預測一個數值');W.intent='predict';W.done=[0];enter(stepData);}},
+    {label:'🩺 監測設備健不健康（異常提前預警）',onClick:()=>{
+      said('我要監測設備健康');W.intent='health';W.target=null;W.task='anomaly';W.done=[0];enter(stepData);}},
+    {label:'🎛 找最佳操作條件（省藥劑、拉產量）',onClick:()=>{
+      said('我要找最佳操作條件');W.intent='optimize';W.done=[0];enter(stepData);}},
+    {label:'🔍 還不確定——先看資料再決定',onClick:()=>{
+      said('還不確定，先看資料');W.intent=null;enter(stepData);}},
+  ]);
+}
+
+// ============================================================ ② 讀資料
+const FMT_GUIDE=`<div class="fmt">📋 資料格式怎麼準備：<br>
+  ・第一列＝<b>欄位名稱</b>（感測點名），之後每一列＝一個時間點的讀值<br>
+  ・至少要有一個<b>數值欄</b>；建議含時間欄（名為 time）<br>
+  ・「標註列」（寫「目標／調整參數」那種）我看得懂，可以幫你跳過<br>
+  ・支援 CSV／Excel（.xlsx），50MB 以內</div>`;
+
+function stepData(){
+  setStep(1);
+  const lead={
+    predict:'要做<b>預測</b>：資料裡要有你想預測的那個「結果欄」（產量、品質、排放…都行）。',
+    health:'要做<b>健康監測</b>：給我一批「多半正常運轉」的資料當基準——不需要目標欄，之後偏離基準就預警。',
+    optimize:'要<b>找最佳操作條件</b>：資料裡要有「結果欄」，也要有你平常會動的參數欄。',
+  }[W.intent]||'先看資料也行——我讀完給你摘要，我們再一起決定拿它做什麼。';
+  const card=aiCard(`${lead}<br>上傳一批<b>製程運轉資料</b>（CSV／Excel），或挑一個之前上傳過的資料集，我帶你一路做到「可呼叫的模型服務」。`);
+  const upl=document.createElement('label');upl.className='upl';upl.textContent='📤 上傳新資料';
+  const fi=document.createElement('input');fi.type='file';fi.accept='.csv,.xlsx,.xls,.xlsm';fi.style.display='none';
+  upl.appendChild(fi);
+  fi.addEventListener('change',()=>{if(fi.files[0])doUpload(fi.files[0],card,{});});
+  const sel=document.createElement('select');sel.innerHTML='<option value="">…載入現有資料集…</option>';
+  fetch('/api/data/sessions').then(r=>r.ok?r.json():[]).then(list=>{
+    sel.innerHTML='<option value="">— 用現有資料集 —</option>'+
+      (list||[]).map(s=>`<option value="${esc(s.sid)}">${esc(s.filename||s.sid)}（${(s.n_rows||0).toLocaleString()} 筆）</option>`).join('');
+  }).catch(()=>{sel.innerHTML='<option value="">（資料集清單載入失敗）</option>';});
+  sel.addEventListener('change',()=>{if(sel.value)pickExisting(sel.value,sel.options[sel.selectedIndex].text,card);});
+  const fmtBtn=document.createElement('button');fmtBtn.textContent='看格式說明';
+  fmtBtn.addEventListener('click',()=>{fmtBtn.remove();card.querySelector('.tx').insertAdjacentHTML('beforeend',FMT_GUIDE);});
+  acts(card,[{el:upl},{el:sel},{el:fmtBtn}]);
+}
+async function doUpload(file,card,opts){
+  opts=opts||{};
+  said(`上傳 ${file.name}${opts.autoclean?'（智慧清理重讀）':opts.skiprows?`（跳過前 ${opts.skiprows} 列）`:''}`);
+  W.pendingFile=file;
+  setTx(card,`<span class="spin"></span>正在讀 <b>${esc(file.name)}</b> …`);card.querySelector('.acts').innerHTML='';
+  const fd=new FormData();fd.append('file',file);
+  if(opts.skiprows)fd.append('skiprows',String(opts.skiprows));
+  if(opts.autoclean)fd.append('autoclean','1');
+  let r;
+  try{
+    const resp=await fetch('/api/data/upload',{method:'POST',body:fd});
+    r=await resp.json();
+    if(!resp.ok)throw new Error(r.detail||('HTTP '+resp.status));
+  }catch(e){
+    W.lastError=String(e.message||e);
+    setTx(card,`讀取失敗：<span class="bad">${esc(W.lastError)}</span>${FMT_GUIDE}
+      <div style="margin-top:8px;font-size:12.5px;color:var(--text2)">最常見的原因：第一列不是欄位名稱、整張表沒有數值欄、或工作表是樞紐/報表版面。可以先在資料工作台手動整理，或修好檔案再上傳。</div>`);
+    acts(card,[
+      {label:'重新選檔',pri:true,onClick:()=>{card.remove();enter(stepData);}},
+      {label:'去資料工作台手動處理',keep:true,onClick:()=>window.open('/data','_blank')},
+    ]);
+    return;
+  }
+  W.sid=r.sid;W.meta=r;
+  // ---- 版面偵測：標註列／重複欄名／段標題混在數據中 → 建議智慧清理重讀 ----
+  if(!opts.skiprows&&!opts.autoclean){
+    const diag=sniffMess(r.preview||[]);
+    if(diag.suspect){
+      W.hints=diag.hints;
+      setTx(card,`讀完了，但這張表<b>混了報表版面</b>：數據列之間夾著${diag.kinds.map(l=>`「${esc(l)}」`).join('、')}這類非數據列，害大部分欄位被當成文字。<br>要我<b>智慧清理重新讀</b>嗎？（把非數據列全部剔除、數值自動修復）${diag.hints?`<br>另外我讀懂了你的標註：<b>目標＝${esc(diag.hints.target.join('、'))}</b>${diag.hints.knobs.length?`、調整參數＝${esc(diag.hints.knobs.slice(0,4).join('、'))}${diag.hints.knobs.length>4?'…':''}`:''}，之後可以直接照它設定。`:''}`);
+      acts(card,[
+        {label:'智慧清理重新讀（建議）',pri:true,onClick:()=>doUpload(file,card,{autoclean:1})},
+        {label:'就照原樣繼續',onClick:()=>afterData(card)},
+        {label:'重新選檔',onClick:()=>{card.remove();enter(stepData);}},
+      ]);
+      return;
+    }
+  }
+  afterData(card);
+}
+// 版面偵測：掃預覽列——「該列可解析為數字的格子比例 < 50%」＝非數據列（標註/段標題/
+// 重複欄名）；同時從這些列裡撈「目標／調整參數」標註 → 之後直接照它設定意圖。
+function sniffMess(preview){
+  if(preview.length<3)return{suspect:false};
+  const cols=Object.keys(preview[0]).filter(k=>k!=='__id__');
+  const kinds=[],hints={target:[],knobs:[]};
+  let badRows=0;
+  for(const row of preview){
+    let nums=0,filled=0;
+    for(const k of cols){
+      const v=row[k];
+      if(v===null||v===''||v===undefined)continue;
+      filled++;
+      if(isFinite(+v))nums++;
+    }
+    if(!filled)continue;
+    if(nums/filled<0.5){
+      badRows++;
+      for(const k of cols){
+        const v=row[k];
+        if(typeof v!=='string'||!v.trim()||isFinite(+v))continue;
+        const t=v.trim();
+        if(t===k){if(!kinds.includes('重複的欄名列'))kinds.push('重複的欄名列');continue;}
+        if(/目標/.test(t)){hints.target.push(k);if(!kinds.includes('標註列'))kinds.push('標註列');}
+        else if(/調整|參數|knob/i.test(t)){hints.knobs.push(k);if(!kinds.includes('標註列'))kinds.push('標註列');}
+        else if(t.length<=8&&!kinds.includes('段標題')&&!/\d/.test(t))kinds.push('段標題');
+      }
+    }
+  }
+  const uniq=a=>[...new Set(a)];
+  return{suspect:badRows>=2,kinds:kinds.length?kinds:['非數據列'],
+    hints:(hints.target.length?{target:uniq(hints.target),knobs:uniq(hints.knobs)}:null)};
+}
+async function pickExisting(sid,label,card){
+  said(`用現有資料集：${label.trim()}`);
+  W.sid=sid;W.pendingFile=null;W.hints=null;
+  let st={};
+  try{st=await fetch(`/api/data/${sid}/state`).then(r=>r.json());}catch{}
+  W.meta={filename:st.filename||sid,n_rows:st.n_view??st.n_base};
+  setTx(card,`好，用 <b>${esc(W.meta.filename)}</b>（${(W.meta.n_rows||0).toLocaleString()} 筆，沿用你在資料工作台做過的清洗步驟）。`);
+  card.querySelector('.acts').innerHTML='';
+  routeAfterData();
+}
+function afterData(card){
+  const n=W.meta.n_rows||0;
+  const fewWarn=n<30?`<br><span class="warn">⚠ 真數據只有 ${n} 列——能建模但可信度有限；若這是報表匯出，建議改拿「原始歷史數據」（一列＝一個時間點、幾百列以上）。</span>`:'';
+  setTx(card,`讀好了：<b>${esc(W.meta.filename)}</b>——${n.toLocaleString()} 筆${W.meta.time_col?`，時間欄 <code>${esc(W.meta.time_col)}</code>`:'（無時間欄，純參數資料也可以）'}。${fewWarn}`);
+  card.querySelector('.acts').innerHTML='';
+  routeAfterData();
+}
+// 資料就緒 → 依「第一步選好的意圖」分流；意圖還沒定的，帶著資料脈絡回頭補答
+function routeAfterData(){
+  if(!(W.done||[]).includes(1))W.done=[...(W.done||[]),1];
+  if(W.intent==='health'){enter(stepTrain);return;}                      // 健康監測不需目標
+  if(W.intent&&W.hints&&W.hints.target&&W.hints.target.length){enter(stepHintShortcut);return;}
+  if(W.intent){enter(stepTarget);return;}
+  enter(stepIntent);
+}
+// 檔案標註列已寫明目標 → 選目標一步併掉（仍可自己選）
+function stepHintShortcut(){
+  setStep(2);
+  const h=W.hints;
+  const card=aiCard(`目標不用挑了——你的檔案標註列自己寫著 <b>目標＝${esc(h.target.join('、'))}</b>${h.knobs.length?`、<b>調整參數＝${esc(h.knobs.slice(0,5).join('、'))}${h.knobs.length>5?'…':''}</b>`:''}，跟你要做的「${W.intent==='optimize'?'找最佳操作條件':'預測'}」對得上。直接照標註設定？`);
+  acts(card,[
+    {label:`照標註設定（目標 ${h.target[0]}）`,pri:true,onClick:()=>{
+      said('照標註設定');W.target=h.target[0];W.task='regression';enter(stepTrain);}},
+    {label:'不，我自己選',onClick:()=>{said('自己選');enter(stepTarget);}},
+  ]);
+}
+
+// ---------- 「還不確定」補答意圖（讀完資料回到第①步，讀資料保持 ✓） ----------
+function stepIntent(){
+  setStep(0);
+  // 讀得懂標註列 → 直接給捷徑
+  if(W.hints&&W.hints.target.length){
+    const card=aiCard(`你的檔案自己說了要做什麼：標註列寫著 <b>目標＝${esc(W.hints.target.join('、'))}</b>${W.hints.knobs.length?`、<b>調整參數＝${esc(W.hints.knobs.slice(0,5).join('、'))}${W.hints.knobs.length>5?'…':''}</b>`:''}。<br>看起來是要「<b>找最佳操作條件</b>」——先建 ${esc(W.hints.target[0])} 的預測模型，之後就能用它找參數。直接照這個設定？`);
+    acts(card,[
+      {label:`照標註設定（目標 ${W.hints.target[0]}）`,pri:true,onClick:()=>{
+        said('照標註設定');W.intent='optimize';W.target=W.hints.target[0];W.task='regression';enter(stepTrain);}},
+      {label:'不，我自己選',onClick:()=>{said('自己選');W.hints=null;renderIntent();}},
+    ]);
+    return;
+  }
+  renderIntent();
+}
+function renderIntent(){
+  const card=aiCard('這批資料你想拿來做什麼？用人話選就好：');
+  acts(card,[
+    {label:'📈 預測一個數值（產量、品質、排放…）',pri:true,onClick:()=>{
+      said('預測一個數值');W.intent='predict';enter(stepTarget);}},
+    {label:'🩺 監測設備健不健康（異常提前預警）',onClick:()=>{
+      said('監測設備健康');W.intent='health';W.target=null;W.task='anomaly';enter(stepTrain);}},
+    {label:'🎛 找最佳操作條件（省藥劑、拉產量）',onClick:()=>{
+      said('找最佳操作條件');W.intent='optimize';enter(stepTarget);}},
+    {label:'🔍 先開資料工作台看分布（新分頁）',keep:true,onClick:()=>window.open(`/data?sid=${W.sid}`,'_blank')},
+  ]);
+}
+
+// ============================================================ ③ 選目標（啟發式，白話版）
+const EXCL_NAME=/^__id__$|^unnamed|^(time|date|datetime|timestamp|id|no|index|序號|編號|查看詳情)$/i;
+const HINT_NAME=/out|outlet|排放|出口|power|發電|mw|eff|效率|品質|quality|yield|產率|產量|conv|轉化|純度|purity|nox|so2|hcl|dust|hg|fbp/i;
+
+async function stepTarget(){
+  setStep(2);
+  const card=aiCard('<span class="spin"></span>看一下哪個欄位最像「結果」…');
+  let cardsResp=null,corr=null;
+  try{cardsResp=await fetch(`/api/data/${W.sid}/cards?per_page=200`).then(r=>r.json());}catch{}
+  let colCards=Array.isArray(cardsResp)?cardsResp:(cardsResp?.cards||cardsResp?.out||[]);
+  try{corr=await fetch(`/api/data/${W.sid}/corr`).then(r=>{if(!r.ok)throw 0;return r.json();});}catch{}
+  W.corr=corr;
+  const numeric=corr?corr.cols:(colCards||[]).filter(c=>c.kind==='numeric').map(c=>c.col);
+  const cand=numeric.filter(c=>!EXCL_NAME.test(c));
+  W.cols=cand;
+  if(!cand.length){
+    W.lastError='沒有可用的數值欄';
+    setTx(card,`這批資料<b>找不到可用的數值欄</b>（或全是常數），沒辦法建模。常見原因：數字被存成文字（有標註列/單位混在格子裡）、或整張表是報表版面。${FMT_GUIDE}`);
+    acts(card,[
+      {label:'重新選檔',pri:true,onClick:()=>{location.reload();}},
+      {label:'去資料工作台檢查',keep:true,onClick:()=>window.open(`/data?sid=${W.sid}`,'_blank')},
+    ]);
+    return;
+  }
+  const score={};
+  for(const c of cand){
+    let s=0;
+    if(corr){
+      const i=corr.cols.indexOf(c);
+      const row=corr.matrix[i].filter((v,j)=>j!==i&&v!=null&&isFinite(v));
+      s=row.length?row.reduce((a,v)=>a+Math.abs(v),0)/row.length:0;
+    }
+    if(HINT_NAME.test(c))s+=0.15;
+    score[c]=s;
+  }
+  // 問句優先：目標由使用者決定，AI 只做排序與佐證（熱力圖），不搶著建議
+  const ranked=[...cand].sort((a,b)=>score[b]-score[a]);
+  const pre=(W.hints?.target||[]).find(t=>cand.includes(t))||ranked[0];   // 預選＝檔案標註優先，否則排最前者
+  const rawR=c=>corr?(score[c]-(HINT_NAME.test(c)?0.15:0)).toFixed(2):null;
+  setTx(card,`換你決定——這批資料裡，<b>你今天想預測的目標是哪一欄？</b>${corr?`<br><span style="font-size:12.5px;color:var(--text2)">選單依「最像結果欄」排序，括號是它被其他欄解釋的平均<span class="tm" data-t="相關 |r|">相關 |r|</span>；拿不定主意就開熱力圖看關聯。</span>`:''}`);
+  const sel=document.createElement('select');
+  sel.innerHTML=ranked.map(c=>`<option value="${esc(c)}"${c===pre?' selected':''}>${esc(c)}${rawR(c)!=null?`（|r|≈${rawR(c)}）`:''}</option>`).join('');
+  sel.addEventListener('change',()=>{                 // 熱力圖開著時換目標 → 立即以新目標重排重繪
+    const cd=sel.closest('.ai'),old=cd&&cd.querySelector('.heat');
+    if(old){old.remove();const box=document.createElement('div');box.className='heat';
+      cd.querySelector('.bd').appendChild(box);drawCorrHeat(box,W.corr,sel.value);}
+  });
+  const btns=[
+    {el:sel},
+    {label:'就用這個當目標',pri:true,onClick:()=>{said(`目標：${sel.value}`);W.target=sel.value;W.task='regression';enter(stepTrain);}},
+  ];
+  if(corr)btns.push({label:'🔥 看相關熱力圖（皮爾森）',keep:true,onClick:(el,cd)=>toggleHeat(el,cd,sel.value)});
+  acts(card,btns);
+}
+// ---------- 皮爾森相關熱力圖（內嵌，用已抓的 W.corr，零額外請求） ----------
+function toggleHeat(btn,card,target){
+  const old=card.querySelector('.heat');
+  if(old){old.remove();btn.textContent='🔥 看相關熱力圖（皮爾森）';return;}
+  btn.textContent='收起熱力圖';
+  const box=document.createElement('div');box.className='heat';
+  card.querySelector('.bd').appendChild(box);
+  drawCorrHeat(box,W.corr,target);
+  box.scrollIntoView({block:'nearest',behavior:'smooth'});
+}
+function drawCorrHeat(box,corr,target){
+  const cols=corr.cols,M=corr.matrix,ti=cols.indexOf(target);
+  // 欄序：內部欄（__id__ 等）不畫；目標最前，其餘依「與目標的 |r|」由強到弱——
+  // 第一列一眼看出誰跟目標最有關
+  const order=[...cols.keys()].filter(i=>i===ti||!EXCL_NAME.test(cols[i])).sort((a,b)=>{
+    if(a===ti)return -1;if(b===ti)return 1;
+    return Math.abs(M[b][ti]??0)-Math.abs(M[a][ti]??0);
+  });
+  const n=order.length,gut=104,gutT=86;
+  const cell=Math.max(9,Math.min(20,Math.floor((600-gut)/n)));
+  const wpx=gut+n*cell+48,hpx=gutT+n*cell+8;
+  const cv=document.createElement('canvas'),dpr=window.devicePixelRatio||1;
+  cv.width=wpx*dpr;cv.height=hpx*dpr;cv.style.width=wpx+'px';cv.style.height=hpx+'px';
+  box.appendChild(cv);
+  const ctx=cv.getContext('2d');ctx.scale(dpr,dpr);
+  const colOf=v=>{
+    if(v==null||!isFinite(v))return '#EDEFF3';
+    const t=Math.max(-1,Math.min(1,+v)),k=Math.abs(t);
+    return t>=0
+      ?`rgb(${Math.round(255-k*(255-4))},${Math.round(255-k*(255-106))},${Math.round(255-k*(255-251))})`
+      :`rgb(${Math.round(255-k*(255-192))},${Math.round(255-k*(255-57))},${Math.round(255-k*(255-43))})`;
+  };
+  ctx.font='9.5px Inter,"Noto Sans TC",sans-serif';
+  const short=s=>s.length>13?s.slice(0,12)+'…':s;
+  order.forEach((oi,i)=>{
+    ctx.fillStyle=oi===ti?'#046AFB':'#555';
+    ctx.textAlign='right';ctx.textBaseline='middle';
+    ctx.fillText(short(cols[oi]),gut-6,gutT+i*cell+cell/2);            // 左標籤（列）
+    ctx.save();ctx.translate(gut+i*cell+cell/2,gutT-5);ctx.rotate(-Math.PI/4);
+    ctx.textAlign='left';ctx.textBaseline='middle';
+    ctx.fillText(short(cols[oi]),0,0);ctx.restore();                   // 上標籤（欄，斜 45°）
+    order.forEach((oj,x)=>{
+      ctx.fillStyle=colOf(M[oi][oj]);
+      ctx.fillRect(gut+x*cell,gutT+i*cell,cell-1,cell-1);
+    });
+  });
+  ctx.strokeStyle='#046AFB';ctx.lineWidth=1.5;
+  ctx.strokeRect(gut-0.5,gutT-0.5,n*cell,cell);                        // 目標列框線
+  const lg=document.createElement('div');lg.className='lg';
+  lg.innerHTML=`<span class="tm" data-t="相關 |r|">皮爾森相關係數 r</span>：`+
+    `<b style="color:#046AFB">藍＝同向</b>、<b style="color:#C0392B">紅＝反向</b>、越深越強。`+
+    `框線那列＝目標 <b>${esc(target)}</b> 與各欄的關聯；欄序已按與目標的關聯強度排好。滑過任一格看數值。`;
+  box.appendChild(lg);
+  let tip=document.getElementById('heat-tip');
+  if(!tip){tip=document.createElement('div');tip.id='heat-tip';document.body.appendChild(tip);}
+  cv.addEventListener('mousemove',e=>{
+    const r=cv.getBoundingClientRect();
+    const x=Math.floor((e.clientX-r.left-gut)/cell),y=Math.floor((e.clientY-r.top-gutT)/cell);
+    if(x<0||y<0||x>=n||y>=n){tip.style.display='none';return;}
+    const v=M[order[y]][order[x]];
+    tip.textContent=`${cols[order[y]]} × ${cols[order[x]]}：r=${v==null||!isFinite(v)?'—':(+v).toFixed(2)}`;
+    tip.style.display='block';
+    tip.style.left=Math.min(e.clientX+12,innerWidth-160)+'px';
+    tip.style.top=(e.clientY+14)+'px';
+  });
+  cv.addEventListener('mouseleave',()=>{tip.style.display='none';});
+}
+
+// ============================================================ ④ 建模（可停止）
+async function pickAlgo(task){
+  if(!W.algos){
+    try{W.algos=(await fetch('/api/automl/algos').then(r=>r.json())).algos||[];}catch{W.algos=[];}
+  }
+  const fit=W.algos.filter(a=>(a.tasks||[]).includes(task)).map(a=>a.key);
+  const prefer=task==='anomaly'?['IFOREST','PCA_T2','OCSVM']:['ET','XGB','RF'];
+  return prefer.find(p=>fit.includes(p))||fit[0];
+}
+async function stepTrain(retryAlgo){
+  setStep(3);
+  if(W.task!=='anomaly'&&!W.cols.length){
+    // 從意圖直達（照標註設定）時還沒掃過欄位——補掃一次拿特徵清單
+    try{
+      const corr=await fetch(`/api/data/${W.sid}/corr`).then(r=>r.json());
+      W.cols=corr.cols.filter(c=>!EXCL_NAME.test(c));W.corr=corr;
+    }catch{W.cols=[];}
+  }
+  if(W.task==='anomaly'&&!W.cols.length){
+    try{
+      const corr=await fetch(`/api/data/${W.sid}/corr`).then(r=>r.json());
+      W.cols=corr.cols.filter(c=>!EXCL_NAME.test(c));
+    }catch{W.cols=[];}
+  }
+  const feats=W.cols.filter(c=>c!==W.target);
+  W.features=feats;
+  if(W.task!=='anomaly'&&(!W.target||!feats.length)){
+    aiCard('<span class="bad">找不到目標或特徵欄——回上一步重選。</span>');return;
+  }
+  const algo=retryAlgo||await pickAlgo(W.task);
+  if(!algo){aiCard('<span class="bad">找不到適用的演算法。</span>');return;}
+  const algoName=(W.algos.find(a=>a.key===algo)||{}).name||algo;
+  const card=aiCard(`<span class="spin"></span>建模中——${W.task==='anomaly'
+    ?`用 <b>${esc(algoName)}</b> 以 ${feats.length} 個監測欄建立健康基準`
+    :`用 <b>${esc(algoName)}</b> 預測 <b>${esc(W.target)}</b>（${feats.length} 個輸入欄，自動調參）`}，大約幾十秒…`);
+  const body=W.task==='anomaly'
+    ?{task_type:'anomaly',features:feats,mode:'manual',algo,name:`${W.meta.filename||'資料'} 健康基準`}
+    :{target:W.target,features:feats,mode:'manual',algo,auto_tune:true,name:`${W.target} 預測`};
+  let created;
+  try{
+    const r=await fetch(`/api/automl/${W.sid}/models`,{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+    created=d.created[0];
+  }catch(e){
+    W.lastError=String(e.message||e);
+    setTx(card,`建模請求失敗：<span class="bad">${esc(W.lastError)}</span>`);
+    acts(card,[{label:'回上一步',onClick:()=>$('btn-back').click()}]);
+    return;
+  }
+  W.mid=created;
+  pollStop=false;
+  // ⏹ 停止等待（訓練在背景仍會完成；可選擇刪除）
+  acts(card,[{label:'⏹ 停止等待',stop:true,onClick:(el,cd)=>{
+    pollStop=true;
+    setTx(cd,`已停止等待。<b>訓練仍在背景進行</b>，完成後會出現在模型工作區；也可以直接刪除這次訓練。`);
+    acts(cd,[
+      {label:'刪除這次訓練',stop:true,onClick:async(e2,c2)=>{
+        try{await fetch(`/api/automl/${W.sid}/models/${W.mid}`,{method:'DELETE'});}catch{}
+        said('已刪除訓練');
+        acts(c2,[{label:'回上一步',pri:true,onClick:()=>$('btn-back').click()}]);
+      }},
+      {label:'其實繼續等',onClick:(e2,c2)=>{pollStop=false;setTx(c2,'<span class="spin"></span>繼續等訓練完成…');acts(c2,[]);pollLoop(c2,algo);}},
+      {label:'去模型工作區看',keep:true,onClick:()=>window.open(`/data?sid=${W.sid}&view=model`,'_blank')},
+    ]);
+  }}]);
+  pollLoop(card,algo);
+}
+function pollLoop(card,algo){
+  const poll=async()=>{
+    if(pollStop)return;
+    let m=null;
+    try{
+      const list=await fetch(`/api/automl/${W.sid}/models`).then(r=>r.json());
+      m=(Array.isArray(list)?list:list.models||[]).find(x=>x.id===W.mid);
+    }catch{}
+    if(!m||m.status==='training'){setTimeout(poll,2500);return;}
+    if(m.status==='error'){
+      W.lastError=m.error||'訓練失敗';
+      setTx(card,`訓練失敗：<span class="bad">${esc(W.lastError)}</span>`);
+      acts(card,[{label:'回上一步',onClick:()=>$('btn-back').click()}]);
+      return;
+    }
+    W.model=m;trainDone(card,m,algo);
+  };
+  setTimeout(poll,2500);
+}
+function trainDone(card,m,algo){
+  const c=m.metrics_cv||{};
+  let verdict,metrics;
+  if(W.task==='anomaly'){
+    verdict=`健康基準建立完成——訓練期資料有 <b>${c.exceed_pct??'—'}%</b> 超出建議門檻（代表「平常也偶爾偏離」的比例，不是故障率）。`;
+    metrics=`<span class="metric">風險門檻 <b>${c.threshold??'—'}</b></span><span class="metric">平均風險 <b>${c.mean_risk??'—'}</b></span>`;
+  }else{
+    const r2=+c.r2;
+    const grade=r2>=0.95?'<span class="ok">極佳</span>':r2>=0.85?'<span class="ok">良好</span>':r2>=0.7?'<span class="warn">可用</span>':'<span class="bad">偏弱</span>';
+    verdict=`訓練完成，交叉驗證 R²=<b>${c.r2??'—'}</b>（${grade}）${r2<0.7?'——建議換演算法試試、或回資料工作台先清資料':''}。`;
+    metrics=`<span class="metric">RMSE <b>${c.rmse??'—'}</b></span><span class="metric">MAE <b>${c.mae??'—'}</b></span><span class="metric">R² <b>${c.r2??'—'}</b></span>`;
+  }
+  setTx(card,`${verdict}<br>${metrics}`);
+  const alt=W.task==='anomaly'?['PCA_T2','OCSVM','IFOREST']:['XGB','RF','ET'];
+  const next=alt.find(a=>a!==algo);
+  acts(card,[
+    {label:'滿意，發布成模型 API →',pri:true,onClick:()=>{said('發布');enter(stepPublish);}},
+    {label:'看詳細（模型工作區）',keep:true,onClick:()=>window.open(`/data?sid=${W.sid}&view=model`,'_blank')},
+    {label:`換 ${next} 再試一次`,onClick:()=>{said(`換演算法 ${next}`);enter(stepTrain,next);}},
+  ]);
+}
+
+// ============================================================ ⑤ 發布
+async function stepPublish(){
+  setStep(4);
+  const card=aiCard('<span class="spin"></span>發布成模型 API…');
+  let d;
+  try{
+    const r=await fetch('/agatha/model/publish/',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({dataset_id:W.sid,model_id:String(W.mid),display_name:W.model.name})});
+    d=await r.json();
+    if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+  }catch(e){
+    W.lastError=String(e.message||e);
+    setTx(card,`發布失敗：<span class="bad">${esc(W.lastError)}</span>`);
+    acts(card,[{label:'重試',pri:true,onClick:()=>{card.remove();enter(stepPublish);}}]);
+    return;
+  }
+  W.modelKey=d.model_key;
+  const lead=d.already_published
+    ?`這顆模型<b>之前就發布過了</b>——同一顆訓練成品只會有一把金鑰，直接沿用（不重複產 key）：`
+    :`發布完成。這是它的<span class="tm" data-t="model_key">model_key</span>——以後不管資料怎麼變，都用這把金鑰呼叫它：`;
+  setTx(card,`${lead}
+    <div class="keybox"><span>${esc(d.model_key)}</span><button id="wz-copy">複製</button></div>`);
+  card.querySelector('#wz-copy').addEventListener('click',async(e)=>{
+    try{await navigator.clipboard.writeText(d.model_key);e.target.textContent='已複製';}catch{}
+  });
+  acts(card,[
+    {label:'綁進數位孿生 →',pri:true,onClick:()=>{said('綁進孿生');enter(stepBind);}},
+    {label:'到此為止（去 API 控制台看）',keep:true,onClick:()=>window.open('/static/model_api.html','_blank')},
+  ]);
+}
+
+// ============================================================ ⑥ 綁孿生
+async function stepBind(){
+  setStep(5);
+  let flows=[];
+  try{flows=await fetch('/agatha/flowsheet/').then(r=>r.json());}catch{}
+  const card=aiCard(`要把模型放進哪裡？<b>新建方案</b>＝先建一個單區塊的<span class="tm" data-t="flowsheet">flowsheet</span>（之後在設計器加更多區塊與連接）；也可以加進現有方案。`);
+  const sel=document.createElement('select');
+  sel.innerHTML='<option value="">— 加進現有方案 —</option>'+
+    flows.map(f=>`<option value="${esc(f.flowsheet_id)}">${esc(f.name)}（${f.n_blocks} 區塊）</option>`).join('');
+  sel.addEventListener('change',()=>{if(sel.value)bindExisting(sel.value,card);});
+  acts(card,[
+    {label:'新建方案',pri:true,onClick:()=>bindNew(card)},
+    {el:sel},
+    {label:'先不綁，完成',onClick:()=>finish(card,null)},
+  ]);
+}
+function slugify(s){
+  const t=String(s||'').toLowerCase().replace(/\.[a-z0-9]+$/,'').replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'');
+  return (/^[a-z0-9]/.test(t)?t:('p-'+t)).slice(0,32)||('plan-'+W.sid);
+}
+async function bindNew(card){
+  said('新建方案');
+  const fid=slugify(W.meta.filename)+'-'+W.sid.slice(0,4);
+  const spec={flowsheet_id:fid,name:`${W.meta.filename||fid} 數據孿生`,desc:'AI 嚮導建立（單區塊起手，於設計器擴充）',
+    trains:[['B-101']],
+    blocks:[{id:'B-101',model_key:W.modelKey,name:W.model.name,better:W.task==='anomaly'?'high':'low'}],
+    connections:[]};
+  await saveFlow(card,spec,fid);
+}
+async function bindExisting(fid,card){
+  said(`加進 ${fid}`);
+  let spec;
+  try{spec=await fetch(`/agatha/flowsheet/${encodeURIComponent(fid)}/spec/`).then(r=>r.json());}catch(e){
+    aiCard(`讀方案失敗：<span class="bad">${esc(e.message||e)}</span>`);return;
+  }
+  const used=new Set((spec.blocks||[]).map(b=>b.id));
+  let bid='B-101';for(let n=1;n<=99;n++){const t=`B-${n}01`;if(!used.has(t)){bid=t;break;}}
+  const body={flowsheet_id:spec.flowsheet_id,name:spec.name,desc:spec.desc,
+    trains:[...(spec.trains||[]),[bid]],
+    blocks:[...(spec.blocks||[]).map(b=>({id:b.id,model_key:b.model_key,name:b.name,ico:b.ico,unit:b.unit,
+      warn:b.warn,crit:b.crit,better:b.better,output_label:b.output_label,defaults:b.defaults||{},pos:b.pos})),
+      {id:bid,model_key:W.modelKey,name:W.model.name,better:W.task==='anomaly'?'high':'low'}],
+    connections:(spec.connections||[]).map(c=>({from:c.from,to:c.to,target_input:c.target_input,unit:c.unit}))};
+  await saveFlow(card,body,spec.flowsheet_id,bid);
+}
+async function saveFlow(card,spec,fid,bid){
+  setTx(card,'<span class="spin"></span>寫入方案…');card.querySelector('.acts').innerHTML='';
+  try{
+    const r=await fetch('/agatha/flowsheet/',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(spec)});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+    finish(card,d.flowsheet_id,bid);
+  }catch(e){
+    setTx(card,`寫入方案失敗：<span class="bad">${esc(e.message||e)}</span>`);
+    acts(card,[{label:'回上一步',onClick:()=>$('btn-back').click()}]);
+  }
+}
+function finish(card,fid,bid){
+  setStep(6);renderSteps();
+  const links=fid?`
+    <a href="/static/incinerator_flowsheet.html?id=${encodeURIComponent(fid)}" target="_blank" style="color:var(--blue)">▶ 工程檢視（即時求解）</a>
+    <a href="/static/flowsheet_builder.html?id=${encodeURIComponent(fid)}" target="_blank" style="color:var(--blue)">✎ 設計器（加區塊與連接）</a>
+    <a href="/static/model_api.html" target="_blank" style="color:var(--blue)">API 控制台</a>`
+    :`<a href="/static/model_api.html" target="_blank" style="color:var(--blue)">API 控制台</a>
+    <a href="/static/flowsheet_builder.html" target="_blank" style="color:var(--blue)">之後想綁 → 設計器</a>`;
+  setTx(card,`🎉 完成！${fid?`模型已放進方案 <b>${esc(fid)}</b>${bid?`（區塊 <code>${esc(bid)}</code>）`:''}，每 2 秒會被求解器呼叫一次。`:'模型服務已就緒。'}${W.intent==='optimize'?'<br>你的意圖是「找最佳操作條件」——開工程檢視後按「⚙ 自動最佳化」，或在 3D 監看卡用「全廠聯合最佳化」。':''}<br>${links}`);
+  card.querySelector('.acts').innerHTML='';
+  const again=aiCard('還有另一批資料？');
+  acts(again,[{label:'再跑一輪嚮導',pri:true,onClick:()=>{location.reload();}}]);
+}
+
+// ============================================================ 問答列（/api/ai/ask 三層）
+$('ask-go').addEventListener('click',doAsk);
+$('ask-q').addEventListener('keydown',e=>{if(e.key==='Enter')doAsk();});
+async function doAsk(){
+  const q=$('ask-q').value.trim();
+  if(!q)return;
+  $('ask-q').value='';said(`❓ ${q}`);
+  const card=aiCard('<span class="spin"></span>想一下…');
+  const ctx={step:STEPS[Math.min(stepNow,STEPS.length-1)],file:W.meta?.filename,n_rows:W.meta?.n_rows,
+    intent:W.intent,target:W.target,task:W.task,columns:(W.cols||[]).slice(0,20),
+    metrics:W.model?.metrics_cv,last_error:W.lastError};
+  try{
+    const r=await fetch('/api/ai/ask',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({question:q,context:ctx})});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+    const tag=d.provider==='anthropic'?'Claude':d.provider==='claude_cli'?'Claude（本機）':d.provider==='local'?'地端模型':'內建說明';
+    setTx(card,`${esc(d.answer).replace(/\n/g,'<br>')}<div style="margin-top:6px;font-size:10.5px;color:var(--text2)">— ${tag}</div>`);
+  }catch(e){
+    setTx(card,`<span class="bad">問答服務沒回應：${esc(e.message||e)}</span>`);
+  }
+  card.scrollIntoView({block:'end',behavior:'smooth'});
+}
+
+renderSteps();
+enter(stepIntent0);
+</script>
+</body>
+</html>

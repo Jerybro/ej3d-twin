@@ -669,7 +669,7 @@
     <div id="opt2-main" style="display:none">
       <div class="opt2-sec">
         <div class="opt2-h">選擇最佳化目標
-          <span class="qi" data-tip="每個目標＝一個已訓練的迴歸／混合模型，加上你要它達成的條件（落在某範圍／最大化／最小化）與相對權重。可加多個目標同時最佳化——系統會找同時讓所有目標盡量滿足的參數組合。權重越大代表該目標越重要。">?</span>
+          <span class="qi" data-tip="每個目標＝一個已訓練的迴歸／混合模型，加上你要它達成的條件（落在某範圍／最大化／最小化）與相對權重。可加多個目標同時最佳化——系統會找同時讓所有目標盡量滿足的參數組合。權重越大代表該目標越重要。同一個模型可以掛多條目標：例如「最大化」＋「落在範圍」＝在安全範圍內盡量高（軟約束用法）。注意：範圍條件必須同時填下限與上限。">?</span>
           <button class="opt2-add" id="opt2-add-obj">＋ 新增目標</button></div>
         <div style="overflow-x:auto"><table class="opt2-table" id="opt2-obj-table"></table></div>
       </div>

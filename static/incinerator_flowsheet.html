@@ -201,9 +201,8 @@
   <div class="bar">
     <span class="lbl">運轉情境</span>
     <button data-s="normal" class="active">正常運轉</button>
-    <button data-s="lhv_drop">進料熱值下降</button>
-    <button data-s="bag_clog">濾袋阻塞</button>
-    <button data-s="fan_degrade">風機軸承劣化</button>
+    <span id="sc-dyn" style="display:contents"></span>
+    <button id="sc-add" title="把一組輸入覆蓋存成具名情境（存於方案、全使用者共用）">＋ 自訂情境</button>
     <span class="viewseg">
       <button id="v-cards" class="on">卡片</button>
       <button id="v-mimic">組態</button>
@@ -245,7 +244,20 @@
   <div class="dhint">自訂只影響這台電腦的顯示，不會改動後端規格檔與模型。</div>
 </aside>
 
+<aside id="bdrawer">
+  <button class="dclose" id="bdrawer-close">×</button>
+  <h2 id="bd-title">—</h2>
+  <div class="dsub" id="bd-sub"></div>
+  <div id="bd-out"></div>
+  <canvas id="bd-spark"></canvas>
+  <div class="group-title">本拍全部輸入（這一塊實際吃到的值）</div>
+  <div id="bd-inputs"></div>
+  <div class="dhint">單位切換只改「顯示」——模型推論、規格檔與守門員一律用原單位。來源標籤：⬅ 上游＝由連接傳遞、🎚 滑桿＝操作設點、⚙ 情境＝自訂情境覆蓋、預設＝規格檔值。</div>
+</aside>
+
 <script src="/static/js/tour.js"></script>
+<script src="/static/js/term.js"></script>
+<script src="/static/js/units.js"></script>
 <script>
 // ============================================================================
 // 泛用 flowsheet 渲染頁 — 完全由後端規格檔驅動，頁內不寫死任何 block 清單。
@@ -491,7 +503,7 @@ async function boot(){
     if(sc){$('btn-3d').href=`/twin?scene=${encodeURIComponent(sc.id)}&flow=1`;$('btn-3d').style.display='';}
   }).catch(()=>{});
   $('btn-edit').href=`/static/flowsheet_builder.html?id=${encodeURIComponent(FID)}`;
-  buildTrains(); buildCtrls(); buildDrawer(); applyGlobal(); buildMimic();
+  buildTrains(); buildCtrls(); buildScenBar(); buildDrawer(); applyGlobal(); buildMimic();
   applyView(new URLSearchParams(location.search).get('view')==='mimic'?'mimic':undefined);
   logln(`✓ 規格已載入：${spec.name||FID}（${(spec.blocks||[]).length} blocks / ${(spec.connections||[]).length} connections / ${(spec.trains||[]).length} trains）`);
   if(timer)clearInterval(timer);
@@ -499,8 +511,8 @@ async function boot(){
   // 首次進頁導覽（spotlight）
   if(window.Tour)Tour.auto('flowsheet',[
     {el:'.viewseg',title:'兩種檢視',text:'「卡片」看模型細節與守門員；「組態」是 DCS 式運轉圖——同一份資料、兩種畫面。'},
-    {el:'#ctrls',title:'操作設點（what-if）',text:'拉滑桿即時改運轉條件，模型每 2 秒重算一次全廠。'},
-    {el:'#trains .blk',title:'模型 block',text:'每張卡是一個模型：預測值、警戒配色、右上圓點是守門員（訓練域）狀態。'},
+    {el:'#ctrls',title:'操作設點（假設試算 what-if）',text:'拉滑桿即時改運轉條件，模型每 2 秒重算一次全廠。'},
+    {el:'#trains .blk',title:'模型 block（點開看全部數據）',text:'卡片只放結論；點卡片開資料面板——全部輸入的實際值、來源、守門員逐項判定與趨勢，單位可切換。'},
     {el:'#btn-custom',title:'自訂顯示',text:'名稱、圖示、警戒值、顯示與否都能改，存在你這台電腦。'},
     {el:'#btn-edit',title:'編輯設計',text:'要改流程本身（加 block、拉連接）就進設計器。'},
   ]);
@@ -568,12 +580,272 @@ function arrowHtml(a,b){
   return `<div class="arrow cn">→<div class="ar-lbl" id="connlbl_${esc(c.from)}__${esc(c.to)}">${esc(prettyFeat(c.source_output))} → <b>--</b></div></div>`;
 }
 
+// ---------------- 運轉情境 v2：無罐頭預設——「正常運轉」＋客戶自訂情境（存規格檔） ----------------
+// 自訂情境＝具名的一組輸入覆蓋 {name, overrides:{blockId:{feature:值}}}，按一下即套用、
+// 全使用者共用。內建模擬故障劇本只在規格檔真的有對應特徵時出現（焚化爐示範），
+// 泛用方案不會再看到不相干的「濾袋阻塞」之類字樣。
+const SIM_FAULTS=[
+  {id:'lhv_drop',   n:'進料熱值下降', need:/LHV/i},
+  {id:'bag_clog',   n:'濾袋阻塞',     need:/bag_dP|collection_eff/i},
+  {id:'fan_degrade',n:'風機軸承劣化', need:/fan_(vib|bearing|motor)/i},
+];
+let csActive=-1;                       // 生效中的自訂情境 index（-1＝無）
+function specFeats(){const s=new Set();(SPEC.blocks||[]).forEach(b=>{Object.keys(b.feature_ranges||{}).forEach(f=>s.add(f));Object.keys(b.defaults||{}).forEach(f=>s.add(f));});return [...s];}
+// 這一塊「實際會吃」的輸入＝defaults（未被餵）∪ 上游餵入——feature_ranges 含目標欄，不能直接當輸入清單
+function featsOfBlock(b){return [...new Set([...Object.keys(b.defaults||{}),...(FEDBY.get(b.id)||new Set())])];}
+// 情境可覆蓋的輸入＝defaults（上游餵的蓋了也沒用，執行期連接優先）
+function overridableFeats(b){return Object.keys(b.defaults||{});}
+function buildScenBar(){
+  const feats=specFeats();
+  const sims=SIM_FAULTS.filter(f=>feats.some(x=>f.need.test(x)));
+  const cs=SPEC.scenarios||[];
+  $('sc-dyn').innerHTML=
+    sims.map(f=>`<button data-s="${f.id}">${esc(f.n)}</button>`).join('')+
+    cs.map((s,i)=>`<button data-cs="${i}">${esc(s.name)}<i class="csed" data-edit="${i}" title="編輯此情境">✎</i></button>`).join('');
+  markScenActive();
+}
+function markScenActive(){
+  document.querySelectorAll('.bar button[data-s],.bar button[data-cs]').forEach(b=>{
+    b.classList.toggle('active', b.dataset.cs!=null ? +b.dataset.cs===csActive
+      : (csActive<0 && b.dataset.s===scenario));
+  });
+}
 document.querySelector('.bar').addEventListener('click',e=>{
-  const btn=e.target.closest('button[data-s]'); if(!btn)return;
-  scenario=btn.dataset.s;
-  document.querySelectorAll('.bar button').forEach(x=>x.classList.toggle('active',x===btn));
-  logln(`▶ 切換情境：${btn.textContent}`);
+  const ed=e.target.closest('.csed');
+  if(ed){openScEditor(+ed.dataset.edit);return;}
+  const btn=e.target.closest('button[data-s],button[data-cs]'); if(!btn)return;
+  if(btn.dataset.cs!=null){csActive=+btn.dataset.cs;scenario='normal';}
+  else{scenario=btn.dataset.s;csActive=-1;}
+  markScenActive();
+  logln(`▶ 切換情境：${btn.textContent.replace('✎','').trim()}`);
 });
+$('sc-add').addEventListener('click',()=>openScEditor(-1));
+
+// ---- 情境編輯器（內嵌面板）：名稱＋覆蓋列（block／特徵／值）→ 存回規格檔 ----
+function openScEditor(idx){
+  closeScEditor();
+  const cur=idx>=0?(SPEC.scenarios||[])[idx]:null;
+  const p=document.createElement('div'); p.id='sc-editor';
+  p.innerHTML=`<div class="sce-head"><b>${cur?'編輯情境':'新增自訂情境'}</b>
+      <span class="mut">一組具名的輸入覆蓋——套用時蓋過即時來源；存在方案規格檔、全使用者共用</span></div>
+    <label class="sce-nm">情境名稱 <input id="sce-name" maxlength="24" placeholder="例：高負載夏季工況" value="${esc(cur?cur.name:'')}"></label>
+    <div id="sce-rows"></div>
+    <div class="sce-acts">
+      <button id="sce-addrow">＋ 加一條覆蓋</button>
+      <span style="flex:1"></span>
+      ${cur?'<button id="sce-del" class="danger">刪除此情境</button>':''}
+      <button id="sce-cancel">取消</button>
+      <button id="sce-save" class="pri">儲存情境</button>
+    </div>`;
+  document.querySelector('.bar').insertAdjacentElement('afterend',p);
+  const addRow=(bid,feat,val)=>{
+    const row=document.createElement('div');row.className='sce-row';
+    const bsel=document.createElement('select');
+    bsel.innerHTML=(SPEC.blocks||[]).map(b=>`<option value="${esc(b.id)}"${b.id===bid?' selected':''}>${esc(b.id)}｜${esc(b.name||'')}</option>`).join('');
+    const fsel=document.createElement('select');
+    const vin=document.createElement('input');vin.type='number';vin.step='any';
+    if(val!=null)vin.value=val;
+    const hint=()=>{
+      const b=BLK[bsel.value]||{};const f=fsel.value;
+      const d=(b.defaults||{})[f];const rg=(b.feature_ranges||{})[f];
+      vin.title=rg?`訓練域 ${Units.disp(rg[0])} ~ ${Units.disp(rg[1])}`:'';
+      vin.placeholder=d!=null?`目前 ${Units.disp(d)}`:'覆蓋值';
+    };
+    const fill=()=>{
+      const b=BLK[bsel.value]||{};
+      fsel.innerHTML=overridableFeats(b).map(f=>`<option value="${esc(f)}"${f===feat?' selected':''}>${esc(prettyFeat(f))}（${esc(f)}）</option>`).join('');
+      hint();
+    };
+    bsel.addEventListener('change',fill);fsel.addEventListener('change',hint);
+    const del=document.createElement('button');del.textContent='✕';del.className='sce-x';del.title='移除這條';del.onclick=()=>row.remove();
+    row.append(bsel,fsel,vin,del);
+    p.querySelector('#sce-rows').appendChild(row);
+    fill();
+  };
+  if(cur)for(const [bid,fm] of Object.entries(cur.overrides||{}))for(const [f,v] of Object.entries(fm))addRow(bid,f,v);
+  else addRow();
+  p.querySelector('#sce-addrow').onclick=()=>addRow();
+  p.querySelector('#sce-cancel').onclick=closeScEditor;
+  if(cur)p.querySelector('#sce-del').onclick=async()=>{
+    if(!confirm(`刪除情境「${cur.name}」？`))return;
+    if(csActive===idx)csActive=-1;
+    await saveScenList((SPEC.scenarios||[]).filter((_,i)=>i!==idx),`🗑 已刪除情境「${cur.name}」`);
+  };
+  p.querySelector('#sce-save').onclick=async()=>{
+    const nm=p.querySelector('#sce-name').value.trim();
+    if(!nm){p.querySelector('#sce-name').focus();return;}
+    const ov={};
+    p.querySelectorAll('.sce-row').forEach(r=>{
+      const sels=r.querySelectorAll('select'), vin=r.querySelector('input');
+      if(vin.value==='')return;
+      (ov[sels[0].value]??={})[sels[1].value]=+vin.value;
+    });
+    if(!Object.keys(ov).length){logln('✖ 情境至少要一條「有填值」的覆蓋');return;}
+    const list=[...(SPEC.scenarios||[])];
+    const item={name:nm,overrides:ov};
+    if(idx>=0)list[idx]=item;else list.push(item);
+    await saveScenList(list,`✓ 情境「${nm}」已儲存（存於方案規格檔，全使用者共用）`);
+  };
+}
+function closeScEditor(){const p=$('sc-editor');if(p)p.remove();}
+async function saveScenList(list,okMsg){
+  try{
+    const r=await fetch('/agatha/flowsheet/',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({...SPEC,scenarios:list})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+    const s=await fetch(`/agatha/flowsheet/${encodeURIComponent(FID)}/spec/`).then(x=>x.json());
+    SPEC.scenarios=s.scenarios||[];
+    if(csActive>=SPEC.scenarios.length)csActive=-1;
+    closeScEditor();buildScenBar();logln(okMsg);
+  }catch(e){logln('✖ 情境儲存失敗：'+(e.message||e));}
+}
+
+// ---------------- Block 資料面板：點卡片看「這一塊的全部數字」 ----------------
+// 卡片只放結論（單一輸出值）；點開面板才是完整數據——本拍輸出＋近 90 拍趨勢＋
+// 全部輸入的實際值、來源（⬅上游/🎚滑桿/⚙情境/預設）與守門員逐項判定；
+// 單位可切換（units.js，僅顯示層，模型與後端一律原單位）。
+const HISTB={};                        // blockId → 近 90 拍輸出
+const BD={id:null};
+function dispOut(sb,v){
+  const du=((CUSTOM.blocks[sb.id]||{}).du_out)||null;
+  const base=eff(sb).unit||'';
+  if(sb.kind==='anomaly')return{v,u:'/100'};
+  if(v==null||!isFinite(v)||!du||!window.Units)return{v,u:base};
+  const cv=Units.convert(v,base,du);
+  return cv==null?{v,u:base}:{v:cv,u:du};
+}
+function srcOf(bid,f){
+  const fed=FEDBY.get(bid);
+  if(fed&&fed.has(f)){const c=(SPEC.connections||[]).find(x=>x.to===bid&&x.target_input===f);return{t:'⬅ 上游 '+(c?c.from:''),cls:'s-up'};}
+  const ov=csActive>=0?(((SPEC.scenarios||[])[csActive]||{}).overrides||{})[bid]:null;
+  if(ov&&ov[f]!=null)return{t:'⚙ 情境',cls:'s-sc'};
+  const sl=SLIDERS.find(s=>s.feats.includes(f));
+  if(sl&&document.getElementById('sl_'+sl.key))return{t:'🎚 滑桿',cls:'s-sl'};
+  return{t:'預設',cls:'s-df'};
+}
+function openBD(id){BD.id=id;$('bdrawer').classList.add('open');renderBD();}
+function renderBD(){
+  const sb=BLK[BD.id];if(!sb)return;
+  const e=eff(sb);
+  $('bd-title').innerHTML=`<span class="tag">${esc(sb.id)}</span> ${esc(e.name||sb.id)}`;
+  $('bd-sub').innerHTML=`${sb.kind==='anomaly'?'健康預警（異常偵測）':'品質預測（迴歸）'} · <span class="tm" data-t="model_key">model_key</span> <code>${esc(sb.model_key||'')}</code>`;
+  const rbk=((LASTRESP||{}).blocks||{})[BD.id]||{};
+  const p=rbk.prediction||{};
+  const raw=sb.kind==='anomaly'?p.health:p.value;
+  const dv=dispOut(sb,raw);
+  const famO=sb.kind!=='anomaly'&&window.Units?Units.family(e.unit||''):null;
+  const duOut=(CUSTOM.blocks[sb.id]||{}).du_out||null;
+  $('bd-out').innerHTML=`<div class="bd-big">${raw!=null&&isFinite(raw)?(sb.kind==='anomaly'?Math.round(raw):Units.disp(dv.v)):'--'}<span class="unit"> ${esc(dv.u)}</span></div>
+    <div class="bd-outrow"><span class="mut">${esc(sb.output_label||'')}${rbk.error?` · <span style="color:#C0392B">錯誤：${esc(rbk.error)}</span>`:''}${rbk.skipped?` · 略過：${esc(rbk.skipped)}`:''}</span>
+      ${famO?`<select class="uconv" id="bd-uout" title="顯示單位（僅換算顯示，不動模型）">${famO.map(l=>`<option${(duOut||Units.canon(e.unit))===l?' selected':''}>${l}</option>`).join('')}</select>`:''}
+    </div>`;
+  const uo=$('bd-uout');
+  if(uo)uo.addEventListener('change',()=>{
+    const c=(CUSTOM.blocks[sb.id]??={});
+    if(uo.value===Units.canon(e.unit))delete c.du_out;else c.du_out=uo.value;
+    saveCustom();renderBD();if(LASTRESP)renderRun(LASTRESP,true);
+  });
+  drawSpark($('bd-spark'),HISTB[BD.id]||[]);
+  const inputs=rbk.inputs||{};
+  const gmap={};(((rbk.guard||{}).checks)||[]).forEach(c=>{gmap[c.feature]=c;});
+  const feats=featsOfBlock(sb);
+  $('bd-inputs').innerHTML=feats.length?feats.map(f=>{
+    const v=inputs[f];
+    const fu=window.Units?Units.featUnit(f):null;
+    const du=(((CUSTOM.blocks[sb.id]||{}).du_in)||{})[f]||null;
+    const fam=fu?Units.family(fu):null;
+    const shown=du&&fu?Units.convert(v,fu,du):v;
+    const g=gmap[f], src=srcOf(sb.id,f);
+    return `<div class="bd-row${g?(g.band==='min_max'?' g-out':' g-warn'):''}">
+      <span class="bd-f" title="${esc(f)}">${esc(prettyFeat(f))}</span>
+      <span class="bd-v">${shown!=null&&isFinite(shown)?Units.disp(shown):'--'}
+        ${fam?`<select class="uconv" data-f="${esc(f)}" title="顯示單位（僅換算顯示）">${fam.map(l=>`<option${(du||fu)===l?' selected':''}>${l}</option>`).join('')}</select>`
+             :`<span class="unit">${esc(du||fu||'')}</span>`}</span>
+      <span class="bd-src ${src.cls}">${src.t}</span>
+      ${g?`<span class="bd-g">${g.band==='min_max'?'✖ 出定義域':'⚠ 外插'}（訓練域 ${Units.disp(g.lo)}~${Units.disp(g.hi)}）</span>`:''}
+    </div>`;
+  }).join(''):'<div class="mut" style="padding:8px 2px">此模型沒有輸入特徵資訊。</div>';
+  $('bd-inputs').querySelectorAll('select.uconv[data-f]').forEach(s=>{
+    s.addEventListener('change',()=>{
+      const f=s.dataset.f, fu=Units.featUnit(f);
+      const c=(CUSTOM.blocks[sb.id]??={}); c.du_in??={};
+      if(s.value===fu)delete c.du_in[f];else c.du_in[f]=s.value;
+      saveCustom();renderBD();
+    });
+  });
+}
+function drawSpark(cv,hist){
+  if(!cv)return;
+  const w=cv.clientWidth||300,h=44,dpr=window.devicePixelRatio||1;
+  cv.width=w*dpr;cv.height=h*dpr;
+  const ctx=cv.getContext('2d');ctx.scale(dpr,dpr);ctx.clearRect(0,0,w,h);
+  const vs=hist.filter(v=>v!=null&&isFinite(v));
+  if(vs.length<2)return;
+  const mn=Math.min(...vs),mx=Math.max(...vs),sp=(mx-mn)||1;
+  ctx.beginPath();let started=false;
+  hist.forEach((v,i)=>{
+    if(v==null||!isFinite(v))return;
+    const x=2+i/Math.max(1,hist.length-1)*(w-4), y=h-4-((v-mn)/sp)*(h-10);
+    started?ctx.lineTo(x,y):ctx.moveTo(x,y);started=true;
+  });
+  ctx.strokeStyle='#046AFB';ctx.lineWidth=1.6;ctx.stroke();
+}
+$('trains').addEventListener('click',e=>{
+  const el=e.target.closest('.blk');if(!el||el.classList.contains('ref'))return;
+  const id=el.id.replace(/^blk_/,'');if(BLK[id])openBD(id);
+});
+$('bdrawer-close').addEventListener('click',()=>{$('bdrawer').classList.remove('open');BD.id=null;});
+
+// 情境列/編輯器/資料面板樣式（隨頁注入，不動原 style 區塊）
+const _xcss=document.createElement('style');
+_xcss.textContent=`
+  .blk{cursor:pointer;}
+  .bar button .csed{margin-left:6px;opacity:.55;font-style:normal;}
+  .bar button .csed:hover{opacity:1;}
+  #sc-editor{background:#fff;border:1px solid #DBDDE0;border-radius:10px;padding:12px 14px;margin:10px 0;font-size:13px;}
+  #sc-editor .sce-head{display:flex;gap:10px;align-items:baseline;margin-bottom:9px;flex-wrap:wrap;}
+  #sc-editor .mut,.bd-outrow .mut{color:#667;font-size:12px;}
+  #sc-editor .sce-nm{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
+  #sc-editor input,#sc-editor select{border:1px solid #DBDDE0;border-radius:7px;padding:6px 8px;font:inherit;font-size:12.5px;background:#fff;}
+  .sce-row{display:flex;gap:7px;margin:5px 0;align-items:center;flex-wrap:wrap;}
+  .sce-row select{max-width:250px;}
+  .sce-row input{width:130px;}
+  .sce-x{border:none;background:none;color:#C0392B;cursor:pointer;font-size:13px;}
+  .sce-acts{display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;}
+  .sce-acts button{border:1px solid #DBDDE0;border-radius:8px;background:#fff;padding:7px 13px;cursor:pointer;font:inherit;font-size:12.5px;}
+  .sce-acts button.pri{border-color:#046AFB;color:#046AFB;font-weight:600;background:rgba(4,106,251,.05);}
+  .sce-acts button.danger{border-color:rgba(192,57,43,.5);color:#C0392B;}
+  #bdrawer{position:fixed;top:0;right:-470px;width:450px;max-width:94vw;height:100vh;background:#fff;
+    border-left:1px solid #DBDDE0;box-shadow:-12px 0 32px rgba(6,16,39,.12);z-index:60;
+    transition:right .22s ease;padding:18px 20px 30px;overflow:auto;font-size:13px;}
+  #bdrawer.open{right:0;}
+  #bdrawer .dclose{position:absolute;top:10px;right:12px;border:none;background:none;font-size:19px;cursor:pointer;color:#667;}
+  #bdrawer h2{font-size:16px;margin:2px 0 3px;display:flex;gap:8px;align-items:center;}
+  #bdrawer h2 .tag{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:#046AFB;background:rgba(4,106,251,.08);border-radius:6px;padding:2px 7px;}
+  #bdrawer .dsub{color:#667;font-size:12px;margin-bottom:10px;}
+  #bdrawer .dsub code{font-size:11px;background:#F3F5F8;border:1px solid #E4E7EB;border-radius:5px;padding:1px 5px;}
+  .bd-big{font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;}
+  .bd-big .unit{font-size:13px;color:#667;font-weight:400;}
+  .bd-outrow{display:flex;gap:10px;align-items:center;margin:2px 0 8px;flex-wrap:wrap;}
+  #bd-spark{width:100%;height:44px;display:block;margin:2px 0 12px;background:#F8FAFC;border:1px solid #EDF0F3;border-radius:7px;}
+  .bd-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 8px;border-bottom:1px solid #F0F2F5;border-radius:6px;}
+  .bd-row.g-warn{background:rgba(180,83,9,.06);}
+  .bd-row.g-out{background:rgba(192,57,43,.07);}
+  .bd-f{flex:1;min-width:120px;}
+  .bd-v{font-variant-numeric:tabular-nums;font-weight:600;display:flex;gap:5px;align-items:center;}
+  .bd-v .unit{color:#667;font-weight:400;font-size:11.5px;}
+  select.uconv{border:1px solid #DBDDE0;border-radius:6px;padding:2px 4px;font-size:11px;color:#334;background:#fff;}
+  .bd-src{font-size:10.5px;border-radius:20px;padding:2px 8px;white-space:nowrap;}
+  .s-up{background:rgba(4,106,251,.09);color:#046AFB;}
+  .s-sl{background:rgba(5,150,105,.1);color:#059669;}
+  .s-sc{background:rgba(124,58,237,.1);color:#7C3AED;}
+  .s-df{background:#F1F3F6;color:#667;}
+  .bd-g{font-size:11px;color:#B45309;flex-basis:100%;}
+  .bd-row.g-out .bd-g{color:#C0392B;}
+  #bdrawer .dhint{margin-top:12px;font-size:11px;color:#889;line-height:1.8;}`;
+document.head.appendChild(_xcss);
+
 $('btn-custom').addEventListener('click',()=>$('drawer').classList.toggle('open'));
 $('drawer-close').addEventListener('click',()=>$('drawer').classList.remove('open'));
 
@@ -592,6 +864,9 @@ async function tick(){
         const v=(S[f]!=null&&isFinite(S[f]))?S[f]:dv;
         bi[f]=+(+v).toFixed(3);
       }
+      // 自訂情境＝具名輸入覆蓋（存於規格檔）：蓋過模擬/預設；上游餵的特徵不蓋（連接優先）
+      const ov=csActive>=0?(((SPEC.scenarios||[])[csActive]||{}).overrides||{})[sb.id]:null;
+      if(ov)for(const f in ov){ if(!(fed&&fed.has(f))) bi[f]=+ov[f]; }
       inputs[sb.id]=bi;
     }
     let resp;
@@ -624,6 +899,7 @@ function renderRun(resp,silent){
   }
   renderKpis(rb);
   updateMimic(resp);
+  if(BD.id)renderBD();                 // 資料面板開著 → 每拍同步刷新
   if(!silent){
     const gsum=`guard: ${counts.ok} ok`+(counts.warn?` / ${counts.warn} warn`:'')+(counts.out?` / ${counts.out} out`:'')+(counts.unknown?` / ${counts.unknown} unknown`:'');
     logln(`run ${resp&&resp.ms!=null?resp.ms:'--'}ms · ${(SPEC.blocks||[]).length} blocks · ${gsum}`+(counts.err?` · ${counts.err} err/skip`:''));
@@ -651,6 +927,8 @@ function renderBlock(sb,rbk,counts,silent){
     return;
   }
   const p=rbk.prediction||{};
+  (HISTB[id]??=[]).push(sb.kind==='anomaly'?(p.health??null):(p.value??null));
+  if(HISTB[id].length>90)HISTB[id].shift();
   let cls='ok',label='正常';
   if(sb.kind==='anomaly'){
     const h=p.health, over=!!p.over_threshold;
@@ -663,7 +941,8 @@ function renderBlock(sb,rbk,counts,silent){
       if(e.better==='low'){cls=v>=e.crit?'crit':v>=e.warn?'warn':'ok';label=v>=e.crit?'偏高':v>=e.warn?'注意':'正常';}
       else{cls=v<=e.crit?'crit':v<=e.warn?'warn':'ok';label=v<=e.crit?'偏低':v<=e.warn?'注意':'正常';}
     }
-    V.innerHTML=`${v!=null?fmt(v):'--'}<span class="unit"> ${esc(e.unit||'')}</span>`;
+    const dv=dispOut(sb,v);            // 顯示層單位換算；警戒比較仍用原單位的 v
+    V.innerHTML=`${v!=null?fmt(dv.v):'--'}<span class="unit"> ${esc(dv.u)}</span>`;
   }
   const gs=(rbk.guard&&rbk.guard.status)||'unknown';
   if(counts[gs]!=null)counts[gs]++;else counts.unknown++;
@@ -692,7 +971,8 @@ function renderKpis(rb){
     const sb=BLK[id]; if(!sb||sb.kind==='anomaly')continue;
     const e=eff(sb); if(e.hidden)continue;
     const en=rb[id], v=en&&en.prediction&&en.prediction.value;
-    items.push([sb.output_label||e.name||id, (v!=null&&isFinite(v))?fmt(v):'--', e.unit||'']);
+    const dv=dispOut(sb,v);
+    items.push([sb.output_label||e.name||id, (v!=null&&isFinite(v))?fmt(dv.v):'--', dv.u||'']);
   }
   $('kpis').innerHTML=items.map(k=>`<div class="kpi"><div class="k">${esc(k[0])}</div><div class="v">${k[1]} <span class="unit">${esc(k[2])}</span></div></div>`).join('');
 }

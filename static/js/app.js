@@ -9,6 +9,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { std, markShadow, builders, detailedBuilders, dm, dFlange, mergeByMaterial, labelHeight, buildPipeComponent, buildTrayBody, PIPE_SERVICES } from './plant-builders.js';
 import { initSprite } from './sprite.js';
+import { loadPointCloud } from './pointcloud.js';
 
 const ACCENT = new THREE.Color('#46c2e0');
 const ALARM_RED = new THREE.Color('#ff2a2d');
@@ -597,6 +598,32 @@ for (const sm of plantData.scan_models ?? []) {
     }
     plantGroup.add(holder);
   }, undefined, (err) => console.error('scan model 載入失敗:', sm.file, err));
+}
+
+// 掃描點雲資產（scan_clouds：編輯器標定/對位後的 .ply 引用）
+// 數值皆為公尺/弧度 canonical（scale 無因次）；缺檔/失敗靜默跳過，不擋孿生載入
+for (const sc of plantData.scan_clouds ?? []) {
+  if (!sc?.file || sc.visible === false) continue;   // 編輯器標記隱藏者不載
+  (async () => {
+    let blobUrl = null;
+    try {
+      const res = await fetch(`/static/scans/${encodeURIComponent(sc.file)}`);
+      if (!res.ok) return;   // 缺檔靜默跳過
+      blobUrl = URL.createObjectURL(await res.blob());
+      const { points } = await loadPointCloud(blobUrl, THREE, { size: 0.015 });
+      const s = (Number.isFinite(sc.scale) && sc.scale > 0) ? sc.scale : 1;
+      points.scale.setScalar(s);                       // 兩點標定尺度：Points.scale 統一乘
+      const p = sc.pos ?? [0, 0, 0];
+      points.position.set(p[0] ?? 0, p[1] ?? 0, p[2] ?? 0);
+      points.rotation.y = sc.rot_y ?? 0;
+      points.material.opacity = 0.85;                  // 半透明疊合現況，不搶模型視覺
+      plantGroup.add(points);
+    } catch (err) {
+      console.warn('scan cloud 載入失敗（跳過）:', sc?.file, err);
+    } finally {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    }
+  })();
 }
 
 // ---------------------------------------------------------------- 設備樹 UI

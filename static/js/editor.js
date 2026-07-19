@@ -346,7 +346,7 @@ function applyLayers() {
 function emptyScene(name) {
   return {
     plant: { id: 'NEW', name, units: [{ id: 'U-100', name: '主區', equipment: [] }] },
-    pipes: [], instruments: {}, scan_models: [], props: [],
+    pipes: [], instruments: {}, scan_models: [], scan_clouds: [], props: [],
     scenarios: [{ id: 'normal', name: '正常運轉', kind: 'normal', desc: '' }],
   };
 }
@@ -827,6 +827,7 @@ function loadSceneData(data, id) {
   clearPointCloud(true);
   sceneData = data;
   sceneId = id;
+  rebuildScanClouds();   // scan_clouds 資產隨場景載入（非同步；404 提示跳過）
   pcButtons();   // 依新場景重置點雲按鈕禁用狀態
   for (const eq of allEquipment()) buildEquipment(eq);
   sceneData.pipes.forEach((pipe, i) => buildPipe(pipe, i));
@@ -853,7 +854,7 @@ function updateTopbar() {
 }
 
 // ------------------------------------------------------------ 模式與選取
-let mode = 'idle'; // idle | placing | pipe | measure | pipenode | nozzle
+let mode = 'idle'; // idle | placing | pipe | measure | pipenode | nozzle | pcscale（掃描點雲兩點尺度標定）
 let placingAsset = null;  // ASSET_CATALOG 項
 let ductDraw = false;     // 繪製模式：true=下一條管線為風管
 let ductSize = [0.8, 0.5];
@@ -895,6 +896,7 @@ function setMode(m) {
   pendingComp = null;
   clearPipeDraft();
   clearMeasure();
+  clearPcScale();   // 離開/切換模式時清掉尺度標定拾取點與標記
   alignSrcTag = null;
   if (m !== 'pipenode') clearNodeHandles();
   if (m === 'idle') setHint('點選素材開始，或點擊場景中的設備編輯');
@@ -2427,13 +2429,22 @@ let pcSizeIdx = 1;
 let pcOpacIdx = 0;
 
 function pcButtons() {
-  const has = !!pcEntry;
-  const on = has && pcEntry.points.visible;
-  document.getElementById('btn-pc-toggle').disabled = !has;
-  document.getElementById('btn-pc-size').disabled = !has;
-  document.getElementById('btn-pc-opacity').disabled = !has;
-  document.getElementById('btn-pc-clear').disabled = !has;
+  const hasLocal = !!pcEntry;
+  const hasAny = hasLocal || scanObjects.some((s) => !!s);   // 點徑/透明也管伺服器掃描資產
+  const on = hasLocal && pcEntry.points.visible;
+  document.getElementById('btn-pc-toggle').disabled = !hasLocal;
+  document.getElementById('btn-pc-size').disabled = !hasAny;
+  document.getElementById('btn-pc-opacity').disabled = !hasAny;
+  document.getElementById('btn-pc-clear').disabled = !hasLocal;
   document.getElementById('btn-pc-toggle').classList.toggle('active', on);
+}
+
+// 目前掛在場景上的所有點雲 Points（本機預覽＋伺服器掃描資產）——點徑/透明/量測共用
+function allPcPoints() {
+  const out = [];
+  if (pcEntry) out.push(pcEntry.points);
+  for (const s of scanObjects) if (s) out.push(s.points);
+  return out;
 }
 
 // 移除目前點雲並釋放 GPU 資源（geometry+material）；同時清 metadata
@@ -2482,18 +2493,23 @@ document.getElementById('btn-pc-toggle').addEventListener('click', () => {
   if (!pcEntry) return;
   pcEntry.points.visible = !pcEntry.points.visible;
   pcButtons();
+  invalidate();   // 點雲顯示切換
 });
 document.getElementById('btn-pc-size').addEventListener('click', () => {
-  if (!pcEntry) return;
+  const pts = allPcPoints();
+  if (!pts.length) return;
   pcSizeIdx = (pcSizeIdx + 1) % PC_SIZES.length;
-  pcEntry.points.material.size = PC_SIZES[pcSizeIdx];
+  for (const p of pts) p.material.size = PC_SIZES[pcSizeIdx];
   setHint(`點雲點徑：<b>${Math.round(PC_SIZES[pcSizeIdx] * 1000)} mm</b>`);
+  invalidate();   // 點徑變更
 });
 document.getElementById('btn-pc-opacity').addEventListener('click', () => {
-  if (!pcEntry) return;
+  const pts = allPcPoints();
+  if (!pts.length) return;
   pcOpacIdx = (pcOpacIdx + 1) % PC_OPACS.length;
-  pcEntry.points.material.opacity = PC_OPACS[pcOpacIdx];
+  for (const p of pts) p.material.opacity = PC_OPACS[pcOpacIdx];
   setHint(`點雲不透明度：<b>${Math.round(PC_OPACS[pcOpacIdx] * 100)}%</b>`);
+  invalidate();   // 透明度變更
 });
 document.getElementById('btn-pc-clear').addEventListener('click', () => {
   clearPointCloud();
@@ -2501,12 +2517,270 @@ document.getElementById('btn-pc-clear').addEventListener('click', () => {
 });
 
 // 對點雲做 raycast，回傳最近命中點座標（公尺）；供量測/標註測現場淨空/間距
+// 目標涵蓋本機預覽＋伺服器掃描資產（隱藏者不參與命中）
 function pickPointCloud(e) {
-  if (!pcEntry || !pcEntry.points.visible) return null;
+  const targets = allPcPoints().filter((p) => p.visible);
+  if (!targets.length) return null;
   setPointer(e);
   raycaster.setFromCamera(pointer, camera);
-  const hits = raycaster.intersectObject(pcEntry.points, false);
+  const hits = raycaster.intersectObjects(targets, false);
   return hits.length ? hits[0].point : null;
+}
+
+// ------------------------------------------------------------ 掃描點雲「場景資產」（scan_clouds：隨場景持久化）
+// sceneData.scan_clouds = [{ file, scale, pos:[E,U,N], rot_y, visible }]
+//   file  : static/scans/ 下檔名（.ply；實體檔不進場景 JSON，只存引用）
+//   scale : 單目重建 up-to-scale → 兩點標定後的尺度倍率（無因次）
+//   pos   : 公尺 canonical；rot_y 弧度 canonical——mm/度只在面板顯示/輸入邊界轉換
+// 與本機預覽（pcEntry，不入存檔）並存；存讀/undo 隨 sceneData 快照自然帶。
+const scanObjects = [];   // index 對齊 sceneData.scan_clouds → { points, dispose } | null（缺檔/載入中）
+let curScanIdx = -1;      // 面板目前操作的掃描資產（標定/對位針對它）
+let scanLoadToken = 0;    // 換場景/undo 令牌：舊的非同步載入完成時作廢，避免殭屍點雲
+
+// 把 canonical transform 套到 Points（scale 統一乘、pos 公尺、rot_y 弧度）
+function applyScanTransform(points, sc) {
+  const s = (Number.isFinite(sc.scale) && sc.scale > 0) ? sc.scale : 1;
+  points.scale.setScalar(s);
+  const p = sc.pos ?? [0, 0, 0];
+  points.position.set(p[0] ?? 0, p[1] ?? 0, p[2] ?? 0);
+  points.rotation.y = sc.rot_y ?? 0;
+  points.visible = sc.visible !== false;
+}
+
+// 移除全部掃描資產實體並 dispose（geometry+material）；資料（sceneData.scan_clouds）不動
+function clearScanClouds() {
+  scanLoadToken++;
+  for (const s of scanObjects) {
+    if (!s) continue;
+    pcGroup.remove(s.points);
+    s.dispose();
+  }
+  scanObjects.length = 0;
+  curScanIdx = -1;
+  pcButtons();
+  invalidate();   // 掃描資產卸載
+}
+
+// 低階載入：fetch /static/scans/<file> → PLYLoader（走既有 loadPointCloud 路徑）
+// 404/失敗回傳 null（呼叫端決定提示或靜默），不 throw
+async function fetchScanEntry(file) {
+  let blobUrl = null;
+  try {
+    const res = await fetch(`/static/scans/${encodeURIComponent(file)}`);
+    if (!res.ok) return null;
+    blobUrl = URL.createObjectURL(await res.blob());
+    return await loadPointCloud(blobUrl, THREE, { size: PC_SIZES[pcSizeIdx] });
+  } catch (err) {
+    console.error('掃描點雲載入失敗', file, err);
+    return null;
+  } finally {
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+  }
+}
+
+// 載入 scan_clouds[i] 並掛上場景（套 transform）；缺檔 setHint 提示並跳過
+async function buildScanCloud(i) {
+  const token = scanLoadToken;
+  const sc = sceneData.scan_clouds?.[i];
+  if (!sc?.file) return null;
+  const entry = await fetchScanEntry(sc.file);
+  if (!entry) {
+    if (token === scanLoadToken) setHint(`掃描點雲缺檔：<b>${sc.file}</b>（已跳過，請放到 static/scans/）`);
+    return null;
+  }
+  if (token !== scanLoadToken || sceneData.scan_clouds?.[i] !== sc) {
+    entry.dispose();   // 載入期間換了場景/undo → 這朵作廢
+    return null;
+  }
+  entry.points.material.opacity = PC_OPACS[pcOpacIdx];
+  applyScanTransform(entry.points, sc);
+  pcGroup.add(entry.points);
+  scanObjects[i] = entry;
+  pcButtons();
+  invalidate();   // 掃描資產非同步載入完成
+  return entry;
+}
+
+// 依 sceneData.scan_clouds 重建全部掃描資產（載入場景/undo/redo 走這裡；非同步不阻塞）
+function rebuildScanClouds() {
+  clearScanClouds();
+  (sceneData.scan_clouds ?? []).forEach((_, i) => { buildScanCloud(i); });
+}
+
+// 「從伺服器載入」：輸入檔名 → 載入成功才寫入 scan_clouds（缺檔不留殘項）
+async function loadScanFromServer() {
+  const name = prompt('伺服器點雲檔名（static/scans/ 下，.ply）：', '');
+  const file = name?.trim();
+  if (!file) return;
+  const entry = await fetchScanEntry(file);
+  if (!entry) { setHint(`載入失敗：<b>${file}</b> 不存在或非有效 .ply（檔案須放在 static/scans/）`); return; }
+  pushUndo();
+  sceneData.scan_clouds ??= [];
+  const sc = { file, scale: 1, pos: [0, 0, 0], rot_y: 0, visible: true };
+  sceneData.scan_clouds.push(sc);
+  const i = sceneData.scan_clouds.length - 1;
+  entry.points.material.opacity = PC_OPACS[pcOpacIdx];
+  applyScanTransform(entry.points, sc);
+  pcGroup.add(entry.points);
+  scanObjects[i] = entry;
+  curScanIdx = i;
+  pcButtons();
+  invalidate();   // 新掃描資產上場
+  const n = entry.points.geometry.getAttribute('position')?.count ?? 0;
+  setHint(`已載入掃描資產 <b>${file}</b>（${n.toLocaleString()} 點）——右側面板可做尺度標定/對位`);
+  renderScanPanel();
+}
+
+// 移除 scan_clouds[i]（資料＋實體；geometry/material dispose）
+function removeScanCloud(i) {
+  pushUndo();
+  sceneData.scan_clouds.splice(i, 1);
+  const old = scanObjects.splice(i, 1)[0];
+  if (old) { pcGroup.remove(old.points); old.dispose(); }
+  if (curScanIdx >= sceneData.scan_clouds.length) curScanIdx = sceneData.scan_clouds.length - 1;
+  pcButtons();
+  invalidate();   // 掃描資產移除
+}
+
+// ---------------- 兩點尺度標定（單目重建 up-to-scale → 對到真實公尺）
+// 流程：面板按「兩點標定」→ 在目前點雲上點 2 點（沿用點雲 raycast threshold）
+//       → 輸入真實距離（顯示單位，fromDisp 轉公尺）→ scale 統一乘、寫回 scan_clouds[i].scale
+let pcScalePts = [];        // 世界座標拾取點（公尺，含目前 scale）
+let pcScaleMarkers = null;  // 拾取點暫時標記（橘球；離開模式即清除）
+
+function startPcScale() {
+  const sc = sceneData.scan_clouds?.[curScanIdx];
+  if (!sc || !scanObjects[curScanIdx]) { setHint('先在掃描面板選取一朵<b>已載入</b>的點雲再標定'); return; }
+  setMode('pcscale');
+  setHint(`尺度標定：在點雲 <b>${sc.file}</b> 上點<b>第 1 點</b>（Esc 取消）`);
+}
+
+function clearPcScale() {
+  pcScalePts = [];
+  if (pcScaleMarkers) {
+    pcScaleMarkers.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+    scene.remove(pcScaleMarkers);
+    pcScaleMarkers = null;
+    invalidate();   // 標定標記清除
+  }
+}
+
+function addPcScalePick(e) {
+  const sc = sceneData.scan_clouds?.[curScanIdx];
+  const entry = scanObjects[curScanIdx];
+  if (!sc || !entry) { setMode('idle'); return; }
+  setPointer(e);
+  raycaster.setFromCamera(pointer, camera);   // Points threshold 沿用全域 raycaster.params.Points
+  const hits = raycaster.intersectObject(entry.points, false);
+  if (!hits.length) { setHint('未命中點雲——請點在掃描點上（Esc 取消）'); return; }
+  const pt = hits[0].point.clone();
+  pcScalePts.push(pt);
+  if (!pcScaleMarkers) { pcScaleMarkers = new THREE.Group(); scene.add(pcScaleMarkers); }
+  const mk = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffb020, depthTest: false }));
+  mk.renderOrder = 5;
+  mk.position.copy(pt);
+  pcScaleMarkers.add(mk);
+  invalidate();   // 標定拾取標記
+  if (pcScalePts.length < 2) { setHint('尺度標定：點<b>第 2 點</b>（Esc 取消）'); return; }
+
+  const measured = pcScalePts[0].distanceTo(pcScalePts[1]);   // 世界量得距離（公尺，已含目前 scale）
+  if (measured < 1e-6) { clearPcScale(); setHint('兩點重合——請重新點<b>第 1 點</b>'); return; }
+  const inp = prompt(`兩點量得 ${fmtLen(measured)}。輸入真實距離（${unitLabel()}）：`, fmtLen(measured, false));
+  if (inp === null) { setMode('idle'); return; }
+  const real = fromDisp(inp);   // 顯示單位 → 公尺（邊界轉換）
+  if (!(real > 0)) { setMode('idle'); setHint('真實距離無效——標定取消'); return; }
+  pushUndo();
+  // 世界量距已含舊 scale → 新 scale＝舊 scale × 真實/量得（Points.scale 統一乘）
+  sc.scale = +(((Number.isFinite(sc.scale) && sc.scale > 0) ? sc.scale : 1) * (real / measured)).toFixed(6);
+  applyScanTransform(entry.points, sc);
+  setMode('idle');
+  setHint(`尺度標定完成：scale＝<b>${sc.scale}</b>（量得 ${fmtLen(measured)} → 真實 ${fmtLen(real)}）`);
+  invalidate();   // 尺度套用
+  renderScanPanel();
+}
+
+// ---------------- 掃描資產面板（佔右側屬性面板：清單＋顯示切換＋對位輸入＋標定入口）
+function renderScanPanel() {
+  repaintPanel = renderScanPanel;   // 切換顯示單位時即時重繪
+  document.getElementById('prop-title').textContent = '掃描點雲資產';
+  const clouds = sceneData.scan_clouds ?? [];
+  if (curScanIdx >= clouds.length) curScanIdx = clouds.length - 1;
+  if (curScanIdx < 0 && clouds.length) curScanIdx = 0;
+  const rows = clouds.map((c, i) => `
+    <div data-scrow="${i}" style="display:flex;align-items:center;gap:6px;padding:5px 4px;border-bottom:1px solid var(--bdr);font-size:12.5px;cursor:pointer;${i === curScanIdx ? 'background:rgba(4,106,251,.10);border-radius:6px;' : ''}">
+      <input type="checkbox" data-scvis="${i}" ${c.visible !== false ? 'checked' : ''} title="顯示/隱藏">
+      <span style="flex:1;color:var(--text);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.file}${scanObjects[i] ? '' : '（缺檔）'}</span>
+      <button data-scdel="${i}" style="border:none;background:none;color:#d03050;cursor:pointer;font-size:11.5px;font-family:inherit">移除</button>
+    </div>`).join('');
+  const sc = clouds[curScanIdx];
+  const detail = sc ? `
+    <div style="margin-top:12px;font-size:12px;color:var(--dim);font-weight:700">對位｜${sc.file}</div>
+    <div style="${PP_ROW}"><span style="width:70px">東 E ${unitLabel()}</span><input id="sc-e" type="number" step="${U().step}" value="${toDisp(sc.pos?.[0] ?? 0)}" style="${PP_INP}"></div>
+    <div style="${PP_ROW}"><span style="width:70px">北 N ${unitLabel()}</span><input id="sc-n" type="number" step="${U().step}" value="${toDisp(sc.pos?.[2] ?? 0)}" style="${PP_INP}"></div>
+    <div style="${PP_ROW}"><span style="width:70px">標高 U ${unitLabel()}</span><input id="sc-u" type="number" step="${U().step}" value="${toDisp(sc.pos?.[1] ?? 0)}" style="${PP_INP}"></div>
+    <div style="${PP_ROW}"><span style="width:70px">轉角（度）</span><input id="sc-rot" type="number" step="0.1" value="${+((sc.rot_y ?? 0) * 180 / Math.PI).toFixed(2)}" style="${PP_INP}"></div>
+    <div style="${PP_ROW}"><span style="width:70px">尺度 ×</span><input id="sc-scale" type="number" step="0.000001" min="0.000001" value="${+(sc.scale ?? 1).toFixed(6)}" style="${PP_INP}"></div>
+    <button id="sc-apply" style="${PP_BTN}">套用對位</button>
+    <button id="sc-calib" style="${PP_GHOST}">兩點尺度標定（在點雲上點兩點）</button>`
+    : '<div style="color:var(--dim);font-size:12px;padding:8px 0">尚無掃描資產——按點雲群「伺服器」輸入 static/scans/ 檔名載入</div>';
+  propBody.innerHTML = `<div>${rows}</div>${detail}`;
+
+  propBody.querySelectorAll('[data-scrow]').forEach((row) => row.addEventListener('click', () => {
+    curScanIdx = +row.dataset.scrow;
+    renderScanPanel();
+  }));
+  propBody.querySelectorAll('[data-scvis]').forEach((cb) => {
+    cb.addEventListener('click', (ev) => ev.stopPropagation());   // 勾選不觸發列選取
+    cb.addEventListener('change', () => {
+      const i = +cb.dataset.scvis;
+      pushUndo();
+      sceneData.scan_clouds[i].visible = cb.checked;   // 顯示狀態寫回（隨場景持久化）
+      if (scanObjects[i]) scanObjects[i].points.visible = cb.checked;
+      invalidate();   // 顯示切換
+    });
+  });
+  propBody.querySelectorAll('[data-scdel]').forEach((b) => b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    removeScanCloud(+b.dataset.scdel);
+    setHint('已移除掃描資產（引用與實體皆卸除；檔案本身仍留在 static/scans/）');
+    renderScanPanel();
+  }));
+  if (!sc) return;
+  document.getElementById('sc-apply').addEventListener('click', () => {
+    const s = parseFloat(document.getElementById('sc-scale').value);
+    pushUndo();
+    // 邊界轉換：E/N/U 顯示單位→公尺（fromDisp 已含 roundMM）；角度 度→弧度
+    sc.pos = [fromDisp(document.getElementById('sc-e').value),
+              fromDisp(document.getElementById('sc-u').value),
+              fromDisp(document.getElementById('sc-n').value)];
+    sc.rot_y = (parseFloat(document.getElementById('sc-rot').value) || 0) * Math.PI / 180;
+    if (Number.isFinite(s) && s > 0) sc.scale = s;
+    if (scanObjects[curScanIdx]) applyScanTransform(scanObjects[curScanIdx].points, sc);
+    invalidate();   // 對位套用
+    setHint(`已套用對位：<b>${sc.file}</b>（E ${fmtLen(sc.pos[0])}、N ${fmtLen(sc.pos[2])}、U ${fmtLen(sc.pos[1])}、${(sc.rot_y * 180 / Math.PI).toFixed(1)}°、×${sc.scale}）`);
+    renderScanPanel();
+  });
+  document.getElementById('sc-calib').addEventListener('click', startPcScale);
+}
+
+// 點雲按鈕群動態擴充（editor.html 不動）：伺服器資產載入＋對位面板入口
+{
+  const fileInp = document.getElementById('pc-file');
+  const mkBtn = (id, icon, text, title) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'rbtn';
+    b.id = id;
+    b.title = title;
+    b.innerHTML = `<span class="ric"><svg viewBox="0 0 24 24">${ICONS[icon]}</svg></span>${text}`;
+    fileInp.parentElement.insertBefore(b, fileInp);
+    return b;
+  };
+  mkBtn('btn-pc-server', 'open', '伺服器', '從伺服器 static/scans/ 載入點雲資產（存 URL 引用、隨場景載入）')
+    .addEventListener('click', loadScanFromServer);
+  mkBtn('btn-pc-align', 'move', '對位', '掃描點雲資產面板：兩點尺度標定／平移／旋轉／標高／顯示')
+    .addEventListener('click', renderScanPanel);
 }
 
 renderer.domElement.addEventListener('pointermove', (e) => {
@@ -2630,6 +2904,12 @@ renderer.domElement.addEventListener('pointerup', (e) => {
       updatePipePreview();
       setHint(`管線繪製：已 ${pipeDraft.length} 點（<b>Shift</b>=正交鎖定），<b>Enter</b> 完成、<b>Esc</b> 取消`);
     }
+    return;
+  }
+
+  if (mode === 'pcscale') {
+    // 兩點尺度標定：只對目前掃描點雲拾取
+    addPcScalePick(e);
     return;
   }
 

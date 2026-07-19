@@ -2588,14 +2588,21 @@ async function buildScanCloud(i) {
     if (token === scanLoadToken) setHint(`掃描點雲缺檔：<b>${sc.file}</b>（已跳過，請放到 static/scans/）`);
     return null;
   }
-  if (token !== scanLoadToken || sceneData.scan_clouds?.[i] !== sc) {
+  if (token !== scanLoadToken) {
     entry.dispose();   // 載入期間換了場景/undo → 這朵作廢
+    return null;
+  }
+  // 身分用 indexOf 而非固定索引：載入期間若前面的資產被移除(splice)，索引會前移，
+  // 固定 i 會把成功載入的這朵誤判作廢；indexOf 找到現在的位置掛載即可。
+  const idx = sceneData.scan_clouds?.indexOf(sc) ?? -1;
+  if (idx < 0) {
+    entry.dispose();   // 這朵真的被移除了
     return null;
   }
   entry.points.material.opacity = PC_OPACS[pcOpacIdx];
   applyScanTransform(entry.points, sc);
   pcGroup.add(entry.points);
-  scanObjects[i] = entry;
+  scanObjects[idx] = entry;
   pcButtons();
   invalidate();   // 掃描資產非同步載入完成
   return entry;
@@ -2612,8 +2619,10 @@ async function loadScanFromServer() {
   const name = prompt('伺服器點雲檔名（static/scans/ 下，.ply）：', '');
   const file = name?.trim();
   if (!file) return;
+  const token = scanLoadToken;   // fetch 期間若換場景/undo，勿把資產寫進別的場景
   const entry = await fetchScanEntry(file);
   if (!entry) { setHint(`載入失敗：<b>${file}</b> 不存在或非有效 .ply（檔案須放在 static/scans/）`); return; }
+  if (token !== scanLoadToken) { entry.dispose(); return; }
   pushUndo();
   sceneData.scan_clouds ??= [];
   const sc = { file, scale: 1, pos: [0, 0, 0], rot_y: 0, visible: true };

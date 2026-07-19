@@ -439,6 +439,57 @@ for (const unit of plantData.plant.units) {
   }
 }
 
+// ---------------------------------------------------------- AI 模組示意層
+// 在 3D 廠區上標出各 AI 診斷／優化模組對應的設備與導入狀態，供簡報／導覽用。
+// 資料可放場景 JSON 的 ai_modules；無則用內建對照（僅命中對得上位號的場景，
+// 例：龍德公用廠）。CSS2DRenderer 不吃父層 visible，callout 自行開關（同 conLabels）。
+const AI_MODULES_FALLBACK = [
+  { name: '智慧除坑',   tag: 'CB-101', status: 'done', note: '煤倉／儲坑結拱堵料偵測' },
+  { name: '智慧閥門',   tag: 'P-201',  status: 'done', note: '給水泵閥件洩漏／黏滯診斷' },
+  { name: '變頻器診斷', tag: 'K-401',  status: 'done', note: '引風機變頻器負載／軸承異常' },
+  { name: '蒸汽預測',   tag: 'B-202',  status: 'done', note: '主蒸汽流量／溫壓短期預測' },
+  { name: '底渣量分析', tag: 'B-201',  status: 'done', note: '爐底渣產出量估測' },
+  { name: '燃燒最佳化', tag: 'B-201',  status: 'wip',  note: '配風／給煤燃燒最佳化（進行中）' },
+  { name: '根因分析',   tag: 'A-501',  status: 'done', note: '全廠告警根因追溯' },
+  { name: 'PEMS',       tag: 'ST-601', status: 'wip',  note: '排放預測監測 PEMS（進行中）' },
+];
+const AI_MODULES = plantData.ai_modules?.length ? plantData.ai_modules : AI_MODULES_FALLBACK;
+const aiModLabels = [];
+{
+  const perTag = {};   // 同一設備掛多個模組 → 垂直錯開避免重疊
+  for (const m of AI_MODULES) {
+    const entry = eqMap[m.tag];
+    if (!entry) continue;
+    const el = document.createElement('div');
+    el.className = 'ai-mod-callout' + (m.status === 'wip' ? ' wip' : '');
+    if (m.note) el.title = m.note;
+    el.innerHTML = `<span class="amc-name"></span><span class="amc-status"></span>`;
+    el.querySelector('.amc-name').textContent = m.name;
+    el.querySelector('.amc-status').textContent = m.status === 'wip' ? '進行中' : '已完成';
+    const label = new CSS2DObject(el);
+    const k = (perTag[m.tag] = (perTag[m.tag] ?? 0) + 1);
+    // 高聳設備（煙囪／塔）的標籤高度封頂，避免 callout 飄出畫面頂端
+    label.position.set(0, Math.min(labelHeight(entry.def), 15) + 2.4 + (k - 1) * 2.0, 0);
+    entry.group.add(label);
+    label.visible = false;
+    aiModLabels.push(label);
+  }
+}
+{
+  let aiModOn = false;
+  const aiModBtn = document.getElementById('ai-mod-toggle');
+  const aiModLegend = document.getElementById('ai-mod-legend');
+  if (aiModBtn && aiModLabels.length) {
+    aiModBtn.style.display = '';   // 有對得上的設備才顯示此工具
+    aiModBtn.addEventListener('click', () => {
+      aiModOn = !aiModOn;
+      for (const l of aiModLabels) l.visible = aiModOn;
+      aiModBtn.classList.toggle('active', aiModOn);
+      aiModLegend?.classList.toggle('hidden', !aiModOn);
+    });
+  }
+}
+
 // 管線（裝飾用，串接設備）
 // P&ID 自動抽取的管線可達數千段——合併成單一 BufferGeometry（一次 draw call），
 // 手繪少量管線走原路徑（個別 mesh 保留陰影品質）

@@ -192,6 +192,42 @@ html, body {
   color: var(--safe); font-size: 12px; font-weight: 700; white-space: nowrap;
 }
 
+/* ---------------------------------------------- AI 模組示意層 callouts */
+.ai-mod-callout {
+  position: relative; padding: 4px 10px 5px; border-radius: 9px;
+  background: rgba(255, 255, 255, 0.97); border: 1.5px solid var(--safe);
+  box-shadow: 0 4px 14px rgba(8, 20, 32, 0.28);
+  font-size: 11px; font-weight: 700; color: #123320;
+  white-space: nowrap; user-select: none; cursor: default;
+}
+.ai-mod-callout .amc-name { font-size: 12px; letter-spacing: 0.3px; }
+.ai-mod-callout .amc-status {
+  display: inline-block; margin-left: 6px; padding: 0 6px;
+  border-radius: 8px; font-size: 9.5px; font-weight: 700;
+  background: var(--safe); color: #06331d; vertical-align: middle;
+}
+.ai-mod-callout::after {                      /* 指向設備的小三角 */
+  content: ''; position: absolute; left: 16px; bottom: -6px;
+  border: 6px solid transparent; border-top-color: var(--safe);
+  filter: drop-shadow(0 2px 1px rgba(8, 20, 32, 0.2));
+}
+.ai-mod-callout.wip { border-color: #f2a33c; color: #4a3410; }
+.ai-mod-callout.wip .amc-status { background: #f2a33c; color: #3a2606; }
+.ai-mod-callout.wip::after { border-top-color: #f2a33c; }
+
+#ai-mod-legend {
+  position: absolute; bottom: 66px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 16px; z-index: 25;
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: 8px; padding: 6px 14px; backdrop-filter: blur(6px);
+  font-size: 11px; color: var(--text-dim); font-weight: 700;
+}
+#ai-mod-legend .aml-item { display: flex; align-items: center; gap: 6px; }
+#ai-mod-legend .aml-dot { width: 12px; height: 12px; border-radius: 3px; }
+#ai-mod-legend .aml-dot.done { background: var(--safe); }
+#ai-mod-legend .aml-dot.wip { background: #f2a33c; }
+#ai-mod-legend .aml-hint { font-weight: 500; opacity: 0.85; }
+
 /* ------------------------------------------------------ AI 情境比對面板 */
 #match-panel {
   position: absolute; bottom: 70px; left: 12px; width: 300px;

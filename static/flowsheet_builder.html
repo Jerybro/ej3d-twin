@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Flowsheet 設計器｜Process Intelligence</title>
+<script>if(localStorage.getItem('ej3d-theme')==='pi')document.documentElement.classList.add('theme-pi');</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
@@ -143,6 +144,35 @@
   .cpick button{display:block;width:100%;text-align:left;border:1px solid transparent;background:none;
     border-radius:6px;padding:5px 7px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text);}
   .cpick button:hover{background:rgba(4,106,251,.06);border-color:var(--bdr);}
+
+  /* -------- PI 戰情室視覺（對齊 OSIsoft PI Vision 畫面格式；與孿生檢視共用 ej3d-theme 記憶） */
+  html.theme-pi{
+    --blue:#4da3ff; --bg:#000; --white:#10161d; --bdr:#3d4a57;
+    --text:#f2f5f8; --text2:#9aa9b8; --green:#2fd693; --amber:#ffb84d; --red:#ff6b6d;
+  }
+  html.theme-pi header.site{background:linear-gradient(180deg,#1d3a5f,#142c4d);
+    border-radius:10px;padding:10px 14px;}
+  html.theme-pi .logo{color:#fff;}
+  html.theme-pi .site-sub{color:#a8bdd6;}
+  html.theme-pi .hbtn{background:rgba(255,255,255,.08);color:#e8eef4;border-color:rgba(255,255,255,.25);}
+  html.theme-pi .hbtn:hover{border-color:#4da3ff;color:#7fbcff;}
+  html.theme-pi .save-btn{background:#2e6fd0;}
+  html.theme-pi .save-btn:hover{background:#3d7fdf;}
+  html.theme-pi .save-btn:disabled{background:#2c3f5c;}
+  html.theme-pi .train{background:#0c1218;}
+  html.theme-pi #canvas-wrap{background:#05080c;}
+  html.theme-pi #cv-inner{background-image:radial-gradient(#1e2a36 1px,transparent 1px);}
+  html.theme-pi .ctile{box-shadow:0 2px 10px rgba(0,0,0,.6);}
+  html.theme-pi .ctile.sel{box-shadow:0 0 0 3px rgba(77,163,255,.3);}
+  html.theme-pi .ctile .ct-kind{background:rgba(77,163,255,.16);}
+  html.theme-pi .ctile .ct-kind.an{background:rgba(47,214,147,.14);}
+  html.theme-pi .ctile .ct-acts button{box-shadow:0 2px 6px rgba(0,0,0,.5);}
+  html.theme-pi .cport.in{background:#3a4653;}
+  html.theme-pi .cvlbl{box-shadow:0 2px 6px rgba(0,0,0,.5);}
+  html.theme-pi .cpick{box-shadow:0 10px 26px rgba(0,0,0,.6);}
+  html.theme-pi .cpick button:hover{background:rgba(77,163,255,.12);}
+  html.theme-pi .viewseg2 button.on{background:rgba(77,163,255,.18);}
+  html.theme-pi .result.err{background:rgba(255,107,109,.12);}
   .cv-hint{font-size:11px;color:var(--text2);margin-top:8px;line-height:1.7;}
 
   /* 驗證錯誤欄位高亮：紅框+光暈+輕微搖動；使用者一輸入即消除 */
@@ -157,6 +187,7 @@
     <span class="logo">Process Intelligence</span>
     <span class="site-sub">Flowsheet 設計器</span>
     <div class="hdr-actions">
+      <button class="hbtn" id="pi-theme-btn" title="視覺風格：J.S 藍白 ↔ PI 戰情室（黑底儀表板，對齊 OSIsoft PI Vision 畫面格式）；全平台共用記憶">PI 戰情室</button>
       <a class="hbtn" href="/static/model_api.html">模型 API 控制台</a>
       <a class="hbtn" href="/">← 回首頁</a>
     </div>
@@ -683,6 +714,24 @@ $('m-load').addEventListener('change',async()=>{
     {el:'.cols .panel:nth-child(3)',title:'③ 模型輸出傳遞',text:'連接也可以用下拉建立——把上游模型的輸出接到下游的輸入特徵，「A 算完、B 跟著變」。'},
     {el:'.save-btn',title:'儲存即運轉',text:'存檔後後端會驗證並自動補訓練中位數預設值（拼圖座標也一起存），馬上就能開檢視頁跑。'},
   ]);
+})();
+</script>
+<script>
+// PI 戰情室切換：html.theme-pi + localStorage（與孿生檢視 /twin 同一把 key，全平台跟著走）
+(function(){
+  const b = document.getElementById('pi-theme-btn');
+  if (!b) return;
+  const sync = () => {
+    const on = document.documentElement.classList.contains('theme-pi');
+    b.style.borderColor = on ? '#4da3ff' : '';
+    b.style.color = on ? '#7fbcff' : '';
+  };
+  b.addEventListener('click', () => {
+    const on = document.documentElement.classList.toggle('theme-pi');
+    localStorage.setItem('ej3d-theme', on ? 'pi' : 'js');
+    sync();
+  });
+  sync();
 })();
 </script>
 </body>

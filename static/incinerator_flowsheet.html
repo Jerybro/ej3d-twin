@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Flowsheet 工程檢視｜Process Intelligence</title>
+<script>if(localStorage.getItem('ej3d-theme')==='pi')document.documentElement.classList.add('theme-pi');</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
@@ -178,6 +179,69 @@
   .pk-acts a.pk-3d{background:rgba(4,106,251,.06);color:var(--blue);font-weight:600;}
   .pk-new{border-style:dashed;display:flex;align-items:center;justify-content:center;min-height:120px;}
   .pk-new a{font-size:13.5px;color:var(--blue);text-decoration:none;font-weight:600;}
+
+  /* -------- PI 戰情室視覺（對齊 OSIsoft PI Vision 儀表板；與孿生檢視共用 ej3d-theme 記憶） */
+  html.theme-pi{
+    --blue:#4da3ff; --bg:#000; --white:#10161d; --bdr:#3d4a57;
+    --text:#f2f5f8; --text2:#9aa9b8; --green:#2fd693; --amber:#ffb84d; --red:#ff6b6d;
+  }
+  html.theme-pi header.site{background:linear-gradient(180deg,#1d3a5f,#142c4d);
+    border-radius:10px;padding:10px 14px;}
+  html.theme-pi .logo{color:#fff;}
+  html.theme-pi .site-sub{color:#a8bdd6;}
+  html.theme-pi .hbtn{background:rgba(255,255,255,.08);color:#e8eef4;border-color:rgba(255,255,255,.25);}
+  html.theme-pi .hbtn:hover{border-color:#4da3ff;color:#7fbcff;}
+  html.theme-pi .viewseg button.on{background:rgba(77,163,255,.18);}
+  html.theme-pi .b-predict{background:rgba(77,163,255,.14);}
+  html.theme-pi .b-health{background:rgba(47,214,147,.13);}
+  html.theme-pi .st.ok{background:rgba(47,214,147,.13);}
+  html.theme-pi .st.warn{background:rgba(255,184,77,.15);}
+  html.theme-pi .st.crit{background:rgba(255,107,109,.14);}
+  html.theme-pi .st.na{background:#1a2129;}
+  html.theme-pi .key{background:#3a4653;}
+  html.theme-pi #log{background:#0c1218;}
+  html.theme-pi .mono, html.theme-pi #sc-editor .mono{background:#0c1218;}
+
+  /* 組態畫面（運轉圖）→ PI Vision 黑底戰情室：黑畫布、亮線圖符、白數值、細灰框 */
+  html.theme-pi #mimic{background:#000;}
+  html.theme-pi #mimic svg > rect:first-child{fill:#000;} /* SVG 內寫死的底色 rect（presentation attr 讓 CSS 蓋） */
+  html.theme-pi #mimic .sym{stroke:#c3d0dc;fill:#0e141b;}
+  html.theme-pi #mimic .pipe{stroke:#5a6a7a;}
+  html.theme-pi #mimic .mtag{fill:#4da3ff;}
+  html.theme-pi #mimic .mnm{fill:#9aa9b8;}
+  html.theme-pi #mimic .vbox{fill:#0a0f14;stroke:#4a5866;}
+  html.theme-pi #mimic .vbox.warn{stroke:#ffb84d;}
+  html.theme-pi #mimic .vbox.crit{stroke:#ff6b6d;}
+  html.theme-pi #mimic .vtxt{fill:#f2f5f8;}
+  html.theme-pi #mimic .vtxt.warn{fill:#ffb84d;}
+  html.theme-pi #mimic .vtxt.crit{fill:#ff6b6d;}
+  html.theme-pi #mimic .vunit{fill:#9aa9b8;}
+  html.theme-pi #mimic .connbox{fill:#0a0f14;stroke:#3d4a57;}
+  html.theme-pi #mimic .conntxt{fill:#4da3ff;}
+  html.theme-pi #mimic .connlbl{fill:#9aa9b8;}
+  html.theme-pi #mimic .kpanel{fill:#0c1218;stroke:#3d4a57;}
+  html.theme-pi #mimic .ktitle{fill:#9aa9b8;}
+  html.theme-pi #mimic .krow{fill:#f2f5f8;}
+  html.theme-pi #mimic .kval{fill:#f2f5f8;}
+  html.theme-pi #mimic .kval.warn{fill:#ffb84d;}
+  html.theme-pi #mimic .kval.crit{fill:#ff6b6d;}
+  html.theme-pi #mimic g.out .sym,html.theme-pi #mimic g.out .vbox{stroke:#ff5252;}
+  html.theme-pi #mimic line:not([class]){stroke:#3d4a57;}
+
+  /* 設備預警詳情抽屜 → 黑卡 */
+  html.theme-pi #bdrawer{background:#10161d;border-left-color:#3d4a57;box-shadow:-12px 0 32px rgba(0,0,0,.6);}
+  html.theme-pi #bdrawer .dclose{color:#9aa9b8;}
+  html.theme-pi #bdrawer h2 .tag{color:#4da3ff;background:rgba(77,163,255,.14);}
+  html.theme-pi #bdrawer .dsub{color:#9aa9b8;}
+  html.theme-pi #bdrawer .dsub code{background:#0c1218;border-color:#3d4a57;}
+  html.theme-pi .bd-big .unit{color:#9aa9b8;}
+  html.theme-pi #bd-spark{background:#05080c;border-color:#2a3745;}
+  html.theme-pi #sc-editor{background:#10161d;border-color:#3d4a57;}
+  html.theme-pi #sc-editor .mut, html.theme-pi .bd-outrow .mut{color:#9aa9b8;}
+  html.theme-pi #sc-editor input, html.theme-pi #sc-editor select{background:#0c1218;border-color:#3d4a57;color:#f2f5f8;}
+  html.theme-pi .sce-acts button{background:#0c1218;border-color:#3d4a57;color:#e8eef4;}
+  html.theme-pi .sce-acts button.pri{border-color:#4da3ff;color:#4da3ff;background:rgba(77,163,255,.1);}
+  html.theme-pi .sce-acts button.danger{border-color:rgba(255,107,109,.5);color:#ff6b6d;}
 </style>
 </head>
 <body>
@@ -186,6 +250,7 @@
     <span class="logo">Process Intelligence</span>
     <span class="site-sub">工程檢視 · Flowsheet</span>
     <div class="hdr-actions">
+      <button class="hbtn" id="pi-theme-btn" title="視覺風格：J.S 藍白 ↔ PI 戰情室（黑底儀表板，對齊 OSIsoft PI Vision 畫面格式）；全平台共用記憶">PI 戰情室</button>
       <a class="hbtn" id="btn-edit" href="/static/flowsheet_builder.html">✎ 編輯設計</a>
       <button class="hbtn" id="btn-custom">⚙ 自訂顯示</button>
       <a class="hbtn" id="btn-3d" href="/twin">3D 智慧運轉</a>
@@ -1112,6 +1177,24 @@ $('v-cards').addEventListener('click',()=>applyView('cards'));
 $('v-mimic').addEventListener('click',()=>applyView('mimic'));
 
 boot().catch(e=>{specError(e);});
+</script>
+<script>
+// PI 戰情室切換：html.theme-pi + localStorage（與孿生檢視 /twin、Flowsheet 設計器同一把 key）
+(function(){
+  const b = document.getElementById('pi-theme-btn');
+  if (!b) return;
+  const sync = () => {
+    const on = document.documentElement.classList.contains('theme-pi');
+    b.style.borderColor = on ? '#4da3ff' : '';
+    b.style.color = on ? '#7fbcff' : '';
+  };
+  b.addEventListener('click', () => {
+    const on = document.documentElement.classList.toggle('theme-pi');
+    localStorage.setItem('ej3d-theme', on ? 'pi' : 'js');
+    sync();
+  });
+  sync();
+})();
 </script>
 </body>
 </html>

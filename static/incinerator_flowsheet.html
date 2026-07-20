@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Flowsheet 工程檢視｜J.S Process Intelligence</title>
+<title>Flowsheet 工程檢視｜Process Intelligence</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
@@ -183,7 +183,6 @@
 <body>
 <div class="wrap">
   <header class="site">
-    <span class="brand">J.S</span>
     <span class="logo">Process Intelligence</span>
     <span class="site-sub">工程檢視 · Flowsheet</span>
     <div class="hdr-actions">
@@ -444,7 +443,7 @@ function sim(){
 // 設計原則：不預設跳任何示範方案——列出全部 flowsheet，各附 工程檢視/組態/3D 入口，
 // 有綁定 3D 場景的方案才出現 3D 按鈕（掃 /api/scenes 的 flowsheet 欄對映）。
 async function renderPicker(){
-  document.title='選擇數據孿生方案｜J.S Process Intelligence';
+  document.title='選擇數據孿生方案｜Process Intelligence';
   $('title').textContent='選擇要開啟的數據孿生方案';
   $('sub').textContent='每個方案是一座用設計器組出來的廠：選檢視方式進入；要新建就開設計器。';
   for(const sel of ['.bar','#ctrls','#view-cards','#mimic'])document.querySelector(sel).style.display='none';
@@ -493,7 +492,7 @@ async function boot(){
     FEDBY.get(c.to).add(c.target_input);
   });
   if(!Array.isArray(spec.order)||!spec.order.length) spec.order=(spec.blocks||[]).map(b=>b.id);
-  document.title=(spec.name||FID)+'｜J.S Process Intelligence';
+  document.title=(spec.name||FID)+'｜Process Intelligence';
   $('title').textContent=spec.name||FID;
   $('sub').innerHTML=`${esc(spec.desc||'')}　<code>?id=${esc(FID)}</code> · 規格 <code>GET /agatha/flowsheet/${esc(FID)}/spec/</code> · 每拍 <code>POST …/run/</code> ×1`;
   // 3D 入口跟著「當前方案」走：掃場景清單找綁定此 flowsheet 的場景；沒有就藏按鈕

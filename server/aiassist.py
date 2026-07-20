@@ -206,7 +206,7 @@ def _faq_answer(q: str) -> str | None:
 
 
 _ASK_SYSTEM = (
-    "你是 J.S Process Intelligence（製程數據孿生平台）的建模嚮導助教。"
+    "你是 Process Intelligence（製程數據孿生平台）的建模嚮導助教。"
     "使用者是製程工程師，可能不懂統計與機器學習。規則："
     "1) 繁體中文、白話，最多 6 行；2) 先直接回答，再給一個下一步建議；"
     "3) 只依提供的 context 陳述事實，不編造欄位或數字；不確定就說不確定並指路"

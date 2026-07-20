@@ -28,7 +28,7 @@ if (SCENE_ID !== 'demo') {
   document.getElementById('brand-title').textContent = plantData.plant?.name ?? SCENE_ID;
   document.getElementById('brand-sub').textContent =
     plantData.source ? `資料來源：${plantData.source}` : `場景：${SCENE_ID}`;
-  document.title = `${plantData.plant?.name ?? SCENE_ID}｜J.S_3D Ai`;
+  document.title = `${plantData.plant?.name ?? SCENE_ID}｜全廠 3D 數位孿生平台`;
   // 自定義調整入口：3D 設計工作室（Studio）開同一場景
   const editBtn = document.getElementById('btn-edit-e3d');
   editBtn.href = `/studio?scene=${SCENE_ID}`;

@@ -173,6 +173,24 @@
   html.theme-pi .cpick button:hover{background:rgba(77,163,255,.12);}
   html.theme-pi .viewseg2 button.on{background:rgba(77,163,255,.18);}
   html.theme-pi .result.err{background:rgba(255,107,109,.12);}
+
+  /* 拼圖塊 → PI Vision 資產顯示風：藍表頭條（位號）＋石墨卡身＋底部資料列 */
+  html.theme-pi .ctile{background:#3a3f44;border-color:#53595f;border-radius:4px;}
+  html.theme-pi .ctile .ct-id{
+    display:block;background:linear-gradient(180deg,#265a94,#1c3f6b);color:#fff;
+    margin:-8px -10px 6px;padding:4px 10px;border-radius:3px 3px 0 0;letter-spacing:.03em;
+  }
+  html.theme-pi .ctile .ct-kind{
+    float:none;position:absolute;top:4px;right:7px;
+    background:rgba(255,255,255,.18);color:#dce7f2;
+  }
+  html.theme-pi .ctile .ct-kind.an{background:rgba(47,214,147,.3);color:#8df2c4;}
+  html.theme-pi .ctile .ct-tg{
+    background:#33383c;color:#c8d2da;
+    margin:5px -10px -9px;padding:4px 10px 5px;
+    border-top:1px solid #53595f;border-radius:0 0 3px 3px;
+  }
+  html.theme-pi .ctile.sel{border-color:#4da3ff;}
   .cv-hint{font-size:11px;color:var(--text2);margin-top:8px;line-height:1.7;}
 
   /* 驗證錯誤欄位高亮：紅框+光暈+輕微搖動；使用者一輸入即消除 */
@@ -187,7 +205,7 @@
     <span class="logo">Process Intelligence</span>
     <span class="site-sub">Flowsheet 設計器</span>
     <div class="hdr-actions">
-      <button class="hbtn" id="pi-theme-btn" title="視覺風格：J.S 藍白 ↔ PI 戰情室（黑底儀表板，對齊 OSIsoft PI Vision 畫面格式）；全平台共用記憶">PI 戰情室</button>
+      <button class="hbtn" id="pi-theme-btn" title="視覺風格：J.S 藍白 ↔ PI 風格（黑底儀表板，對齊 OSIsoft PI Vision 畫面格式）；全平台共用記憶">PI 風格</button>
       <a class="hbtn" href="/static/model_api.html">模型 API 控制台</a>
       <a class="hbtn" href="/">← 回首頁</a>
     </div>

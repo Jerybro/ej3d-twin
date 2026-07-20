@@ -242,6 +242,34 @@
   html.theme-pi .sce-acts button{background:#0c1218;border-color:#3d4a57;color:#e8eef4;}
   html.theme-pi .sce-acts button.pri{border-color:#4da3ff;color:#4da3ff;background:rgba(77,163,255,.1);}
   html.theme-pi .sce-acts button.danger{border-color:rgba(255,107,109,.5);color:#ff6b6d;}
+
+  /* BLOCK 卡片 → PI Vision 資產顯示風：藍表頭條＋石墨卡身＋斑馬數據列＋白底圖磚
+     （對齊 PI Vision Storage Tank 顯示：深藍 Name/Value/Units 表頭、灰黑交錯資料列、白字） */
+  html.theme-pi .blk{
+    display:flex;flex-direction:column;align-items:stretch;
+    background:#3a3f44;border-color:#53595f;border-radius:4px;
+  }
+  html.theme-pi .blk:hover{border-color:#4da3ff;}
+  html.theme-pi .blk .tag{
+    order:-3;background:linear-gradient(180deg,#265a94,#1c3f6b);color:#fff;
+    margin:-12px -13px 9px;padding:5px 11px;border-radius:3px 3px 0 0;
+    font-size:11.5px;letter-spacing:.03em;
+  }
+  html.theme-pi .blk .icw{order:-2;background:#fff;border-radius:3px;}
+  html.theme-pi .blk .icw svg{stroke:#1c2733;}
+  html.theme-pi .blk .nm{order:-1;}
+  html.theme-pi .blk .badge{align-self:flex-start;}
+  html.theme-pi .blk .st{align-self:flex-start;}
+  html.theme-pi .blk .lbl2{
+    background:#43484d;color:#c8d2da;
+    margin:8px -13px 0;padding:4px 13px 3px;border-top:1px solid #53595f;
+  }
+  html.theme-pi .blk .val{
+    background:#33383c;
+    margin:0 -13px;padding:5px 13px 6px;border-bottom:1px solid #53595f;
+  }
+  html.theme-pi .blk .key{top:7px;right:9px;box-shadow:0 0 0 2px rgba(255,255,255,.3);}
+  html.theme-pi .blk .mk{color:#8b98a5;}
 </style>
 </head>
 <body>
@@ -250,7 +278,7 @@
     <span class="logo">Process Intelligence</span>
     <span class="site-sub">工程檢視 · Flowsheet</span>
     <div class="hdr-actions">
-      <button class="hbtn" id="pi-theme-btn" title="視覺風格：J.S 藍白 ↔ PI 戰情室（黑底儀表板，對齊 OSIsoft PI Vision 畫面格式）；全平台共用記憶">PI 戰情室</button>
+      <button class="hbtn" id="pi-theme-btn" title="視覺風格：J.S 藍白 ↔ PI 風格（黑底儀表板，對齊 OSIsoft PI Vision 畫面格式）；全平台共用記憶">PI 風格</button>
       <a class="hbtn" id="btn-edit" href="/static/flowsheet_builder.html">✎ 編輯設計</a>
       <button class="hbtn" id="btn-custom">⚙ 自訂顯示</button>
       <a class="hbtn" id="btn-3d" href="/twin">3D 智慧運轉</a>

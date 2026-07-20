@@ -88,6 +88,7 @@ let roomEnvTex;
 // 8K 原圖先縮 4K 再上 GPU，顧內顯筆電的記憶體
 const DARK_BG = scene.background;
 const DARK_FOG = scene.fog;
+const GROUND_DARK = { c: 0x1c232b }; // 深色模式地坪色（PI 戰情室主題會改它）
 let skyOn = false;
 let skyTex = null;
 let skyEnvTex = null;
@@ -142,7 +143,7 @@ function setGroundReal(on) {
     m.metalness = 1; // 讓 metalnessMap（B 通道≈0）主導
   } else {
     m.map = m.normalMap = m.roughnessMap = m.metalnessMap = null;
-    m.color.setHex(0x1c232b);
+    m.color.setHex(GROUND_DARK.c);
     m.metalness = 0;
   }
   m.needsUpdate = true;
@@ -195,7 +196,10 @@ if (!plantData.environment) {
     skyBtn.disabled = false;
   });
   // 預設開實景；示範資產還沒 fetch 時安靜退回深色模式
-  setSky(true).catch(() => { skyBtn.style.display = 'none'; });
+  // （PI 戰情室主題記憶中則不自動開——戰情室是純黑畫布，避免非同步載入把照片天空蓋上去）
+  if (localStorage.getItem('ej3d-theme') !== 'pi') {
+    setSky(true).catch(() => { skyBtn.style.display = 'none'; });
+  }
 }
 const sun = new THREE.DirectionalLight(0xfff4e0, 1.6);
 sun.position.set(18, 26, 10);
@@ -488,6 +492,30 @@ const aiModLabels = [];
       aiModLegend?.classList.toggle('hidden', !aiModOn);
     });
   }
+}
+
+// ---------------------------------------------------------- 視覺風格切換
+// J.S 藍白（預設）↔ PI 戰情室：黑底儀表板、PI 藍位號、深藍頂欄——
+// 對齊 OSIsoft PI Vision 畫面格式，給熟悉 PI 的化工客戶一鍵切換熟悉視覺。
+// UI 靠 body.theme-pi 吃 CSS 變數；3D 畫布（背景/霧/地坪/格線）這裡同步。
+const THEME_KEY = 'ej3d-theme';
+const themeBtn = document.getElementById('theme-toggle');
+function applyTheme(pi, persist = true) {
+  document.body.classList.toggle('theme-pi', pi);
+  themeBtn?.classList.toggle('active', pi);
+  // DARK_BG / DARK_FOG 是 setSky 深色模式共用的同一物件，就地改色兩邊同步
+  DARK_BG.set(pi ? 0x000000 : 0x0e141b);
+  DARK_FOG.color.set(pi ? 0x000000 : 0x0e141b);
+  GROUND_DARK.c = pi ? 0x0b0f13 : 0x1c232b;
+  if (!ground.material.map) ground.material.color.setHex(GROUND_DARK.c);
+  grid.material.transparent = true;
+  grid.material.opacity = pi ? 0.45 : 1;
+  if (pi && skyOn) setSky(false).catch(() => {});
+  if (persist) localStorage.setItem(THEME_KEY, pi ? 'pi' : 'js');
+}
+if (themeBtn) {
+  themeBtn.addEventListener('click', () => applyTheme(!document.body.classList.contains('theme-pi')));
+  if (localStorage.getItem(THEME_KEY) === 'pi') applyTheme(true, false);
 }
 
 // 管線（裝飾用，串接設備）

@@ -521,3 +521,68 @@ body.splat-mode .eq-label,
 body.splat-mode .muster-label { display: none !important; }
 #view-toggle { font-family: inherit; }
 #view-toggle:disabled { opacity: 0.55; cursor: wait; }
+
+/* ------------------------------------------- PI Vision 戰情室 視覺風格 */
+/* 對齊 OSIsoft PI Vision 儀表板畫面格式：純黑畫布、細灰白框面板、
+   PI 藍位號連結、深藍頂欄（New Display 列）、黑底時間軸列 */
+body.theme-pi {
+  --bg: #000000;
+  --panel: rgba(12, 17, 23, 0.95);
+  --panel-border: #3d4a57;
+  --accent: #4da3ff;
+  --accent-deep: rgba(77, 163, 255, 0.16);
+  --text: #f2f5f8;
+  --text-dim: #9aa9b8;
+}
+body.theme-pi #topbar {
+  background: linear-gradient(180deg, #1d3a5f, #142c4d);
+  border-bottom-color: #0c1e36;
+}
+body.theme-pi .brand-mark {
+  background: none; -webkit-background-clip: initial; background-clip: initial;
+  color: #ffffff;
+}
+body.theme-pi .brand-title { color: #f2f5f8; }
+body.theme-pi .brand-home {
+  background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+}
+body.theme-pi .brand-home:hover { background: rgba(255, 255, 255, 0.2); }
+body.theme-pi .chip { background: rgba(255, 255, 255, 0.07); color: #e8eef4; }
+body.theme-pi .chip b { color: #7fbcff; }
+body.theme-pi .chip-btn:hover { background: rgba(255, 255, 255, 0.16); }
+body.theme-pi .chip-btn.active { background: rgba(77, 163, 255, 0.28); border-color: #4da3ff; }
+body.theme-pi .chip-group { border-left-color: rgba(255, 255, 255, 0.18); }
+body.theme-pi .chip-group::after { color: #8fa3b8; }
+body.theme-pi .chip-primary { background: #2e6fd0; border-color: #2e6fd0; }
+body.theme-pi .chip-primary:hover { background: #3d7fdf; }
+body.theme-pi .chip.alarm { background: rgba(208, 48, 80, 0.28); }
+
+body.theme-pi #scenario-bar {
+  background: linear-gradient(0deg, #05080c, #0e151d);
+  border-top-color: #2a3745;
+}
+body.theme-pi .sc-btn { background: rgba(255, 255, 255, 0.06); }
+body.theme-pi .sc-btn:hover { background: rgba(77, 163, 255, 0.2); }
+body.theme-pi .sc-btn.inject:hover { background: rgba(255, 170, 60, 0.25); }
+
+/* 設備位號標籤 → PI Vision 藍色位號連結（黑底細框） */
+body.theme-pi .eq-label {
+  background: rgba(5, 9, 14, 0.9);
+  border-color: #44566a;
+  color: #4da3ff;
+}
+body.theme-pi .eq-label:hover { background: rgba(77, 163, 255, 0.2); color: #7fbcff; }
+body.theme-pi .eq-label.alarming { border-color: var(--alarm); color: #ff6b6d; }
+body.theme-pi .muster-label { background: rgba(5, 20, 12, 0.92); }
+
+body.theme-pi .tree-eq:hover { background: rgba(77, 163, 255, 0.1); }
+body.theme-pi .tree-eq.active { background: rgba(77, 163, 255, 0.18); outline-color: rgba(77, 163, 255, 0.45); }
+body.theme-pi .eq-name { color: #d7dee6; }
+body.theme-pi #tree-collapse, body.theme-pi #tree-expand { color: #c6d2dd; }
+body.theme-pi .pid-box { background: #0b1118; }
+body.theme-pi .spark { background: rgba(255, 255, 255, 0.04); }
+body.theme-pi #alarm-banner { background: rgba(60, 8, 10, 0.95); }
+
+/* AI 模組 callout 維持亮卡，黑底上對比最強（PI 多態警示邏輯：綠=正常、黃=注意） */
+body.theme-pi .ai-mod-callout { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.65); }

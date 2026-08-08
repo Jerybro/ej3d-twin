@@ -26,7 +26,8 @@ TILE_W = 56.0
 # 儀錶位號（先判，避免被設備規則吃掉）
 INST_RE = re.compile(
     r"^(TI|TIC|TE|TT|TV|TR|PI|PIC|PT|PDI|PDT|PR|FI|FIC|FT|FE|FV|FR|LI|LIC|LT|LG|LV|LR|"
-    r"AI|AT|AR|HV|XV|VS|GD|SD|SFS|FSL|FAL|FALL|LSH|LSL|LAH|LAL|PAH|PAL|PDAH|STR|HS|ZS)"
+    r"AI|AT|AR|AE|HV|XV|VS|VSH|VAH|GD|SD|SFS|FSL|FAL|FALL|LSH|LSL|LAH|LAL|"
+    r"LGR|PSV|PSE|TSH|TSL|FQI|TDI|PAH|PAL|PDAH|STR|HS|ZS)"
     r"-?\d{3,5}[A-Z]?$"
 )
 # 設備位號：單字母（限已知設備類型）+ 3 碼數字 + 白名單字尾。
@@ -103,24 +104,34 @@ def _orientation_score(img) -> float:
         if len(text.strip()) >= 3)
 
 
-def _render(pdf_path: Path, scale: float = 6.0):
+def _render(pdf_path: Path, scale: float = 6.0, info: dict | None = None):
     """渲染第一頁；直式頁面（CAD 橫圖轉 90° 存檔的常態）自動轉正，
     再以 OCR 小樣本投票防整張倒置（ARO-1 PFD 實測 180° 倒放，
-    倒置圖 OCR 全滅只剩幽靈）。"""
+    倒置圖 OCR 全滅只剩幽靈）。
+
+    傳入 info dict 會回填 {rot, pw, ph}——向量圖元（閥件偵測）要把 PDF
+    點座標對回這張圖，非知道實際套用的旋轉不可。
+    """
     import pypdfium2 as pdfium
 
     doc = pdfium.PdfDocument(str(pdf_path))
     try:
         page = doc[0]
+        pw, ph = page.get_size()
         bmp = page.render(scale=scale)
         img = bmp.to_pil()
     finally:
         doc.close()
+    rot = 0
     if img.height > img.width:  # 直式 → 逆時針轉正
         img = img.rotate(90, expand=True)
+        rot = 90
     flipped = img.rotate(180)
     if _orientation_score(flipped) > _orientation_score(img) * 1.15:
         img = flipped  # 倒置圖：180° 修正（1.15 遲滯防抖動）
+        rot = (rot + 180) % 360
+    if info is not None:
+        info.update({"rot": rot, "pw": pw, "ph": ph})
     return img
 
 
@@ -610,6 +621,125 @@ def extract_pipes(pdf_path: Path) -> tuple[list, float, float]:
     return [pl for pl, _ in out[:PIPE_MAX_SEG]], pw, ph
 
 
+def page_segments(pdf_path: Path) -> tuple[list, float, float]:
+    """整頁所有兩點直線段（PDF 點座標）＋頁面尺寸。
+
+    閥件偵測與閥件歸屬共用同一份原始線段：extract_pipes 的門檻是為 3D 建模
+    調的（PIPE_MIN_LEN=60pt），會把閥件所在的短支管全濾掉——判歸屬不能用那份。
+    """
+    import ctypes
+
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as praw
+
+    doc = pdfium.PdfDocument(str(pdf_path))
+    try:
+        page = doc[0]
+        pw, ph = page.get_size()
+        segs = []
+        for i in range(praw.FPDFPage_CountObjects(page.raw)):
+            obj = praw.FPDFPage_GetObject(page.raw, i)
+            if praw.FPDFPageObj_GetType(obj) != praw.FPDF_PAGEOBJ_PATH:
+                continue
+            m = praw.FS_MATRIX()
+            praw.FPDFPageObj_GetMatrix(obj, ctypes.byref(m))
+            cur: list = []
+            for j in range(praw.FPDFPath_CountSegments(obj)):
+                seg = praw.FPDFPath_GetPathSegment(obj, j)
+                x = ctypes.c_float()
+                y = ctypes.c_float()
+                praw.FPDFPathSegment_GetPoint(seg, ctypes.byref(x), ctypes.byref(y))
+                st = praw.FPDFPathSegment_GetType(seg)
+                X = m.a * x.value + m.c * y.value + m.e
+                Y = m.b * x.value + m.d * y.value + m.f
+                if st == praw.FPDF_SEGMENT_MOVETO:
+                    if len(cur) == 2:
+                        segs.append(tuple(cur))
+                    cur = [(X, Y)]
+                elif st == praw.FPDF_SEGMENT_LINETO:
+                    cur.append((X, Y))
+                else:                       # Bezier：閥件/管線不含曲線
+                    cur = []
+            if len(cur) == 2:
+                segs.append(tuple(cur))
+    finally:
+        doc.close()
+    return segs, pw, ph
+
+
+def detect_valves(pdf_path: Path) -> tuple[list, float, float]:
+    """向量幾何抓閥件 → [(x, y, size)]（PDF 點座標）＋頁面尺寸。
+
+    不用模型、不用 OCR——閥件沒有文字，但幾何特徵極明確。
+    實測 C12070-1：閥件符號是**四條獨立線段**（兩條交叉對角線＋上下兩短邊），
+    不是閉合三角形，所以三角形/多邊形偵測全部落空。真正的判準是：
+
+        兩條「等長且互相平分（共用中點）」的線段 ＝ 矩形的兩條對角線 ＝ 蝴蝶結
+
+    這個條件非常specific——實測 5544 條線段中只有 85 組命中，疊圖驗證零誤判。
+    另加夾角檢查排除共線的重疊線。
+    """
+    from collections import defaultdict
+
+    segs, pw, ph = page_segments(pdf_path)
+
+    cand = []
+    for a, b in segs:
+        L = math.dist(a, b)
+        if VALVE_MIN <= L <= VALVE_MAX:
+            cand.append(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, L, a, b))
+
+    grid = defaultdict(list)                # 中點分格，避免 O(n²)
+    for i, c in enumerate(cand):
+        grid[(round(c[0] / 2), round(c[1] / 2))].append(i)
+
+    valves, used = [], set()
+    for i, c in enumerate(cand):
+        if i in used:
+            continue
+        hit = None
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for k in grid[(round(c[0] / 2) + dx, round(c[1] / 2) + dy)]:
+                    if k <= i or k in used:
+                        continue
+                    d = cand[k]
+                    if math.dist(c[:2], d[:2]) > 0.6:          # 共用中點
+                        continue
+                    if abs(c[2] - d[2]) > max(c[2], d[2]) * 0.15:  # 等長
+                        continue
+                    v1 = (c[4][0] - c[3][0], c[4][1] - c[3][1])
+                    v2 = (d[4][0] - d[3][0], d[4][1] - d[3][1])
+                    cosang = abs(v1[0] * v2[0] + v1[1] * v2[1]) / (
+                        math.hypot(*v1) * math.hypot(*v2))
+                    if cosang > 0.95:                          # 排除共線
+                        continue
+                    hit = k
+                    break
+                if hit is not None:
+                    break
+            if hit is not None:
+                break
+        if hit is not None:
+            valves.append((c[0], c[1], round(c[2], 2)))
+            used.add(i)
+            used.add(hit)
+    return valves, pw, ph
+
+
+def pdf_to_norm(x: float, y: float, pw: float, ph: float, rot: int) -> tuple:
+    """PDF 點座標 → 底圖正規化座標（0-1，左上原點），依 _render 實際套用的旋轉。"""
+    u = x / pw
+    v = (ph - y) / ph          # PDF 原點在左下，影像在左上
+    if rot == 90:              # 逆時針 90°（expand）
+        return v, 1.0 - u
+    if rot == 180:
+        return 1.0 - u, 1.0 - v
+    if rot == 270:
+        return 1.0 - v, u
+    return u, v
+
+
 def _save_tiles(img, stem: str) -> str:
     """OCR 渲染圖轉存圖紙底圖（hi：單圖場景讀位號用；lo：整廠 30 張省 GPU）。
     回傳 hi 檔 URL 路徑。"""
@@ -635,6 +765,10 @@ def _pixel_true_layout(equips: dict, width: float, height: float,
     }
     return _push_apart(pos, min_gap), tile_h
 
+
+# 閥件對角線長（pt）。實測 C12070-1 兩種規格：主線閥 ~10pt、小口徑閥 ~8pt；
+# 下限 5 擋掉引線箭頭，上限 22 擋掉真正交叉的製程管線。
+VALVE_MIN, VALVE_MAX = 5.0, 22.0
 
 PIPE_Y = 1.8   # 管線離地高（避開地毯、低於設備頂；>1.6 不觸發敷設管架）
 PIPE_R = 0.11

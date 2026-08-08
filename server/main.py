@@ -386,6 +386,11 @@ from .flowsheet import router as flowsheet_router  # noqa: E402
 
 app.include_router(flowsheet_router)
 
+# ------------------------------------ P&ID 標示化協作（地端 VLM 區域問答）
+from .pid_vlm import router as pid_vlm_router  # noqa: E402
+
+app.include_router(pid_vlm_router)
+
 # --------------------------------------------------------- 登入與權限（Google OAuth）
 from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
 
@@ -478,6 +483,7 @@ PAGES = {
     "/e3d": "editor.html",     # 舊路徑別名（既有連結相容）
     "/twin/editor": "editor.html",  # 舊路徑別名（既有連結相容）
     "/twin/pid": "pid.html",   # 產品3：P&ID 管理
+    "/twin/pid/label": "pid-label.html",  # 產品3：P&ID 標示化協作工作台
     "/data": "data.html",      # 產品2：資料前處理
     "/docs": "docs.html",      # 操作說明（雙語）
     "/admin": "admin.html",    # 權限管理（admin）

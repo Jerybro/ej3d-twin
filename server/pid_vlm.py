@@ -1259,14 +1259,20 @@ def describe(req: DescribeReq) -> dict:
     if survey:
         ctx += ("\n【分塊細看圖面所得（同一張圖放大後逐塊判讀）】\n" + survey)
 
+    # 知識庫檢索：給模型本廠既有的製程判讀慣例當依據，而不是讓它自由發揮。
+    # 這是製程說明穩定度的根本——同一張圖每次跑，引用的參考條文都一樣。
+    kb = _kb_retrieve(items, survey)
+    if kb:
+        ctx += "\n\n" + kb
+
     if req.previous.strip() or req.feedback.strip():
         # 修訂模式：帶上前一版與工程師意見，要求標出改動處
         user = (f"【目前已確認清單】\n{ctx}\n"
                 f"【前一版說明】\n{req.previous.strip() or '（無）'}\n"
                 f"【工程師意見】\n{req.feedback.strip() or '（無特別意見，請依最新清單自行校正牴觸之處）'}")
-        return {"text": _complete_text(REVISE_SYS, user, image_b64=sheet_b64),
+        return {"text": _clean_md(_complete_text(REVISE_SYS, user, image_b64=sheet_b64)),
                 "based_on": len(items), "revised": True, "with_image": bool(sheet_b64)}
-    return {"text": _complete_text(DESCRIBE_SYS, ctx, image_b64=sheet_b64),
+    return {"text": _clean_md(_complete_text(DESCRIBE_SYS, ctx, image_b64=sheet_b64)),
             "based_on": len(items), "revised": False, "with_image": bool(sheet_b64)}
 
 
@@ -1473,6 +1479,77 @@ def _tile_survey(filename: str, provider: str, tc: int = 3, tr: int = 2) -> str:
             if t:
                 out.append(f"[第 {r * tc + c + 1} 塊]\n{t.strip()}")
     return "\n".join(out)
+
+
+def _kb_retrieve(items: list, survey: str = "") -> str:
+    """依偵測到的位號／設備檢索製程知識庫 → 注入提示詞的參考條文。
+
+    用規則比對而非向量檢索：知識庫是人工策展的小型結構化資料，
+    位號前綴與關鍵字的比對既精確又可稽核，不需要 embedding 也不會檢索錯。
+    目的是讓模型「有據可循」而不是憑空推論——這是穩定度的根本。
+    """
+    p = RULES_DIR / "process_kb.json"
+    if not p.exists():
+        return ""
+    try:
+        kb = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return ""
+
+    tags = [str(i.get("tag") or "").upper() for i in items]
+    prefixes = {re.match(r"^[A-Z]+", t).group(0) for t in tags if re.match(r"^[A-Z]+", t)}
+    equip_pfx = {t[0] for i, t in zip(items, tags)
+                 if i.get("kind") == "equipment" and t}
+    blob = (survey + " " + " ".join(
+        str(i.get("symbol", "")) + str(i.get("note", "")) for i in items)).upper()
+
+    picked = []
+    for sig in kb.get("unit_signatures", []):
+        w = sig.get("when", {})
+        hit = (any(e in equip_pfx for e in w.get("equip_prefix", []))
+               or any(a in prefixes for a in w.get("any_tag", []))
+               or any(k.upper() in blob for k in w.get("keywords", [])))
+        if hit:
+            picked.append(sig["text"])
+    for group in ("control_patterns", "safety_patterns", "mounting_meaning"):
+        for e in kb.get(group, []):
+            if any(k.upper() in prefixes or k.upper() in blob for k in e.get("key", [])):
+                picked.append(e["text"])
+    picked += kb.get("cautions", [])
+
+    if not picked:
+        return ""
+    seen, out = set(), []
+    for t in picked:
+        if t not in seen:
+            seen.add(t)
+            out.append("· " + t)
+    return ("【製程判讀參考（由本廠知識庫依本圖位號檢索而得，"
+            "請據此判斷，不要與之牴觸）】\n" + "\n".join(out))
+
+
+_MD_HEAD = re.compile(r"^\s{0,3}#{1,6}\s*", re.M)
+_MD_BULLET = re.compile(r"^\s{0,4}[-*+]\s+", re.M)
+_MD_BOLD = re.compile(r"\*\*(.+?)\*\*|__(.+?)__", re.S)
+_MD_FENCE = re.compile(r"^\s*```.*$", re.M)
+
+
+def _clean_md(t: str) -> str:
+    """清掉模型硬要輸出的 markdown 記號。
+
+    提示詞已明說不要，但 7B 模型照樣吐 ####、**粗體**、- 項目符號。
+    這種事不該靠模型自律——在輸出端清掉才是可靠的做法。
+    """
+    if not t:
+        return t
+    t = _MD_FENCE.sub("", t)
+    t = _MD_HEAD.sub("", t)
+    t = _MD_BOLD.sub(lambda m: m.group(1) or m.group(2) or "", t)
+    t = _MD_BULLET.sub("· ", t)
+    t = re.sub(r"^\s*[-–—=]{3,}\s*$", "", t, flags=re.M)   # 分隔線
+    t = re.sub(r"`([^`]+)`", r"\1", t)                      # 行內程式碼
+    t = re.sub(r"\n{3,}", "\n\n", t)                        # 過多空行
+    return t.strip()
 
 
 def _sheet_b64(filename: str, width: int = 1800) -> str:

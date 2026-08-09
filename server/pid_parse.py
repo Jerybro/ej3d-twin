@@ -621,11 +621,15 @@ def extract_pipes(pdf_path: Path) -> tuple[list, float, float]:
     return [pl for pl, _ in out[:PIPE_MAX_SEG]], pw, ph
 
 
-def page_segments(pdf_path: Path) -> tuple[list, float, float]:
+def page_segments(pdf_path: Path, with_arcs: bool = False):
     """整頁所有兩點直線段（PDF 點座標）＋頁面尺寸。
 
     閥件偵測與閥件歸屬共用同一份原始線段：extract_pipes 的門檻是為 3D 建模
     調的（PIPE_MIN_LEN=60pt），會把閥件所在的短支管全濾掉——判歸屬不能用那份。
+
+    with_arcs=True 時額外回傳弧線清單 [(cx, cy, r, span)]。
+    跳線（line jump）的半圓弧就是 Bezier——那是判定兩條線「交叉但不相接」
+    最直接的向量證據，丟掉等於自廢武功（點陣圖上要判這個難一個數量級）。
     """
     import ctypes
 
@@ -636,7 +640,7 @@ def page_segments(pdf_path: Path) -> tuple[list, float, float]:
     try:
         page = doc[0]
         pw, ph = page.get_size()
-        segs = []
+        segs, arcs = [], []
         for i in range(praw.FPDFPage_CountObjects(page.raw)):
             obj = praw.FPDFPage_GetObject(page.raw, i)
             if praw.FPDFPageObj_GetType(obj) != praw.FPDF_PAGEOBJ_PATH:
@@ -644,6 +648,7 @@ def page_segments(pdf_path: Path) -> tuple[list, float, float]:
             m = praw.FS_MATRIX()
             praw.FPDFPageObj_GetMatrix(obj, ctypes.byref(m))
             cur: list = []
+            bez: list = []          # 目前這段子路徑累積的曲線控制點
             for j in range(praw.FPDFPath_CountSegments(obj)):
                 seg = praw.FPDFPath_GetPathSegment(obj, j)
                 x = ctypes.c_float()
@@ -655,16 +660,49 @@ def page_segments(pdf_path: Path) -> tuple[list, float, float]:
                 if st == praw.FPDF_SEGMENT_MOVETO:
                     if len(cur) == 2:
                         segs.append(tuple(cur))
-                    cur = [(X, Y)]
+                    if bez:
+                        arcs.append(bez)
+                    cur, bez = [(X, Y)], []
                 elif st == praw.FPDF_SEGMENT_LINETO:
                     cur.append((X, Y))
-                else:                       # Bezier：閥件/管線不含曲線
-                    cur = []
+                else:                       # Bezier（本廠 CAD 匯出實測為 0）
+                    if cur:
+                        bez.extend(cur)
+                        cur = []
+                    bez.append((X, Y))
             if len(cur) == 2:
                 segs.append(tuple(cur))
+            elif len(cur) >= 4:
+                # 折線近似的弧：本廠 CAD 把所有曲線轉成折線，整張圖 0 個 Bezier
+                # （實測），所以跳線半圓弧會以「多段短折線」出現而非曲線指令。
+                arcs.append(list(cur))
+            if bez:
+                arcs.append(bez)
     finally:
         doc.close()
-    return segs, pw, ph
+    if not with_arcs:
+        return segs, pw, ph
+    return segs, _fit_arcs(arcs), pw, ph
+
+
+def _fit_arcs(raw_arcs: list) -> list:
+    """曲線控制點群 → [(cx, cy, r, chord)]。只留「小半徑、非閉合」的弧，
+    那就是跳線的形狀；閉合的圓（氣泡）交給 detect_bubbles 處理。"""
+    out = []
+    for pts in raw_arcs:
+        if len(pts) < 3:
+            continue
+        cx = sum(p[0] for p in pts) / len(pts)
+        cy = sum(p[1] for p in pts) / len(pts)
+        ds = [math.dist(p, (cx, cy)) for p in pts]
+        r = sum(ds) / len(ds)
+        if not (JUMP_R_MIN <= r <= JUMP_R_MAX):
+            continue
+        chord = math.dist(pts[0], pts[-1])
+        if chord < r * 0.4:          # 首尾幾乎重合 = 閉合圓，不是跳線
+            continue
+        out.append((cx, cy, r, chord))
+    return out
 
 
 def detect_valves(pdf_path: Path) -> tuple[list, float, float]:
@@ -843,6 +881,10 @@ VALVE_MIN, VALVE_MAX = 5.0, 22.0
 # 儀錶氣泡半徑（pt）。實測 C12070-1 氣泡半徑約 9-11pt；
 # 下限 5 擋掉小圓點與接續標記，上限 30 擋掉容器輪廓。
 BUBBLE_MIN, BUBBLE_MAX = 5.0, 30.0
+
+# 跳線（line jump）半圓弧半徑（pt）。比氣泡小得多——跳線只是讓線「跨過去」，
+# 弧半徑約為線寬的數倍。上限刻意低於 BUBBLE_MIN 附近以免把小氣泡收進來。
+JUMP_R_MIN, JUMP_R_MAX = 1.0, 6.0
 
 PIPE_Y = 1.8   # 管線離地高（避開地毯、低於設備頂；>1.6 不觸發敷設管架）
 PIPE_R = 0.11

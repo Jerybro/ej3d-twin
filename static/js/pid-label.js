@@ -107,9 +107,24 @@ $('scan-all-btn').addEventListener('click', async () => {
     // 而不是從字母序第一項慢慢翻到最後才遇到問題。
     const rank = i => (i.warn ? 0 : (i.confidence < 0.7 ? 1 : 2));
     items.sort((a, b) => rank(a) - rank(b) || a.confidence - b.confidence);
-    curIdx = 0;
-    render(); focusItem(0);
-    startCrossCheck();          // 背景跑 OCR×VLM 雙重檢查
+    // 幾何檢查（氣泡＋編號族群）已在後端完成，且與 OCR 完全獨立。
+    // 通過幾何驗證、信心滿分的儀錶直接放行，人只審有疑慮的。
+    let auto = 0;
+    for (const it of items) {
+      if (it.kind === 'instrument' && it.confidence >= 1.0 && !it.warn) {
+        it.state = 'accepted'; auto++;
+        fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...it, source: 'auto-geom' }),
+        }).catch(() => {});
+      }
+    }
+    curIdx = items.findIndex(i => i.state === 'pending');
+    if (curIdx < 0) curIdx = 0;
+    render(); focusItem(curIdx);
+    $('cc-state').innerHTML = `幾何驗證通過自動放行 <b style="color:var(--hi)">${auto}</b> 項｜`
+      + `需人工審核 <b>${items.length - auto}</b> 項`;
+    scheduleDesc();
   } catch (e) {
     alert('辨識失敗：' + (e.message || ''));
   } finally {

@@ -727,6 +727,76 @@ def detect_valves(pdf_path: Path) -> tuple[list, float, float]:
     return valves, pw, ph
 
 
+def detect_bubbles(pdf_path: Path) -> tuple[list, float, float]:
+    """向量幾何抓儀錶氣泡（圓圈／六角）→ [(cx, cy, r)]（PDF 點座標）。
+
+    P&ID 的鐵律：儀錶位號一定畫在氣泡裡。因此「這串文字在不在圈內」
+    是判斷它是不是位號最強的證據——而且與 OCR 完全獨立。
+
+    為什麼不用 VLM 重讀位號來驗證：三個裁切共用同一個中心，中心錯了
+    三票一起錯（實測 R101 三塊全讀成 FR 65101），投票買不到獨立性。
+    幾何檢查才是真的獨立證據，且零推論、零延遲。
+    """
+    import ctypes
+
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as praw
+
+    doc = pdfium.PdfDocument(str(pdf_path))
+    try:
+        page = doc[0]
+        pw, ph = page.get_size()
+        subs = []
+        for i in range(praw.FPDFPage_CountObjects(page.raw)):
+            obj = praw.FPDFPage_GetObject(page.raw, i)
+            if praw.FPDFPageObj_GetType(obj) != praw.FPDF_PAGEOBJ_PATH:
+                continue
+            m = praw.FS_MATRIX()
+            praw.FPDFPageObj_GetMatrix(obj, ctypes.byref(m))
+            cur: list = []
+            for j in range(praw.FPDFPath_CountSegments(obj)):
+                seg = praw.FPDFPath_GetPathSegment(obj, j)
+                x = ctypes.c_float()
+                y = ctypes.c_float()
+                praw.FPDFPathSegment_GetPoint(seg, ctypes.byref(x), ctypes.byref(y))
+                st = praw.FPDFPathSegment_GetType(seg)
+                X = m.a * x.value + m.c * y.value + m.e
+                Y = m.b * x.value + m.d * y.value + m.f
+                if st == praw.FPDF_SEGMENT_MOVETO:
+                    if len(cur) >= 5:
+                        subs.append(cur)
+                    cur = [(X, Y)]
+                else:
+                    cur.append((X, Y))
+            if len(cur) >= 5:
+                subs.append(cur)
+    finally:
+        doc.close()
+
+    out = []
+    for pts in subs:
+        n = len(pts)
+        cx = sum(p[0] for p in pts) / n
+        cy = sum(p[1] for p in pts) / n
+        ds = [math.dist(p, (cx, cy)) for p in pts]
+        r = sum(ds) / n
+        if not (BUBBLE_MIN <= r <= BUBBLE_MAX):
+            continue
+        # 各點到中心的距離要夠一致才算圓／正多邊形（氣泡、六角、圓角框）
+        if max(ds) > r * 1.30 or min(ds) < r * 0.70:
+            continue
+        out.append((cx, cy, r))
+
+    # 同心重複（圓被畫兩次、或圓外還有方框）→ 併掉
+    out.sort(key=lambda b: -b[2])
+    merged: list = []
+    for b in out:
+        if any(math.dist(b[:2], m[:2]) < max(b[2], m[2]) * 0.6 for m in merged):
+            continue
+        merged.append(b)
+    return merged, pw, ph
+
+
 def pdf_to_norm(x: float, y: float, pw: float, ph: float, rot: int) -> tuple:
     """PDF 點座標 → 底圖正規化座標（0-1，左上原點），依 _render 實際套用的旋轉。"""
     u = x / pw
@@ -769,6 +839,10 @@ def _pixel_true_layout(equips: dict, width: float, height: float,
 # 閥件對角線長（pt）。實測 C12070-1 兩種規格：主線閥 ~10pt、小口徑閥 ~8pt；
 # 下限 5 擋掉引線箭頭，上限 22 擋掉真正交叉的製程管線。
 VALVE_MIN, VALVE_MAX = 5.0, 22.0
+
+# 儀錶氣泡半徑（pt）。實測 C12070-1 氣泡半徑約 9-11pt；
+# 下限 5 擋掉小圓點與接續標記，上限 30 擋掉容器輪廓。
+BUBBLE_MIN, BUBBLE_MAX = 5.0, 30.0
 
 PIPE_Y = 1.8   # 管線離地高（避開地毯、低於設備頂；>1.6 不觸發敷設管架）
 PIPE_R = 0.11

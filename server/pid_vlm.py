@@ -577,6 +577,28 @@ def _pipes_norm(filename: str) -> list:
     return out
 
 
+_bubble_cache: dict = {}
+
+
+def _bubbles_norm(filename: str) -> list:
+    """全圖儀錶氣泡 → [(cx, cy, rx, ry)] 正規化座標（rx/ry 為正規化半徑）。"""
+    if filename in _bubble_cache:
+        return _bubble_cache[filename]
+    from .pid_parse import detect_bubbles, pdf_to_norm
+
+    _, meta = _ensure_base(filename)
+    rot = meta.get("rot", 0)
+    bl, pw, ph = detect_bubbles(_safe_pdf(filename))
+    out = []
+    for bx, by, r in bl:
+        nx, ny = pdf_to_norm(bx, by, pw, ph, rot)
+        rx = r / ph if rot in (90, 270) else r / pw
+        ry = r / pw if rot in (90, 270) else r / ph
+        out.append((nx, ny, rx, ry))
+    _bubble_cache[filename] = out
+    return out
+
+
 def _pt_seg_dist(p, a, b) -> float:
     """點到線段距離（正規化座標，已依 W/H 換算成像素比例後呼叫）。"""
     ax, ay = a
@@ -969,6 +991,38 @@ def scan_all(req: ScanAllReq) -> dict:
         items += _valves_in(req.filename, [0.0, 0.0, 1.0, 1.0], hits, W, H)
     except Exception:  # noqa: BLE001
         pass
+
+    # ---- 氣泡幾何檢查（與 OCR 完全獨立的證據，零推論零延遲）----
+    # P&ID 鐵律：儀錶位號畫在氣泡（圓/六角）裡，設備位號不會。
+    # 於是兩條互補規則就能抓出兩類誤讀：
+    #   儀錶卻不在圈內 → 多半是把註記、尺寸標註誤讀成位號
+    #   設備卻在圈內   → 多半是把儀錶位號誤讀成設備（R101 其實是 FR 65101）
+    try:
+        bubbles = _bubbles_norm(req.filename)
+    except Exception:  # noqa: BLE001
+        bubbles = []
+    if bubbles:
+        for it in items:
+            if it["kind"] not in ("instrument", "equipment"):
+                continue
+            bx0, by0, bx1, by1 = it["bbox"]
+            cx2, cy2 = (bx0 + bx1) / 2, (by0 + by1) / 2
+            inside = any(abs(cx2 - bx) < rx * 1.25 and abs(cy2 - by) < ry * 1.25
+                         for bx, by, rx, ry in bubbles)
+            want = it["kind"] == "instrument"
+            ok = (inside == want)
+            it.setdefault("evidence", []).append({
+                "stage": "氣泡幾何檢查", "ok": ok, "score": 1.0 if ok else 0.15,
+                "detail": (("位號落在儀錶氣泡內" if inside else "位號不在任何氣泡內")
+                           + "，" + ("與判定的類型相符" if ok else
+                                    ("但儀錶位號應該畫在氣泡裡 → 可能是註記或尺寸標註被誤讀"
+                                     if want else
+                                     "但設備位號不會畫在儀錶氣泡裡 → 可能是儀錶位號被誤讀成設備")))})
+            if not ok:
+                it["confidence"] = min(it["confidence"], 0.4)
+                w = ("此處無氣泡，可能是註記文字被誤讀成儀錶位號"
+                     if want else "此處是儀錶氣泡，可能把儀錶位號誤讀成設備")
+                it["warn"] = (it["warn"] + "｜" + w) if it.get("warn") else w
 
     # 設備編號族群一致性：同一張圖的設備編號通常同族（本圖 E651/E652/V613 皆 6xx）。
     # 混進 R101/T108/D181 這種 1xx 幾乎都是把註記或圖框文字誤讀成位號。

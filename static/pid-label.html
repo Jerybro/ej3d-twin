@@ -3,20 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>P&ID 標示化協作｜Process Intelligence</title>
+  <title>P&ID 判讀｜Process Intelligence</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
   <style>
     :root {
       --bg: #F6F7FA; --panel: #ffffff; --panel2: #F1F3F6;
       --bdr: #DBDDE0; --accent: #046AFB; --accent-deep: #E3EDFE;
       --text: #061027; --dim: #5C6773;
-      --hi: #12A150; --mid: #E0A415; --lo: #D93F3F; --cloud: #7B5BE0;
+      --hi: #12A150; --mid: #E0A415; --lo: #D93F3F;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; background: var(--bg); color: var(--text);
       font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", sans-serif; font-size: 14px; }
     .layout { display: flex; height: 100vh; }
-    aside { width: 236px; flex-shrink: 0; border-right: 1px solid var(--bdr);
+    aside { width: 224px; flex-shrink: 0; border-right: 1px solid var(--bdr);
       padding: 15px; overflow-y: auto; background: var(--panel); }
     .head { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; }
     .brand-home { display: inline-flex; align-items: center; justify-content: center;
@@ -36,19 +36,8 @@
     .mini-btn:hover { border-color: var(--accent); }
     .mini-btn.primary { background: var(--accent); border-color: var(--accent);
       color: #fff; font-weight: 600; }
-    .mini-btn.ghost { background: var(--panel); }
-    .mini-btn:disabled { opacity: 0.45; pointer-events: none; }
+    .mini-btn:disabled { opacity: 0.4; pointer-events: none; }
     .hint { font-size: 11.5px; color: var(--dim); line-height: 1.7; }
-
-    /* --------------------------------------------------------- 分區地圖 */
-    #zonemap { display: grid; gap: 3px; margin-top: 6px; }
-    .zc { aspect-ratio: 1.4; border-radius: 3px; background: var(--panel2);
-      border: 1px solid var(--bdr); cursor: pointer; position: relative;
-      font-size: 9px; color: var(--dim); display: flex;
-      align-items: center; justify-content: center; }
-    .zc:hover { border-color: var(--accent); }
-    .zc.done { background: rgba(18,161,80,0.22); border-color: var(--hi); color: var(--hi); }
-    .zc.cur { outline: 2px solid var(--accent); outline-offset: 1px; }
 
     /* ------------------------------------------------------------ 畫布 */
     main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -56,110 +45,123 @@
       background: var(--panel); display: flex; align-items: center; gap: 9px;
       padding: 0 13px; font-size: 12.5px; }
     .toolbar .sp { flex: 1; }
-    select { padding: 4px 8px; border-radius: 6px; border: 1px solid var(--bdr);
-      background: var(--panel2); color: var(--text); font-family: inherit;
-      font-size: 11.5px; cursor: pointer; }
-    .pill { padding: 3px 9px; border-radius: 10px; font-size: 10.5px; font-weight: 600;
-      border: 1px solid var(--bdr); background: var(--panel2); color: var(--dim); }
-    .pill.warn { color: #8a5b00; border-color: var(--mid); background: rgba(224,164,21,0.12); }
+    .lg { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px;
+      color: var(--dim); margin-left: 2px; }
+    .lg i { width: 11px; height: 9px; border: 1.5px solid; border-radius: 2px; display: inline-block; }
     #stage { flex: 1; overflow: auto; background: #E9EDF2; position: relative; }
     #stage.empty { display: flex; align-items: center; justify-content: center; color: var(--dim); }
     #canvas-wrap { position: relative; display: inline-block; }
     #sheet { display: block; user-select: none; -webkit-user-drag: none; }
-    #overlay { position: absolute; inset: 0; cursor: crosshair; }
-    .sel-box { position: absolute; border: 2px solid var(--accent);
-      background: rgba(4,106,251,0.12); pointer-events: none; }
-    .zone-box { position: absolute; border: 2px dashed var(--accent);
-      background: rgba(4,106,251,0.07); pointer-events: none; }
-    .zone-box::after { content: attr(data-z); position: absolute; top: -19px; left: 0;
-      background: var(--accent); color: #fff; font-size: 10px; font-weight: 700;
-      padding: 1px 6px; border-radius: 4px; }
-    .an-box { position: absolute; border: 1.5px solid var(--hi);
-      background: rgba(18,161,80,0.10); pointer-events: none; }
+    #overlay { position: absolute; inset: 0; }
+
+    /* 標註框：顏色＝信心度、線型＝審核狀態。待審用虛線，已確認用實線，
+       設備線較粗。有警示者一律紅色——警示的意思就是「別信那個數字」。 */
+    .an-box { position: absolute; border: 1.5px solid var(--hi); border-radius: 2px;
+      pointer-events: auto; cursor: help; }
+    .an-box.hi  { border-color: var(--hi); }
     .an-box.mid { border-color: var(--mid); background: rgba(224,164,21,0.10); }
-    .an-box.lo { border-color: var(--lo); background: rgba(217,63,63,0.10); }
-    .an-box i { position: absolute; top: -16px; left: -1px; font-style: normal;
-      font-size: 9.5px; font-weight: 700; color: #fff; background: var(--hi);
-      padding: 1px 5px; border-radius: 3px; white-space: nowrap; }
-    .an-box.mid i { background: var(--mid); } .an-box.lo i { background: var(--lo); }
+    .an-box.lo  { border-color: var(--lo); background: rgba(217,63,63,0.12); }
+    .an-box.pending { border-style: dashed; opacity: 0.85; }
+    .an-box.eq { border-width: 2.5px; }
+    /* 審核中的那一項：醒目脈動，讓使用者一眼找到它在圖上哪裡 */
+    .focus-ring { position: absolute; border: 3px solid var(--lo); border-radius: 4px;
+      pointer-events: none; box-shadow: 0 0 0 3px rgba(217,63,63,0.18);
+      animation: pulse 1.1s ease-in-out infinite; }
+    .focus-ring::after { content: attr(data-t); position: absolute; top: -22px; left: -2px;
+      background: var(--lo); color: #fff; font-size: 11px; font-weight: 700;
+      padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+    @keyframes pulse { 0%,100% { transform: scale(1); opacity: 1; }
+                       50% { transform: scale(1.08); opacity: 0.75; } }
 
     /* ------------------------------------------------------------- 右欄 */
-    .side { width: 380px; flex-shrink: 0; border-left: 1px solid var(--bdr);
+    .side { width: 384px; flex-shrink: 0; border-left: 1px solid var(--bdr);
       background: var(--panel); display: flex; flex-direction: column; }
+    .tabs { display: flex; border-bottom: 1px solid var(--bdr); flex-shrink: 0; }
+    .tab { flex: 1; text-align: center; padding: 11px 6px; cursor: pointer;
+      font-size: 12.5px; color: var(--dim); border-bottom: 2px solid transparent; }
+    .tab.on { color: var(--accent); font-weight: 700; border-bottom-color: var(--accent); }
     .side-scroll { flex: 1; overflow-y: auto; padding: 15px; }
-    .guide { border: 1px solid var(--accent); border-radius: 10px; padding: 12px 13px;
-      background: var(--accent-deep); margin-bottom: 12px; }
-    .guide h3 { font-size: 13px; margin-bottom: 5px; }
-    .guide p { font-size: 12px; color: #24406e; line-height: 1.7; }
-    .steps { display: flex; gap: 5px; margin: 9px 0 0; }
-    .steps i { flex: 1; height: 4px; border-radius: 2px; background: rgba(4,106,251,0.22); }
-    .steps i.on { background: var(--accent); }
-    .prog-wrap { margin: 4px 0 12px; }
     .prog { height: 7px; border-radius: 4px; background: var(--panel2);
       border: 1px solid var(--bdr); overflow: hidden; }
     .prog i { display: block; height: 100%; background: var(--hi); width: 0;
-      transition: width 0.3s; }
-    .prog-txt { font-size: 11.5px; color: var(--dim); margin-top: 5px; }
-    .qbtns { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0 9px; }
-    .qbtn { padding: 4px 8px; border-radius: 11px; font-size: 11px; cursor: pointer;
-      background: var(--panel2); border: 1px solid var(--bdr); color: var(--dim); }
-    .qbtn:hover { border-color: var(--accent); color: var(--accent); }
-    textarea { width: 100%; min-height: 54px; padding: 8px 10px; border-radius: 8px;
-      border: 1px solid var(--bdr); background: var(--panel2); color: var(--text);
-      font-family: inherit; font-size: 12px; resize: vertical; }
-    textarea:focus { outline: none; border-color: var(--accent); }
-    .answer { margin-top: 9px; padding: 10px 12px; border-radius: 8px;
-      background: var(--panel2); border: 1px solid var(--bdr);
-      font-size: 12px; line-height: 1.75; white-space: pre-wrap; }
-    .answer.err { border-color: var(--lo); color: var(--lo); }
-    .cand { border: 1px solid var(--bdr); border-radius: 8px; padding: 8px 10px;
-      margin-bottom: 6px; background: var(--panel2); font-size: 12px; }
-    .cand.taken { opacity: 0.5; }
-    .cand-top { display: flex; align-items: center; gap: 6px; }
-    .cand-tag { font-weight: 700; }
-    .conf { font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 7px;
+      transition: width 0.25s; }
+    .prog-txt { font-size: 12px; color: var(--dim); margin: 6px 0 12px; }
+
+    /* 審核卡：一次只專注一項 */
+    .rev { border: 1px solid var(--accent); border-radius: 10px; padding: 13px;
+      background: var(--accent-deep); margin-bottom: 12px; }
+    .rev-top { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+    .rev-tag { font-size: 17px; font-weight: 700; letter-spacing: 0.3px; }
+    .rev-sub { font-size: 12.5px; color: #24406e; line-height: 1.7; }
+    .conf { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 8px;
       color: #fff; background: var(--hi); }
     .conf.mid { background: var(--mid); } .conf.lo { background: var(--lo); }
-    .cand-sym { color: var(--dim); font-size: 11.5px; }
-    .cand-act { display: flex; gap: 5px; margin-top: 6px; }
-    /* 判讀依據鏈：信心度不能是黑盒，每一步憑什麼都要攤開 */
-    .ev { margin-top: 5px; }
-    .ev summary { cursor: pointer; font-size: 11px; color: var(--accent);
-      user-select: none; outline: none; }
-    .ev summary::marker { color: var(--dim); }
-    .ev-row { display: flex; gap: 6px; padding: 4px 0 4px 2px;
-      border-top: 1px dashed var(--bdr); }
-    .ev-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
-      margin-top: 4px; }
+    .ctx { margin-top: 10px; padding: 9px 11px; border-radius: 8px;
+      background: rgba(255,255,255,0.72); border: 1px solid rgba(4,106,251,0.28);
+      font-size: 12px; line-height: 1.75; color: #1d3557; }
+    .rev-crop { display: block; width: 100%; margin-top: 10px; border-radius: 8px;
+      border: 1px solid var(--bdr); background: #fff; }
+    .crop-cap { font-size: 10.5px; color: var(--dim); margin-top: 4px; text-align: center; }
+    .ctx.verify { background: rgba(224,164,21,0.10); border-color: var(--mid); color: #6b4a05; }
+    .rev-act { display: flex; gap: 6px; margin-top: 11px; }
+    .rev-act .mini-btn { flex: 1; text-align: center; padding: 8px; font-size: 12.5px; }
+    .nav-row { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; }
+    .nav-row .mini-btn { padding: 4px 9px; }
+    .nav-row .sp { flex: 1; }
+
+    /* 依據鏈 */
+    .ev { margin-top: 9px; }
+    .ev summary { cursor: pointer; font-size: 11.5px; color: var(--accent); outline: none; }
+    .ev-row { display: flex; gap: 6px; padding: 5px 0 5px 2px;
+      border-top: 1px dashed rgba(4,106,251,0.25); }
+    .ev-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
     .ev-dot.ok { background: var(--hi); } .ev-dot.no { background: var(--mid); }
-    .ev-g { flex: 1; min-width: 0; font-size: 11px; line-height: 1.55; }
-    .ev-s { color: var(--dim); font-weight: 700; margin-left: 5px; }
-    .ev-d { color: var(--dim); word-break: break-all; }
-    .an-row { display: flex; align-items: center; gap: 7px; padding: 6px 9px;
-      border-radius: 6px; background: var(--panel2); border: 1px solid var(--bdr);
-      margin-bottom: 4px; font-size: 11.5px; }
-    .an-row .g { flex: 1; min-width: 0; }
-    .an-row .x { cursor: pointer; color: var(--dim); font-size: 14px; line-height: 1; }
-    .an-row .x:hover { color: var(--lo); }
-    /* 雙引擎比對 */
-    .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .cmp-col { border: 1px solid var(--bdr); border-radius: 8px; overflow: hidden; }
-    .cmp-h { padding: 5px 8px; font-size: 11px; font-weight: 700; color: #fff; }
-    .cmp-h.c { background: var(--cloud); } .cmp-h.l { background: var(--dim); }
-    .cmp-b { padding: 7px 8px; font-size: 11px; line-height: 1.65; max-height: 240px;
-      overflow-y: auto; background: var(--panel2); }
-    .cmp-b div { padding: 1px 0; }
-    .dif { font-size: 11px; line-height: 1.8; margin-top: 8px; color: var(--dim); }
-    .dif b { color: var(--text); }
+    .ev-g { flex: 1; min-width: 0; font-size: 11px; line-height: 1.6; color: #24406e; }
+    .ev-s { font-weight: 700; margin-left: 5px; }
+
+    /* 清單 */
+    .li { display: flex; align-items: center; gap: 7px; padding: 7px 9px;
+      border-radius: 7px; border: 1px solid var(--bdr); background: var(--panel2);
+      margin-bottom: 4px; font-size: 12px; cursor: pointer; }
+    .li:hover { border-color: var(--accent); }
+    .li.cur { border-color: var(--lo); background: rgba(217,63,63,0.06); }
+    .li.done { opacity: 0.5; }
+    .li .g { flex: 1; min-width: 0; }
+    .li .st { font-size: 14px; }
+    /* ------------------------------------------- 製程說明（圖面下方常駐） */
+    #desc-panel { flex-shrink: 0; border-top: 1px solid var(--bdr);
+      background: var(--panel); display: flex; flex-direction: column;
+      max-height: 44vh; }
+    #desc-panel.collapsed .dp-body { display: none; }
+    #desc-panel.collapsed #dp-collapse { transform: rotate(180deg); }
+    .dp-head { display: flex; align-items: center; gap: 9px; padding: 9px 14px;
+      font-size: 13px; flex-shrink: 0; }
+    .dp-head .sp { flex: 1; }
+    .dp-state { font-size: 11.5px; color: var(--dim); }
+    .dp-state.live { color: var(--accent); font-weight: 600; }
+    .dp-body { padding: 0 14px 13px; overflow-y: auto; }
+    .dp-body textarea { width: 100%; min-height: 56px; padding: 8px 10px;
+      border-radius: 8px; border: 1px solid var(--bdr); background: var(--panel2);
+      color: var(--text); font-family: inherit; font-size: 12px; resize: vertical; }
+    .dp-body textarea:focus { outline: none; border-color: var(--accent); }
+    #dp-collapse { padding: 2px 8px; }
+
+    .desc { white-space: pre-wrap; font-size: 12.5px; line-height: 1.85;
+      background: var(--panel2); border: 1px solid var(--bdr);
+      border-radius: 9px; padding: 13px; }
+    /* 修訂後有更動的句子：高亮，讓工程師一眼看出這輪改了什麼 */
+    .desc mark { background: rgba(224,164,21,0.30); border-bottom: 2px solid var(--mid);
+      color: inherit; padding: 1px 2px; border-radius: 2px; }
     .spin { display: inline-block; width: 11px; height: 11px; border-radius: 50%;
       border: 2px solid var(--accent-deep); border-top-color: var(--accent);
       animation: sp 0.7s linear infinite; vertical-align: -1px; }
     @keyframes sp { to { transform: rotate(360deg); } }
-    .tabs { display: flex; gap: 5px; margin-bottom: 11px; }
-    .tab { flex: 1; text-align: center; padding: 6px; border-radius: 7px; cursor: pointer;
-      font-size: 12px; border: 1px solid var(--bdr); background: var(--panel2); color: var(--dim); }
-    .tab.on { background: var(--accent-deep); border-color: var(--accent);
-      color: var(--accent); font-weight: 600; }
+    .zc { aspect-ratio: 1.4; border-radius: 3px; background: var(--panel2);
+      border: 1px solid var(--bdr); cursor: pointer; font-size: 9px; color: var(--dim);
+      display: flex; align-items: center; justify-content: center; }
+    .zc:hover { border-color: var(--accent); }
+    .zc.done { background: rgba(18,161,80,0.22); border-color: var(--hi); color: var(--hi); }
+    #zonemap { display: grid; gap: 3px; margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -167,107 +169,125 @@
     <aside>
       <div class="head">
         <a class="brand-home" href="/twin/pid" title="回 P&ID 管理">⌂</a>
-        <h1>P&amp;ID 標示化</h1>
+        <h1>P&amp;ID 判讀</h1>
       </div>
-      <div class="section-title">圖面清單</div>
+      <div class="section-title">圖面</div>
       <div id="file-list"><span class="hint">載入中…</span></div>
-
-      <div class="section-title">分區地圖</div>
-      <div class="hint" id="zone-hint">選圖後顯示。綠＝已巡完。</div>
-      <div id="zonemap"></div>
+      <div class="section-title">說明</div>
+      <div class="hint">辨識結果需逐項確認後才會入庫；
+        全部審核完成才會產生製程說明。</div>
     </aside>
 
     <main>
       <div class="toolbar">
         <span id="doc-name" style="font-weight:600">未選擇圖面</span>
         <span class="sp"></span>
-        <label class="hint" style="font-size:11px">引擎</label>
-        <select id="engine">
-          <option value="cloud">雲端 Claude（準）</option>
-          <option value="local">地端 Qwen（不外傳）</option>
-        </select>
-        <span class="pill" id="eng-pill">檢查中…</span>
         <button class="mini-btn" id="zoom-out">−</button>
         <span id="zoom-val" style="color:var(--dim);min-width:40px;text-align:center">100%</span>
         <button class="mini-btn" id="zoom-in">＋</button>
         <button class="mini-btn" id="zoom-fit">全圖</button>
+        <span class="lg"><i style="border-color:var(--hi)"></i>高信心</span>
+        <span class="lg"><i style="border-color:var(--mid);background:rgba(224,164,21,.15)"></i>待查</span>
+        <span class="lg"><i style="border-color:var(--lo);background:rgba(217,63,63,.15)"></i>可疑</span>
+        <span class="lg"><i style="border-style:dashed;border-color:var(--dim)"></i>未審</span>
       </div>
-      <div id="stage" class="empty"><span>選擇左側圖面開始標示</span></div>
+      <div id="stage" class="empty"><span>選擇左側圖面開始</span></div>
+
+      <!-- 製程說明：常駐在圖面下方，隨審核進度即時更新 -->
+      <section id="desc-panel">
+        <div class="dp-head">
+          <b>製程說明</b>
+          <span class="dp-state" id="desc-state">審核開始後自動產生</span>
+          <span class="sp"></span>
+          <button class="mini-btn" id="fb-toggle">提出修正意見</button>
+          <button class="mini-btn" id="desc-btn" disabled>立即更新</button>
+          <button class="mini-btn" id="dp-collapse" title="收合">▾</button>
+        </div>
+        <div class="dp-body" id="dp-body">
+          <div id="desc-out"><span class="hint">確認幾項位號之後，這裡會依<b>已確認</b>的清單
+            自動寫出這張圖在做什麼製程；之後每次審核都會即時校正，
+            改動過的句子會標成黃底。</span></div>
+          <div id="fb-box" style="display:none;margin-top:10px">
+            <textarea id="fb-text" placeholder="指出哪裡寫錯或補充現場知識，例如：V613 不是儲槽，是氣液分離器。"></textarea>
+            <button class="mini-btn primary" id="fb-btn" style="margin-top:6px">依意見修訂</button>
+          </div>
+        </div>
+      </section>
     </main>
 
     <div class="side">
+      <div class="tabs">
+        <div class="tab on" data-tab="review">審核與製程說明</div>
+        <div class="tab" data-tab="adv">進階</div>
+      </div>
       <div class="side-scroll">
-        <!-- 導覽引導卡 -->
-        <div class="guide" id="guide">
-          <h3 id="g-title">① 選一張圖面</h3>
-          <p id="g-body">左側點一張 P&amp;ID，系統會把整張圖切成分區，
-            帶你一區一區把位號標示完成。</p>
-          <div class="steps" id="g-steps"><i></i><i></i><i></i><i></i></div>
-        </div>
-
-        <div class="prog-wrap">
+        <!-- ───────────────────────── 審核 -->
+        <div id="tab-review">
+          <button class="mini-btn primary" id="scan-all-btn" disabled
+                  style="width:100%;padding:10px;margin-bottom:12px">辨識整張圖面</button>
           <div class="prog"><i id="prog-bar"></i></div>
-          <div class="prog-txt" id="prog-txt">尚未開始</div>
-        </div>
+          <div class="prog-txt" id="prog-txt">尚未辨識</div>
+          <div id="rev-host"></div>
 
-        <div style="display:flex;gap:6px;margin-bottom:12px">
-          <button class="mini-btn primary" id="start-btn" disabled style="flex:1">開始導覽</button>
-          <button class="mini-btn" id="next-btn" disabled>本區完成 → 下一區</button>
-        </div>
-
-        <div class="tabs">
-          <div class="tab on" data-tab="work">判讀</div>
-          <div class="tab" data-tab="cmp">雙引擎比對</div>
-          <div class="tab" data-tab="list">已標註</div>
-        </div>
-
-        <!-- 判讀分頁 -->
-        <div id="tab-work">
-          <div class="hint" id="sel-hint">尚未選定區域。可按「開始導覽」，
-            或直接在圖上拖曳框選任一塊。</div>
-          <div style="display:flex;gap:6px;margin:9px 0">
-            <button class="mini-btn primary" id="scan-btn" disabled style="flex:1">
-              智慧掃描（推薦）</button>
-            <button class="mini-btn" id="id-btn" disabled>純 AI 判讀</button>
-            <button class="mini-btn" id="ask-btn" disabled>問問題</button>
+          <div class="section-title">手動標註</div>
+          <div class="hint" id="man-hint">在圖面上直接拖曳框選一塊區域，即可補上 AI 沒抓到的元件。</div>
+          <div id="man-form" style="display:none;margin-top:8px">
+            <div style="display:flex;gap:6px;margin-bottom:6px">
+              <input id="man-tag" placeholder="位號，如 PI 65103" style="flex:1;padding:6px 9px;
+                border-radius:6px;border:1px solid var(--bdr);background:var(--panel2);
+                font-family:inherit;font-size:12px" />
+              <select id="man-kind" style="padding:6px 8px;border-radius:6px;
+                border:1px solid var(--bdr);background:var(--panel2);font-family:inherit;font-size:12px">
+                <option value="instrument">儀錶</option><option value="equipment">設備</option>
+                <option value="valve">閥件</option><option value="pipe">管線</option>
+                <option value="other">其他</option>
+              </select>
+            </div>
+            <input id="man-note" placeholder="備註（選填）" style="width:100%;padding:6px 9px;
+              border-radius:6px;border:1px solid var(--bdr);background:var(--panel2);
+              font-family:inherit;font-size:12px;margin-bottom:6px" />
+            <div style="display:flex;gap:6px">
+              <button class="mini-btn primary" id="man-add" style="flex:1">加入並確認</button>
+              <button class="mini-btn" id="man-cancel">取消</button>
+            </div>
           </div>
-          <div class="hint" style="margin:-4px 0 8px">
-            智慧掃描＝OCR 定位位號 ＋ AI 只判斷氣泡外框（就地／盤面／DCS）＋ ISA 規則解語意。
-            實測比純 AI 判讀命中率高很多，且結果穩定不飄。</div>
-          <div class="qbtns" id="qbtns">
-            <span class="qbtn" data-q="這塊區域是什麼？請說明看得到的元件與管線。">這是什麼</span>
-            <span class="qbtn" data-q="這區域有哪些閥件？各是什麼型式？">有哪些閥</span>
-            <span class="qbtn" data-q="這條管線從哪來、接到哪裡去？管線編號是什麼？">管線走向</span>
-            <span class="qbtn" data-q="這區的儀錶哪些是就地、哪些是盤面/DCS？依圓圈與方框判斷。">就地或盤面</span>
+
+          <div class="section-title">全部項目 <span id="li-count" style="color:var(--dim);font-weight:400"></span></div>
+          <div id="li-list"><span class="hint">按上方按鈕辨識整張圖面。</span></div>
+        </div>
+
+        <!-- ───────────────────────── 進階 -->
+        <div id="tab-adv" style="display:none">
+          <div class="hint">分區逐格檢視、區域問答與雙引擎比對。整張辨識已涵蓋一般用途，
+            這裡供需要針對特定區塊細看時使用。</div>
+          <div class="section-title">分區檢視</div>
+          <div id="zonemap"></div>
+          <div class="section-title">區域問答</div>
+          <div class="hint" id="sel-hint">在圖上拖曳框選一塊區域，或點上方分區。</div>
+          <textarea id="q" style="width:100%;min-height:52px;margin-top:8px;padding:8px 10px;
+            border-radius:8px;border:1px solid var(--bdr);background:var(--panel2);
+            font-family:inherit;font-size:12px" placeholder="例如：這條管線接到哪裡？"></textarea>
+          <div style="display:flex;gap:6px;margin-top:7px">
+            <button class="mini-btn" id="ask-btn" disabled style="flex:1">問 AI</button>
+            <button class="mini-btn" id="cmp-btn" disabled>雙引擎比對</button>
           </div>
-          <textarea id="q" placeholder="也可以自己問，例如：這台泵的備援是哪一台？"></textarea>
-          <div id="answer" style="display:none"></div>
-          <div class="section-title">候選標註（確認後才入庫）
-            <span id="review-txt" style="float:right;font-weight:400;letter-spacing:0"></span></div>
-          <div id="cands"><span class="hint">按「辨識這區元件」後，AI 判讀會列在這裡。</span></div>
-        </div>
-
-        <!-- 比對分頁 -->
-        <div id="tab-cmp" style="display:none">
-          <div class="hint">同一塊區域讓兩個引擎各判一次，原始結果並排——
-            用來評估地端模型在 NDA 場域要犧牲多少準確度。</div>
-          <button class="mini-btn primary" id="cmp-btn" disabled
-                  style="width:100%;margin:9px 0">雙引擎同題比對</button>
-          <div id="cmp-out"></div>
-        </div>
-
-        <!-- 已標註分頁 -->
-        <div id="tab-list" style="display:none">
-          <div class="section-title">已採納標註 <span id="an-count" style="color:var(--dim);font-weight:400"></span></div>
-          <a class="mini-btn primary" id="export-btn" href="#"
-             style="width:100%;text-align:center;margin-bottom:8px">
-            匯出設備台帳 CSV（Excel 可開）</a>
-          <div id="annots"><span class="hint">尚無標註。</span></div>
+          <div id="answer" style="display:none;margin-top:9px" class="desc"></div>
+          <div id="cmp-out" style="margin-top:9px"></div>
+          <div class="section-title">匯出</div>
+          <a class="mini-btn" id="export-btn" href="#"
+             style="width:100%;text-align:center;padding:8px">匯出設備台帳 CSV</a>
+          <div class="section-title">引擎</div>
+          <select id="engine" style="width:100%;padding:6px 8px;border-radius:6px;
+            border:1px solid var(--bdr);background:var(--panel2);font-family:inherit;font-size:12px">
+            <option value="local">地端（圖面不外傳）</option>
+            <option value="cloud">雲端</option>
+          </select>
+          <div class="hint" id="eng-pill" style="margin-top:6px">檢查中…</div>
         </div>
       </div>
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260808g"></script>
+  <script src="/static/js/pid-label.js?v=20260809e"></script>
 </body>
 </html>

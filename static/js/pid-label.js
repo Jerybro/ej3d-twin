@@ -1,7 +1,9 @@
-// P&ID 標示化協作工作台
-// 核心 UX：把整張圖切成分區，帶著工程師一區一區走完 —— AI 判讀、工程師確認、
-// 標記本區巡完 → 完成度才有真實分母（「整廠資訊化」是可量的，不是感覺）。
-// 人工驗證關卡：模型輸出一律先進「候選」，按下採納才入庫並留稽核。
+// P&ID 判讀工作台
+// 流程：整張辨識 → 逐項審核（點到哪就在圖上高亮哪）→ 全部審完 → 產生製程說明。
+// 兩條鐵則：
+//   1. 模型輸出一律先進待審，工程師確認才入庫（否決也留稽核，不靜默丟棄）
+//   2. 製程說明只能建立在「已確認」的清單上——用未經確認的輸出寫報告
+//      等於把幻覺包裝成結論
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g,
@@ -12,88 +14,40 @@ const KIND_TXT = { equipment: '設備', valve: '閥件', instrument: '儀錶', p
 
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const ZC = 5, ZR = 4;           // 分區格數（欄×列）：A3 圖面實測這個粒度一區可判 5-15 個元件
+const ZC = 5, ZR = 4;
 
 let curFile = null, baseMeta = null, zoom = 1;
-let sel = null;                 // 目前作用區域 [x0,y0,x1,y1]
-let zoneIdx = -1;               // 導覽中的分區序號（-1＝自由框選）
-let zonesDone = {};             // {"r-c": {...}}
-let annots = [];
-let wrap, sheet, overlay, selEl;
+let items = [];            // 待審清單（含 state: pending|accepted|rejected）
+let curIdx = -1;
+let sel = null;
+let wrap, sheet, overlay, selEl, ring;
 const engine = () => $('engine').value;
-
-// ------------------------------------------------------------------ 分區
-// 分區之間刻意重疊 —— 位號剛好壓在格線上會被切成兩半，兩邊都認不出來
-// （實測 PDI 65105 卡在分區左緣整個漏掉）。重疊帶讓邊界元件至少被完整看到一次；
-// 重複命中由標註端依 tag 去重吸收。
-const ZOVER = 0.35;             // 重疊比例（佔一格寬/高）
-
-function zoneBox(i) {           // 序號 → 正規化 bbox（左→右、上→下）
-  const r = Math.floor(i / ZC), c = i % ZC;
-  const ox = ZOVER / ZC, oy = ZOVER / ZR;
-  return [Math.max(0, c / ZC - ox), Math.max(0, r / ZR - oy),
-          Math.min(1, (c + 1) / ZC + ox), Math.min(1, (r + 1) / ZR + oy)];
-}
-const zoneKey = i => `${Math.floor(i / ZC)}-${i % ZC}`;
-
-function renderZoneMap() {
-  const el = $('zonemap');
-  if (!curFile) { el.innerHTML = ''; return; }
-  el.style.gridTemplateColumns = `repeat(${ZC}, 1fr)`;
-  let html = '';
-  for (let i = 0; i < ZC * ZR; i++) {
-    const done = zonesDone[zoneKey(i)] ? ' done' : '';
-    const cur = i === zoneIdx ? ' cur' : '';
-    html += `<div class="zc${done}${cur}" data-i="${i}" title="第 ${i + 1} 區">${i + 1}</div>`;
-  }
-  el.innerHTML = html;
-  el.querySelectorAll('.zc').forEach(z =>
-    z.addEventListener('click', () => gotoZone(+z.dataset.i)));
-  $('zone-hint').textContent = `共 ${ZC * ZR} 區，綠＝已巡完。點格子可直接跳。`;
-}
-
-function updateProgress() {
-  const total = ZC * ZR, done = Object.keys(zonesDone).length;
-  $('prog-bar').style.width = (done / total * 100) + '%';
-  $('prog-txt').innerHTML = curFile
-    ? `分區進度 <b>${done}/${total}</b>（${Math.round(done / total * 100)}%）｜已確認位號 <b>${annots.length}</b> 個`
-    : '尚未開始';
-}
-
-function setGuide(step, title, body) {
-  $('g-title').textContent = title;
-  $('g-body').innerHTML = body;
-  [...$('g-steps').children].forEach((n, i) => n.classList.toggle('on', i < step));
-}
 
 // ------------------------------------------------------------------ 檔案
 async function loadFiles() {
   const el = $('file-list');
   try {
     const files = await fetch('/api/pid/list').then(r => r.json());
-    if (!files.length) { el.innerHTML = '<span class="hint">尚無圖面，請先到 P&ID 管理上傳。</span>'; return; }
+    if (!files.length) { el.innerHTML = '<span class="hint">尚無圖面。</span>'; return; }
     el.innerHTML = files.map(f =>
       `<div class="file-item" data-name="${esc(f.name)}">${esc(f.name)}</div>`).join('');
     el.querySelectorAll('.file-item').forEach(d =>
       d.addEventListener('click', () => openDoc(d.dataset.name)));
-  } catch { el.innerHTML = '<span class="hint">圖面清單載入失敗。</span>'; }
+  } catch { el.innerHTML = '<span class="hint">清單載入失敗。</span>'; }
 }
 
 async function openDoc(name) {
-  curFile = name; sel = null; zoneIdx = -1;
+  curFile = name; items = []; curIdx = -1; sel = null;
   $('doc-name').textContent = name;
   document.querySelectorAll('.file-item').forEach(d =>
     d.classList.toggle('active', d.dataset.name === name));
   stage.className = 'empty';
-  stage.innerHTML = '<span><span class="spin"></span> 渲染圖面中（首次較久）…</span>';
-  setGuide(1, '② 渲染中…', '正在把 PDF 轉成可框選的高解析底圖。');
+  stage.innerHTML = '<span><span class="spin"></span> 載入圖面中…</span>';
   try {
     baseMeta = await fetch(`/api/pid/vlm/base/${encodeURIComponent(name)}`)
       .then(r => { if (!r.ok) throw new Error(); return r.json(); });
   } catch {
-    stage.innerHTML = '<span>圖面渲染失敗，請確認 PDF 可讀。</span>';
-    setGuide(1, '渲染失敗', '這張 PDF 讀不出來，換一張試試。');
-    return;
+    stage.innerHTML = '<span>圖面載入失敗。</span>'; return;
   }
   stage.className = '';
   stage.innerHTML = `<div id="canvas-wrap"><img id="sheet" src="${esc(baseMeta.url)}" draggable="false" />
@@ -102,11 +56,10 @@ async function openDoc(name) {
   if (sheet.complete && sheet.naturalWidth) fitZoom();
   else sheet.addEventListener('load', fitZoom, { once: true });
   bindSelection();
-  $('start-btn').disabled = false;
-  await loadAnnots();
+  $('scan-all-btn').disabled = false;
   renderZoneMap();
-  setGuide(2, '③ 開始導覽', '按 <b>開始導覽</b>，我會帶你從第 1 區走到第 ' +
-    (ZC * ZR) + ' 區；也可以直接在圖上拖曳框選任意區域。');
+  await loadAnnots();
+  render();
 }
 
 // -------------------------------------------------------------------- 縮放
@@ -117,374 +70,490 @@ function applyZoom() {
 }
 function fitZoom() {
   if (!baseMeta) return;
-  zoom = Math.min(1, (stage.clientWidth - 24) / baseMeta.w);
-  applyZoom();
+  zoom = Math.min(1, (stage.clientWidth - 24) / baseMeta.w); applyZoom();
 }
 $('zoom-in').addEventListener('click', () => { zoom = Math.min(zoom * 1.4, 8); applyZoom(); });
 $('zoom-out').addEventListener('click', () => { zoom = Math.max(zoom / 1.4, 0.02); applyZoom(); });
 $('zoom-fit').addEventListener('click', fitZoom);
 
-// ---------------------------------------------------------------- 框選互動
+// 滾輪縮放，並以游標為錨點——放大時盯著的地方不會跑掉
+stage.addEventListener('wheel', e => {
+  if (!sheet || !baseMeta) return;
+  e.preventDefault();
+  const r = stage.getBoundingClientRect();
+  const mx = e.clientX - r.left + stage.scrollLeft;   // 游標在內容座標系的位置
+  const my = e.clientY - r.top + stage.scrollTop;
+  const before = zoom;
+  zoom = Math.max(0.02, Math.min(8, zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  applyZoom();
+  const k = zoom / before;
+  stage.scrollLeft = mx * k - (e.clientX - r.left);
+  stage.scrollTop = my * k - (e.clientY - r.top);
+}, { passive: false });
+
+// ------------------------------------------------------- 整張辨識
+$('scan-all-btn').addEventListener('click', async () => {
+  if (!curFile) return;
+  const b = $('scan-all-btn');
+  b.disabled = true; b.innerHTML = '<span class="spin"></span> 辨識中，整張圖需要一到兩分鐘…';
+  try {
+    const d = await fetch('/api/pid/vlm/scan_all', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: curFile }),
+    }).then(r => r.json());
+    if (d.detail) throw new Error(d.detail);
+    // 滿分且無警示的儀錶自動通過，人只審真正有疑慮的——
+    // 但設備一律要人看：OCR 給 R101 的信心也是 1.0，那只代表「字元讀對了」，
+    // 不代表「這是有效設備位號」（實測 7 個設備有 4 個是誤讀）。
+    items = (d.items || []).map(i => ({ ...i, state: i.auto_ok ? 'accepted' : 'pending' }));
+    const auto = items.filter(i => i.state === 'accepted');
+    for (const it of auto) {
+      fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...it, source: 'auto' }),
+      }).catch(() => {});
+    }
+    curIdx = items.findIndex(i => i.state === 'pending');
+    if (curIdx < 0) curIdx = 0;
+    render(); focusItem(curIdx);
+    if (auto.length) {
+      $('prog-txt').insertAdjacentHTML('beforeend',
+        `<br><span style="color:var(--hi)">滿分儀錶 ${auto.length} 項已自動通過，
+         只需人工確認其餘 ${items.length - auto.length} 項</span>`);
+    }
+  } catch (e) {
+    alert('辨識失敗：' + (e.message || ''));
+  } finally {
+    b.disabled = false; b.textContent = '重新辨識整張圖面';
+  }
+});
+
+// ------------------------------------------------------- 審核
+function reviewedCount() { return items.filter(i => i.state !== 'pending').length; }
+function allReviewed() { return items.length > 0 && reviewedCount() === items.length; }
+
+function render() {
+  const done = reviewedCount(), total = items.length;
+  $('prog-bar').style.width = total ? (done / total * 100) + '%' : '0';
+  $('prog-txt').innerHTML = total
+    ? `審核進度 <b>${done}/${total}</b>（${Math.round(done / total * 100)}%）｜
+       已確認 <b>${items.filter(i => i.state === 'accepted').length}</b> 項`
+    : '尚未辨識';
+  $('li-count').textContent = total ? `（${total}）` : '';
+  renderReviewCard();
+  renderList();
+  drawBoxes();
+
+  const acc = items.filter(i => i.state === 'accepted').length;
+  $('desc-btn').disabled = acc < 3;
+  if (!descText) {
+    $('desc-state').textContent = acc < 3
+      ? `再確認 ${3 - acc} 項就會自動產生說明`
+      : '準備產生說明…';
+  }
+}
+
+function renderReviewCard() {
+  const host = $('rev-host');
+  const it = items[curIdx];
+  if (!it) {
+    host.innerHTML = items.length
+      ? '<div class="hint" style="margin-bottom:12px">全部審完了 ✓ 下方製程說明已依最終清單校正。</div>' : '';
+    clearRing(); return;
+  }
+  const mount = it.mounting ? `｜安裝：${esc(it.mounting)}` : '';
+  host.innerHTML = `
+    <div class="nav-row">
+      <button class="mini-btn" id="prev-b">← 上一項</button>
+      <span class="sp"></span>
+      <span class="hint">第 ${curIdx + 1} / ${items.length} 項</span>
+      <span class="sp"></span>
+      <button class="mini-btn" id="next-b">下一項 →</button>
+    </div>
+    <div class="rev">
+      <div class="rev-top">
+        <span class="rev-tag">${esc(it.tag || '（無位號）')}</span>
+        <span class="conf ${confClass(it.confidence)}">${Math.round(it.confidence * 100)}%</span>
+        <span class="rev-sub">${esc(KIND_TXT[it.kind] || it.kind)}</span>
+      </div>
+      <div class="rev-sub">${esc(it.symbol || '')}${mount}
+        ${it.mount_conf ? `<span class="hint">（安裝別信心 ${Math.round(it.mount_conf * 100)}%）</span>` : ''}</div>
+      ${it.note ? `<div class="rev-sub" style="opacity:.85">${esc(it.note)}</div>` : ''}
+      ${it.warn ? `<div class="rev-sub" style="color:#8a5b00">⚠ ${esc(it.warn)}</div>` : ''}
+      ${(it.evidence || []).length ? `<details class="ev"><summary>判讀依據（${it.evidence.length} 步）</summary>
+        ${it.evidence.map(e => `<div class="ev-row"><span class="ev-dot ${e.ok ? 'ok' : 'no'}"></span>
+          <span class="ev-g"><b>${esc(e.stage)}</b><span class="ev-s">${Math.round((e.score || 0) * 100)}%</span><br>
+          ${esc(e.detail)}</span></div>`).join('')}</details>` : ''}
+      <img class="rev-crop" alt="局部圖"
+           src="/api/pid/vlm/crop/${encodeURIComponent(curFile)}?bbox=${it.bbox.join(',')}&z=7" />
+      <div class="crop-cap">↑ 圖上實際樣貌（框中央即此項）${
+        it.warn ? '<b style="color:#8a5b00">　請對照確認是否真有此位號</b>' : ''}</div>
+      <div class="ctx${it.warn ? ' verify' : ''}" id="ctx-box">${it._ctx
+        ? esc(it._ctx)
+        : '<span class="spin"></span> ' + (it.warn ? '查核這個判讀是否成立…' : '判讀這顆在圖上的角色與前後連接…')}</div>
+      <div class="rev-act">
+        <button class="mini-btn primary" id="acc-b">確認正確</button>
+        <button class="mini-btn" id="rej-b">不是</button>
+      </div>
+    </div>`;
+  $('prev-b').onclick = () => focusItem(Math.max(0, curIdx - 1));
+  $('next-b').onclick = () => focusItem(Math.min(items.length - 1, curIdx + 1));
+  $('acc-b').onclick = () => decide('accepted');
+  $('rej-b').onclick = () => decide('rejected');
+}
+
+function renderList() {
+  const el = $('li-list');
+  if (!items.length) { el.innerHTML = '<span class="hint">按上方按鈕辨識整張圖面。</span>'; return; }
+  el.innerHTML = items.map((i, k) => `
+    <div class="li ${k === curIdx ? 'cur' : ''} ${i.state !== 'pending' ? 'done' : ''}" data-k="${k}">
+      <span class="conf ${confClass(i.confidence)}">${Math.round(i.confidence * 100)}</span>
+      <span class="g"><b>${esc(i.tag || '（無位號）')}</b>
+        <span style="color:var(--dim)">${esc(KIND_TXT[i.kind] || i.kind)}
+        ${i.symbol ? '｜' + esc(i.symbol) : ''}</span></span>
+      <span class="st">${i.state === 'accepted' ? '✓' : i.state === 'rejected' ? '✕' : ''}</span>
+    </div>`).join('');
+  el.querySelectorAll('.li').forEach(d =>
+    d.addEventListener('click', () => focusItem(+d.dataset.k)));
+}
+
+// 點到哪就在圖上高亮哪——使用者要能立刻找到「PDI65104 在圖中哪裡」
+function focusItem(k) {
+  curIdx = k;
+  const it = items[k];
+  render();
+  if (!it || !overlay) return;
+  clearRing();
+  const [x0, y0, x1, y1] = it.bbox;
+  ring = document.createElement('div');
+  ring.className = 'focus-ring';
+  ring.dataset.t = it.tag || KIND_TXT[it.kind] || '';
+  const padX = Math.max(0.004, (x1 - x0) * 0.35), padY = Math.max(0.004, (y1 - y0) * 0.35);
+  ring.style.cssText = `left:${(x0 - padX) * 100}%;top:${(y0 - padY) * 100}%;` +
+    `width:${(x1 - x0 + padX * 2) * 100}%;height:${(y1 - y0 + padY * 2) * 100}%`;
+  overlay.appendChild(ring);
+  // 太小看不到 → 自動放大到看得清，再捲到畫面中央
+  if (zoom < 0.6) { zoom = 0.7; applyZoom(); }
+  requestAnimationFrame(() =>
+    ring.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' }));
+  if (it.kind === 'instrument' && !it.mounting) classifyOne(k);
+  loadContext(k);
+}
+
+// 這顆元件在圖上扮演什麼角色——裁一塊夠大的鄰域讓模型看得到上下游
+async function loadContext(k) {
+  const it = items[k];
+  if (!it || it._ctx || it._ctxBusy) return;
+  it._ctxBusy = true;
+  try {
+    const d = await fetch('/api/pid/vlm/context', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      // 被標警示的項目改用查核問法——用「描述功能」去問等於預設它存在，
+      // 模型只能編出連接關係，跟警示自相矛盾（實測 D181 就是這樣）
+      body: JSON.stringify({ filename: curFile, bbox: it.bbox, tag: it.tag,
+                             kind: it.kind, symbol: it.symbol, provider: engine(),
+                             verify: !!it.warn }),
+    }).then(r => r.json());
+    it._ctx = d.text || '（無法判讀這塊區域）';
+  } catch { it._ctx = '（情境判讀失敗）'; }
+  if (curIdx === k) renderReviewCard();
+}
+function clearRing() { if (ring) { ring.remove(); ring = null; } }
+
+// 審到哪一項才判那一項的安裝別（就地／盤面），不必先等整張圖跑完推論
+async function classifyOne(k) {
+  const it = items[k];
+  if (!it || it._cls) return;
+  it._cls = true;
+  try {
+    const d = await fetch('/api/pid/vlm/classify_one', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: curFile, bbox: it.bbox, provider: engine() }),
+    }).then(r => r.json());
+    if (d.mounting) {
+      it.mounting = d.mounting; it.mount_conf = d.mount_conf;
+      (it.evidence = it.evidence || []).push(
+        { stage: '安裝別判定', ok: true, score: d.mount_conf, detail: d.detail });
+      if (curIdx === k) renderReviewCard();
+    }
+  } catch { /* 判不出來就留空，不擋審核 */ }
+}
+
+async function decide(state) {
+  const it = items[curIdx];
+  if (!it || it.state !== 'pending') { focusItem(Math.min(items.length - 1, curIdx + 1)); return; }
+  it.state = state;
+  try {
+    if (state === 'accepted') {
+      await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...it, source: 'scan' }),
+      });
+    } else {
+      await fetch(`/api/pid/vlm/reject/${encodeURIComponent(curFile)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag: it.tag, kind: it.kind }),
+      });
+    }
+  } catch { /* 留痕失敗不擋流程 */ }
+  const nxt = items.findIndex((x, i) => i > curIdx && x.state === 'pending');
+  focusItem(nxt >= 0 ? nxt : Math.min(items.length - 1, curIdx + 1));
+  checkStale();          // 標註一改，既有製程說明就可能過期
+}
+
+// 只畫「已確認」的框——未確認的不畫，避免整片色塊蓋住圖面
+// 框線顏色＝信心度（綠高／黃中／紅低），線型＝審核狀態（實線已確認／虛線待審）。
+// 一律綠色等於把「這項很可靠」和「這項很可疑」畫成同一個樣子，
+// 使用者反而看不出該優先看哪裡。
+function drawBoxes() {
+  if (!overlay) return;
+  overlay.querySelectorAll('.an-box').forEach(b => b.remove());
+  for (const a of items) {
+    if (a.state === 'rejected' || !Array.isArray(a.bbox)) continue;
+    const [x0, y0, x1, y1] = a.bbox;
+    const d = document.createElement('div');
+    d.className = 'an-box ' + confClass2(a) + (a.state === 'pending' ? ' pending' : '')
+      + (a.kind === 'equipment' ? ' eq' : '');
+    d.title = `${a.tag || KIND_TXT[a.kind]}｜信心 ${Math.round(a.confidence * 100)}%`
+      + (a.warn ? '｜⚠ ' + a.warn : '');
+    d.style.cssText = `left:${x0 * 100}%;top:${y0 * 100}%;` +
+      `width:${(x1 - x0) * 100}%;height:${(y1 - y0) * 100}%`;
+    overlay.appendChild(d);
+  }
+}
+// 有警示一律降級成低信心配色——警示的意義就是「別信這個數字」
+function confClass2(a) {
+  if (a.warn) return 'lo';
+  return a.confidence >= 0.9 ? 'hi' : (a.confidence >= 0.6 ? 'mid' : 'lo');
+}
+
+async function loadAnnots() {
+  if (!curFile) return;
+  const ex = $('export-btn');
+  ex.href = `/api/pid/vlm/export/${encodeURIComponent(curFile)}`;
+}
+
+// ------------------------------------------------------- 製程說明
+let descText = '';          // 目前這一版說明（修訂時要帶回後端比對）
+
+// 模型把改動過的句子包在 ⟪⟫ 裡 → 轉成 <mark> 高亮
+function renderDesc(t) {
+  return esc(t).replace(/⟪([\s\S]*?)⟫/g, '<mark>$1</mark>');
+}
+
+let descBusy = false, descTimer = null, descBaseline = '';
+
+function annotSignature() {
+  return items.filter(i => i.state === 'accepted')
+    .map(i => `${i.tag}|${i.kind}|${i.mounting || ''}`).sort().join(';');
+}
+
+async function genDesc(feedback) {
+  if (descBusy || !curFile) return;
+  descBusy = true;
+  const out = $('desc-out'), st = $('desc-state');
+  st.className = 'dp-state live';
+  st.innerHTML = `<span class="spin"></span> ${feedback ? '依你的意見修訂中…' : '校正說明中…'}`;
+  $('desc-btn').disabled = true;
+  const sig = annotSignature();
+  try {
+    const d = await fetch('/api/pid/vlm/describe', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: curFile, feedback: feedback || '',
+                             previous: descText }),
+    }).then(r => r.json());
+    if (d.detail) throw new Error(d.detail);
+    descText = d.text;
+    descBaseline = sig;
+    out.innerHTML = `<div class="desc">${renderDesc(d.text)}</div>`;
+    const acc = items.filter(i => i.state === 'accepted').length;
+    st.className = 'dp-state';
+    st.innerHTML = d.revised
+      ? `依 ${acc} 項已確認標註校正｜<b style="color:#8a5b00">黃底＝本次改動</b>`
+      : `依 ${acc} 項已確認標註產生`;
+    $('fb-text').value = '';
+  } catch (e) {
+    st.className = 'dp-state';
+    st.textContent = '產生失敗';
+    out.innerHTML = `<div class="desc" style="color:var(--lo)">${esc(e.message || '產生失敗')}</div>`;
+  } finally {
+    descBusy = false;
+    $('desc-btn').disabled = items.filter(i => i.state === 'accepted').length < 3;
+    if (annotSignature() !== descBaseline) scheduleDesc();   // 期間又審了新的
+  }
+}
+
+// 每次審核都可能改變結論——去抖動後自動校正，讓使用者真的看到
+// 「我審了這一項，說明就跟著變」，但不會每點一下就打一次模型
+function scheduleDesc() {
+  const acc = items.filter(i => i.state === 'accepted').length;
+  if (acc < 3 || descBusy) return;
+  if (annotSignature() === descBaseline) return;
+  clearTimeout(descTimer);
+  $('desc-state').className = 'dp-state live';
+  $('desc-state').textContent = descText ? '標註已變更，即將校正說明…' : '即將產生說明…';
+  descTimer = setTimeout(() => genDesc(''), 2500);
+}
+
+$('desc-btn').addEventListener('click', () => { clearTimeout(descTimer); genDesc(''); });
+$('fb-toggle').addEventListener('click', () => {
+  const b = $('fb-box');
+  b.style.display = b.style.display === 'none' ? '' : 'none';
+  if (b.style.display === '') $('fb-text').focus();
+});
+$('fb-btn').addEventListener('click', () => {
+  const t = $('fb-text').value.trim();
+  if (!t) { alert('請先寫下要修正或補充的內容'); return; }
+  clearTimeout(descTimer); genDesc(t);
+});
+$('dp-collapse').addEventListener('click', () =>
+  $('desc-panel').classList.toggle('collapsed'));
+
+function checkStale() { scheduleDesc(); }
+
+// ------------------------------------------------------- 手動標註
+let manBox = null;
+function openManual(box) {
+  manBox = box;
+  $('man-form').style.display = '';
+  $('man-hint').innerHTML = `已框選區域，填入位號後即可加入。`;
+  $('man-tag').focus();
+}
+$('man-cancel').addEventListener('click', () => {
+  manBox = null; $('man-form').style.display = 'none';
+  $('man-hint').textContent = '在圖面上直接拖曳框選一塊區域，即可補上 AI 沒抓到的元件。';
+  if (selEl) { selEl.remove(); selEl = null; }
+});
+$('man-add').addEventListener('click', async () => {
+  if (!manBox || !curFile) return;
+  const tag = $('man-tag').value.trim();
+  if (!tag) { alert('請輸入位號'); return; }
+  const it = {
+    tag, kind: $('man-kind').value, symbol: '', mounting: '', mount_conf: 0,
+    note: $('man-note').value.trim(), confidence: 1.0, bbox: manBox,
+    source: 'manual', state: 'accepted',
+    evidence: [{ stage: '人工標註', ok: true, score: 1.0,
+                 detail: '由工程師手動框選並填寫，非模型輸出' }],
+  };
+  try {
+    await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(it),
+    });
+  } catch { alert('儲存失敗'); return; }
+  items.push(it);
+  $('man-tag').value = ''; $('man-note').value = '';
+  $('man-cancel').click();
+  render(); checkStale();
+});
+
+// ------------------------------------------------------- 分頁
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
+  ['review', 'adv'].forEach(n =>
+    $('tab-' + n).style.display = n === t.dataset.tab ? '' : 'none');
+}));
+
+// ------------------------------------------------------- 進階：分區/問答/比對
+function zoneBox(i) {
+  const r = Math.floor(i / ZC), c = i % ZC;
+  const ox = 0.35 / ZC, oy = 0.35 / ZR;
+  return [Math.max(0, c / ZC - ox), Math.max(0, r / ZR - oy),
+          Math.min(1, (c + 1) / ZC + ox), Math.min(1, (r + 1) / ZR + oy)];
+}
+function renderZoneMap() {
+  const el = $('zonemap');
+  el.style.gridTemplateColumns = `repeat(${ZC}, 1fr)`;
+  el.innerHTML = Array.from({ length: ZC * ZR },
+    (_, i) => `<div class="zc" data-i="${i}">${i + 1}</div>`).join('');
+  el.querySelectorAll('.zc').forEach(z => z.addEventListener('click', () => {
+    const b = zoneBox(+z.dataset.i);
+    setSel(b, `第 ${+z.dataset.i + 1} 區`);
+    clearRing();
+    ring = document.createElement('div');
+    ring.className = 'focus-ring'; ring.dataset.t = `第 ${+z.dataset.i + 1} 區`;
+    ring.style.cssText = `left:${b[0] * 100}%;top:${b[1] * 100}%;` +
+      `width:${(b[2] - b[0]) * 100}%;height:${(b[3] - b[1]) * 100}%`;
+    overlay.appendChild(ring);
+    ring.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+  }));
+}
+function setSel(box, label) {
+  sel = box;
+  $('sel-hint').innerHTML = `作用區域：<b>${esc(label)}</b>`;
+  ['ask-btn', 'cmp-btn'].forEach(i => { $(i).disabled = false; });
+}
 function bindSelection() {
-  let sx = 0, sy = 0, dragging = false;
+  let sx = 0, sy = 0, drag = false;
   overlay.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
     const r = overlay.getBoundingClientRect();
-    sx = e.clientX - r.left; sy = e.clientY - r.top;
-    dragging = true;
+    sx = e.clientX - r.left; sy = e.clientY - r.top; drag = true;
     overlay.setPointerCapture(e.pointerId);
     if (selEl) selEl.remove();
     selEl = document.createElement('div');
-    selEl.className = 'sel-box';
-    overlay.appendChild(selEl);
-    e.preventDefault();
+    selEl.style.cssText = 'position:absolute;border:2px solid var(--accent);' +
+      'background:rgba(4,106,251,0.10);pointer-events:none';
+    overlay.appendChild(selEl); e.preventDefault();
   });
   overlay.addEventListener('pointermove', e => {
-    if (!dragging) return;
+    if (!drag) return;
     const r = overlay.getBoundingClientRect();
     const cx = e.clientX - r.left, cy = e.clientY - r.top;
-    selEl.style.cssText = `left:${Math.min(sx, cx)}px;top:${Math.min(sy, cy)}px;` +
-      `width:${Math.abs(cx - sx)}px;height:${Math.abs(cy - sy)}px`;
+    selEl.style.left = Math.min(sx, cx) + 'px'; selEl.style.top = Math.min(sy, cy) + 'px';
+    selEl.style.width = Math.abs(cx - sx) + 'px'; selEl.style.height = Math.abs(cy - sy) + 'px';
   });
   overlay.addEventListener('pointerup', e => {
-    if (!dragging) return;
-    dragging = false;
+    if (!drag) return;
+    drag = false;
     const r = overlay.getBoundingClientRect();
     const cx = e.clientX - r.left, cy = e.clientY - r.top;
     const x0 = Math.min(sx, cx) / r.width, x1 = Math.max(sx, cx) / r.width;
     const y0 = Math.min(sy, cy) / r.height, y1 = Math.max(sy, cy) / r.height;
-    if ((x1 - x0) < 0.003 || (y1 - y0) < 0.003) {
-      if (selEl) { selEl.remove(); selEl = null; }
-      return;                                  // 誤點：保留原本作用區域
-    }
-    zoneIdx = -1;                              // 手動框選 → 脫離導覽序
-    document.querySelectorAll('.zone-box').forEach(b => b.remove());
-    renderZoneMap();
-    setSel([x0, y0, x1, y1], `自由框選 ${Math.round((x1 - x0) * 100)}%×${Math.round((y1 - y0) * 100)}% 區域`);
+    if ((x1 - x0) < 0.004 || (y1 - y0) < 0.004) { if (selEl) { selEl.remove(); selEl = null; } return; }
+    const box = [x0, y0, x1, y1];
+    setSel(box, `框選 ${Math.round((x1 - x0) * 100)}%×${Math.round((y1 - y0) * 100)}%`);
+    openManual(box);          // 框選即可手動補標，也同時成為問答的作用區域
   });
 }
 
-function setSel(box, label) {
-  sel = box;
-  $('sel-hint').innerHTML = `作用區域：<b>${esc(label)}</b>，可以判讀了。`;
-  ['scan-btn', 'id-btn', 'ask-btn', 'cmp-btn'].forEach(i => { $(i).disabled = false; });
-}
-
-// 智慧掃描：OCR 定位 → VLM 只做選擇題 → ISA 解碼（本平台預設路徑）
-$('scan-btn').addEventListener('click', async () => {
-  if (!sel || !curFile) return;
-  const el = $('cands');
-  el.innerHTML = '<span class="hint"><span class="spin"></span> OCR 定位中，接著逐個氣泡判外框…</span>';
-  $('scan-btn').disabled = true;
-  try {
-    const r = await fetch('/api/pid/vlm/scan', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename: curFile, bbox: sel, provider: engine() }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || '掃描失敗');
-    renderCands(d, d.stats);
-  } catch (err) {
-    el.innerHTML = `<span class="hint" style="color:var(--lo)">${esc(err.message)}</span>`;
-  } finally { $('scan-btn').disabled = !sel; }
-});
-
-// ------------------------------------------------------------------ 導覽
-function gotoZone(i, autoScan) {
-  if (!curFile || i < 0 || i >= ZC * ZR) return;
-  zoneIdx = i;
-  const box = zoneBox(i);
-  if (selEl) { selEl.remove(); selEl = null; }
-  document.querySelectorAll('.zone-box').forEach(b => b.remove());
-  const d = document.createElement('div');
-  d.className = 'zone-box';
-  d.dataset.z = `第 ${i + 1} 區 / ${ZC * ZR}`;
-  d.style.cssText = `left:${box[0] * 100}%;top:${box[1] * 100}%;` +
-    `width:${(box[2] - box[0]) * 100}%;height:${(box[3] - box[1]) * 100}%`;
-  overlay.appendChild(d);
-  d.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
-  setSel(box, `第 ${i + 1} 區（共 ${ZC * ZR} 區）`);
-  $('next-btn').disabled = false;
-  renderZoneMap();
-  setGuide(3, `④ 第 ${i + 1} 區`,
-    '按 <b>辨識這區元件</b> 讓 AI 判讀 → 逐項 <b>採納</b> 或 <b>不是</b> → ' +
-    '確認完按 <b>本區完成</b> 進下一區。');
-  $('answer').style.display = 'none';
-  // 導覽推進時直接開判（帶著使用者做）；手動點格子只跳過去不自動花 GPU
-  if (autoScan) $('scan-btn').click();
-  else $('cands').innerHTML = '<span class="hint">按「智慧掃描」開始判讀這一區。</span>';
-}
-
-$('start-btn').addEventListener('click', () => {
-  let i = 0;                                   // 從第一個未完成的分區接續
-  while (i < ZC * ZR && zonesDone[zoneKey(i)]) i++;
-  gotoZone(i >= ZC * ZR ? 0 : i, true);
-});
-
-$('next-btn').addEventListener('click', async () => {
-  if (zoneIdx < 0) return;
-  try {
-    const r = await fetch(`/api/pid/vlm/zone/${encodeURIComponent(curFile)}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ zone: zoneKey(zoneIdx), status: 'done' }),
-    });
-    zonesDone = (await r.json()).zones || zonesDone;
-  } catch { /* 進度存不了不擋流程 */ }
-  updateProgress();
-  let n = zoneIdx + 1;
-  while (n < ZC * ZR && zonesDone[zoneKey(n)]) n++;
-  if (n >= ZC * ZR) {
-    renderZoneMap();
-    setGuide(4, '全圖巡完 🎉',
-      `這張圖 ${ZC * ZR} 區都走完了，共確認 <b>${annots.length}</b> 個位號。` +
-      '可以換下一張圖面繼續。');
-    $('next-btn').disabled = true;
-    return;
-  }
-  gotoZone(n, true);
-});
-
-// -------------------------------------------------------------------- 分頁
-document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
-  ['work', 'cmp', 'list'].forEach(n =>
-    $('tab-' + n).style.display = n === t.dataset.tab ? '' : 'none');
-}));
-
-// -------------------------------------------------------------------- 問答
-$('qbtns').addEventListener('click', e => {
-  const b = e.target.closest('.qbtn');
-  if (!b) return;
-  $('q').value = b.dataset.q;
-  if (sel) doAsk();
-});
-
-async function doAsk() {
+$('ask-btn').addEventListener('click', async () => {
   if (!sel || !curFile) return;
   const box = $('answer');
-  box.style.display = ''; box.className = 'answer';
-  box.innerHTML = '<span class="spin"></span> 判讀中…';
-  $('ask-btn').disabled = true;
+  box.style.display = ''; box.innerHTML = '<span class="spin"></span> 判讀中…';
   try {
-    const r = await fetch('/api/pid/vlm/ask', {
+    const d = await fetch('/api/pid/vlm/ask', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename: curFile, bbox: sel, question: $('q').value, provider: engine() }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || '判讀失敗');
-    box.textContent = d.text;
-  } catch (err) {
-    box.className = 'answer err'; box.textContent = err.message || '判讀失敗';
-  } finally { $('ask-btn').disabled = !sel; }
-}
-$('ask-btn').addEventListener('click', doAsk);
-
-// ---------------------------------------------------------------- 結構化辨識
-$('id-btn').addEventListener('click', async () => {
-  if (!sel || !curFile) return;
-  const el = $('cands');
-  el.innerHTML = '<span class="hint"><span class="spin"></span> 辨識中…</span>';
-  $('id-btn').disabled = true;
-  try {
-    const r = await fetch('/api/pid/vlm/identify', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename: curFile, bbox: sel, provider: engine() }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || '辨識失敗');
-    renderCands(d);
-  } catch (err) {
-    el.innerHTML = `<span class="hint" style="color:var(--lo)">${esc(err.message)}</span>`;
-  } finally { $('id-btn').disabled = !sel; }
+    }).then(r => r.json());
+    box.textContent = d.text || d.detail || '（無回應）';
+  } catch { box.textContent = '判讀失敗'; }
 });
 
-function renderCands(d, stats) {
-  const el = $('cands');
-  if (!d.items || !d.items.length) {
-    el.innerHTML = `<span class="hint">${esc(d.warn || 'AI 在這區沒有辨識出可標註的元件——可能這區是空白或圖框。')}</span>`;
-    return;
-  }
-  const head = stats
-    ? `OCR 定位 ${stats.instruments} 儀錶 / ${stats.equipment} 設備｜
-       幾何抓到 ${stats.valves || 0} 閥件｜AI 判外框 ${stats.vlm_calls} 次。請逐項確認：`
-    : `AI 判讀出 ${d.items.length} 項，請逐項確認（採納才會入庫）：`;
-  el.innerHTML =
-    `<div class="hint" style="margin-bottom:7px">${head}</div>` +
-    d.items.map((it, i) => `
-    <div class="cand" data-i="${i}">
-      <div class="cand-top">
-        <span class="cand-tag">${esc(it.tag || '（無位號）')}</span>
-        <span class="conf ${confClass(it.confidence)}">${Math.round(it.confidence * 100)}%</span>
-        <span class="cand-sym">${esc(KIND_TXT[it.kind] || it.kind)}</span>
-        ${it.mounting ? `<span class="cand-sym">· ${esc(it.mounting)}</span>` : ''}
-      </div>
-      <div class="cand-sym">${esc(it.symbol)}${it.note ? '｜' + esc(it.note) : ''}</div>
-      ${it.warn ? `<div class="cand-sym" style="color:var(--mid)">⚠ ${esc(it.warn)}</div>` : ''}
-      ${(it.evidence || []).length ? `<details class="ev"><summary>判讀依據（${it.evidence.length} 步）</summary>
-        ${it.evidence.map(e => `<div class="ev-row">
-          <span class="ev-dot ${e.ok ? 'ok' : 'no'}"></span>
-          <span class="ev-g"><b>${esc(e.stage)}</b>
-            <span class="ev-s">${Math.round((e.score || 0) * 100)}%</span><br>
-            <span class="ev-d">${esc(e.detail)}</span></span></div>`).join('')}
-      </details>` : ''}
-      <div class="cand-act">
-        <button class="mini-btn primary acc">採納</button>
-        <button class="mini-btn drop-it">不是</button>
-      </div>
-    </div>`).join('') +
-    `<button class="mini-btn ghost" id="acc-all" style="width:100%;margin-top:4px">
-      全部採納（${d.items.length} 項）</button>`;
-  reviewTotal = d.items.length; reviewDone = 0; updateReview();
-  el.querySelectorAll('.cand').forEach(c => {
-    const it = d.items[+c.dataset.i];
-    c.querySelector('.acc').addEventListener('click', () => accept(it, c));
-    c.querySelector('.drop-it').addEventListener('click', () => reject(it, c));
-  });
-  $('acc-all').addEventListener('click', async e => {
-    e.target.disabled = true;
-    for (const c of [...el.querySelectorAll('.cand')]) await accept(d.items[+c.dataset.i], c);
-  });
-}
-
-// 本區審核進度：AI 判出幾項、人工審過幾項——一一審核要看得到還剩幾筆
-let reviewTotal = 0, reviewDone = 0;
-function updateReview() {
-  const el = $('review-txt');
-  if (!el) return;
-  el.textContent = reviewTotal
-    ? `本區審核 ${reviewDone}/${reviewTotal}` + (reviewDone >= reviewTotal ? '（已審完）' : '')
-    : '';
-  el.style.color = (reviewTotal && reviewDone >= reviewTotal) ? 'var(--hi)' : 'var(--dim)';
-}
-
-function markReviewed(cardEl, txt, cls) {
-  cardEl.classList.add('taken');
-  cardEl.querySelector('.cand-act').innerHTML =
-    `<span class="hint" style="color:var(--${cls})">${txt}</span>`;
-  reviewDone++; updateReview();
-}
-
-async function reject(it, cardEl) {
-  markReviewed(cardEl, '已否決 ✕（已留稽核）', 'lo');
-  try {
-    await fetch(`/api/pid/vlm/reject/${encodeURIComponent(curFile)}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tag: it.tag, kind: it.kind }),
-    });
-  } catch { /* 留痕失敗不擋審核流程 */ }
-}
-
-async function accept(it, cardEl) {
-  if (!sel || !curFile) return;
-  try {
-    const r = await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      // 智慧掃描的每一項都有自己的精確座標；純 AI 判讀才退回整區框
-      body: JSON.stringify({ ...it, bbox: it.bbox || sel,
-        source: engine() === 'cloud' ? 'vlm-cloud' : 'vlm-local' }),
-    });
-    if (!r.ok) throw new Error();
-    markReviewed(cardEl, '已採納 ✓', 'hi');
-    await loadAnnots();
-  } catch { alert('採納失敗，請重試'); }
-}
-
-// ------------------------------------------------------------ 雙引擎比對
 $('cmp-btn').addEventListener('click', async () => {
   if (!sel || !curFile) return;
   const el = $('cmp-out');
-  el.innerHTML = '<span class="hint"><span class="spin"></span> 兩個引擎判讀中（地端較慢）…</span>';
-  $('cmp-btn').disabled = true;
+  el.innerHTML = '<span class="hint"><span class="spin"></span> 兩個引擎判讀中…</span>';
   try {
     const d = await fetch('/api/pid/vlm/compare', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename: curFile, bbox: sel }),
     }).then(r => r.json());
-    const col = (r, cls, name) => `
-      <div class="cmp-col"><div class="cmp-h ${cls}">${name}（${(r.items || []).length}）</div>
-      <div class="cmp-b">${r.error ? `<div style="color:var(--lo)">${esc(r.error)}</div>`
-        : ((r.items || []).map(i =>
-          `<div><b>${esc(i.tag || '—')}</b> <span style="color:var(--dim)">${esc(i.symbol)}</span></div>`
-        ).join('') || '<div style="color:var(--dim)">無</div>')}</div></div>`;
-    el.innerHTML = `<div class="cmp">${col(d.cloud || {}, 'c', '雲端 Claude')}${col(d.local || {}, 'l', '地端 Qwen')}</div>
-      <div class="dif">
-        <div><b>兩邊都抓到</b>：${(d.diff.both.join('、') || '—')}</div>
-        <div style="color:var(--cloud)"><b>只有雲端抓到</b>：${(d.diff.cloud_only.join('、') || '—')}</div>
-        <div><b>只有地端抓到</b>：${(d.diff.local_only.join('、') || '—')}</div>
-      </div>`;
-  } catch {
-    el.innerHTML = '<span class="hint" style="color:var(--lo)">比對失敗</span>';
-  } finally { $('cmp-btn').disabled = !sel; }
+    const col = (r, name) => `<div style="flex:1"><b style="font-size:11.5px">${name}（${(r.items || []).length}）</b>
+      <div class="hint">${r.error ? esc(r.error)
+        : ((r.items || []).map(i => esc(i.tag || '—')).join('、') || '無')}</div></div>`;
+    el.innerHTML = `<div style="display:flex;gap:10px">${col(d.cloud || {}, '雲端')}${col(d.local || {}, '地端')}</div>
+      <div class="hint" style="margin-top:6px">兩邊都抓到：${(d.diff.both.join('、') || '—')}</div>`;
+  } catch { el.innerHTML = '<span class="hint">比對失敗</span>'; }
 });
 
-// ------------------------------------------------------------ 已採納標註
-async function loadAnnots() {
-  if (!curFile) return;
-  try {
-    const d = await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`).then(r => r.json());
-    annots = d.items || [];
-    zonesDone = d.zones || {};
-  } catch { annots = []; zonesDone = {}; }
-  renderAnnots(); drawAnnotBoxes(); updateProgress(); renderZoneMap();
-}
-
-function renderAnnots() {
-  const el = $('annots');
-  $('an-count').textContent = annots.length ? `（${annots.length}）` : '';
-  const ex = $('export-btn');
-  ex.href = curFile ? `/api/pid/vlm/export/${encodeURIComponent(curFile)}` : '#';
-  ex.style.opacity = annots.length ? '' : '0.45';
-  ex.style.pointerEvents = annots.length ? '' : 'none';
-  if (!annots.length) { el.innerHTML = '<span class="hint">尚無標註。</span>'; return; }
-  el.innerHTML = annots.slice().reverse().map(a => `
-    <div class="an-row" data-id="${esc(a.id)}">
-      <span class="conf ${confClass(a.confidence)}">${Math.round((a.confidence || 0) * 100)}%</span>
-      <span class="g"><b>${esc(a.tag || '（無位號）')}</b>
-        <span style="color:var(--dim)">${esc(KIND_TXT[a.kind] || a.kind)}${a.symbol ? '｜' + esc(a.symbol) : ''}</span></span>
-      <span class="x" title="刪除">×</span>
-    </div>`).join('');
-  el.querySelectorAll('.an-row').forEach(r =>
-    r.querySelector('.x').addEventListener('click', () => delAnnot(r.dataset.id)));
-}
-
-function drawAnnotBoxes() {
-  if (!overlay) return;
-  overlay.querySelectorAll('.an-box').forEach(b => b.remove());
-  for (const a of annots) {
-    if (!Array.isArray(a.bbox) || a.bbox.length !== 4) continue;
-    const [x0, y0, x1, y1] = a.bbox;
-    const d = document.createElement('div');
-    d.className = 'an-box ' + confClass(a.confidence || 0);
-    d.style.cssText = `left:${x0 * 100}%;top:${y0 * 100}%;width:${(x1 - x0) * 100}%;height:${(y1 - y0) * 100}%`;
-    d.innerHTML = `<i>${esc(a.tag || KIND_TXT[a.kind] || '標註')}</i>`;
-    overlay.appendChild(d);
-  }
-}
-
-async function delAnnot(id) {
-  try {
-    await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}/${encodeURIComponent(id)}`,
-      { method: 'DELETE' });
-    await loadAnnots();
-  } catch { /* 重載即可看出結果 */ }
-}
-
-// -------------------------------------------------------------- 引擎狀態
-async function refreshEngine() {
-  const pill = $('eng-pill');
+(async function initEngine() {
   try {
     const s = await fetch('/api/pid/vlm/status').then(r => r.json());
-    window.__ENG = s;
     const cur = s[engine()] || {};
-    pill.className = 'pill' + (cur.ok ? '' : ' warn');
-    pill.textContent = cur.ok
-      ? (engine() === 'cloud' ? `雲端就緒｜${cur.model}` : `地端就緒｜${cur.model}`)
-      : (cur.reason || '未就緒');
-  } catch { pill.className = 'pill warn'; pill.textContent = '引擎狀態未知'; }
-}
-$('engine').addEventListener('change', refreshEngine);
+    $('eng-pill').textContent = cur.ok ? `就緒｜${cur.model}` : (cur.reason || '未就緒');
+  } catch { $('eng-pill').textContent = '狀態未知'; }
+})();
+$('engine').addEventListener('change', () => location.reload());
 
-refreshEngine();
 loadFiles();
-setGuide(1, '① 選一張圖面',
-  '左側點一張 P&ID，系統會把整張圖切成分區，帶你一區一區把位號標示完成。');

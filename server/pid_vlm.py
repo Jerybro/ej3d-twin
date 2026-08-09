@@ -876,6 +876,451 @@ def annot_add(filename: str, item: Annot) -> dict:
     return {"ok": True, "id": rec["id"], "count": len(d["items"])}
 
 
+class ScanAllReq(BaseModel):
+    filename: str
+
+
+@router.post("/scan_all")
+def scan_all(req: ScanAllReq) -> dict:
+    """整張圖一次辨識——位號、設備、閥件全出，每項都帶精確座標。
+
+    只跑確定性管線（OCR＋規則＋向量幾何），全頁一次掃完約 1-2 分鐘。
+    氣泡外框的判定改成審核時逐項即時處理（見 /classify_one），
+    這樣使用者不必等一百多次推論才看得到東西。
+    """
+    from .pid_parse import EQUIP_RE, INST_RE, TYPE_MAP
+
+    _, meta = _ensure_base(req.filename)
+    W, H = meta["w"], meta["h"]
+
+    # 整頁一次 OCR 會漏字：底圖 3572px 寬不會被放大，小字讀不到
+    # （實測整頁 73 儀錶，分塊後 100+）。改成分塊掃描各自放大再合併，
+    # 塊間重疊讓壓在切線上的位號至少被完整看到一次，重複由 tag 去重吸收。
+    TC, TR, OV = 4, 3, 0.06
+    hits = []
+    for r in range(TR):
+        for c in range(TC):
+            box = [max(0.0, c / TC - OV), max(0.0, r / TR - OV),
+                   min(1.0, (c + 1) / TC + OV), min(1.0, (r + 1) / TR + OV)]
+            try:
+                h, _ = _ocr_region(req.filename, box)
+                hits += h
+            except Exception:  # noqa: BLE001
+                continue
+
+    insts, equips = {}, {}
+    for cx, cy, text, conf, hh in hits:
+        t = text.replace(" ", "").replace("-", "")
+        if INST_RE.match(t):
+            if t not in insts or conf > insts[t][2]:
+                insts[t] = (cx, cy, conf, hh)
+        elif EQUIP_RE.match(t) and t[0] in TYPE_MAP:
+            if t not in equips or conf > equips[t][2]:
+                equips[t] = (cx, cy, conf, hh)
+
+    items = []
+    for tag, (cx, cy, conf, hh) in insts.items():
+        dec = _decode_isa(tag)
+        items.append({
+            "tag": tag, "kind": "instrument", "symbol": dec or "儀錶",
+            "note": "", "mounting": "", "mount_conf": 0.0,
+            "confidence": round(float(conf), 2),
+            "evidence": [
+                {"stage": "位號定位", "ok": True, "score": round(float(conf), 2),
+                 "detail": f"辨識出「{tag}」，位置 ({int(cx)}, {int(cy)})"},
+                {"stage": "ISA 5.1 語意", "ok": bool(dec), "score": 1.0 if dec else 0.0,
+                 "detail": f"{tag[:len(re.match(r'^[A-Z]+', tag).group(0))]} → {dec}"
+                           if dec else "字母碼不在 ISA 表中"},
+            ],
+            "bbox": [round((cx - hh) / W, 4), round((cy - hh) / H, 4),
+                     round((cx + hh) / W, 4), round((cy + hh) / H, 4)],
+        })
+    for tag, (cx, cy, conf, hh) in equips.items():
+        dec = _decode_equip(tag)
+        items.append({
+            "tag": tag, "kind": "equipment", "symbol": dec or "設備",
+            "note": "", "mounting": "", "mount_conf": 0.0,
+            "confidence": round(float(conf), 2),
+            "evidence": [
+                {"stage": "位號定位", "ok": True, "score": round(float(conf), 2),
+                 "detail": f"辨識出「{tag}」，位置 ({int(cx)}, {int(cy)})"},
+                {"stage": "設備型別", "ok": bool(dec), "score": 1.0 if dec else 0.0,
+                 "detail": f"首字母 {tag[0]} → {dec}" if dec else "首字母不在型別表"},
+            ],
+            "bbox": [round((cx - hh) / W, 4), round((cy - hh) / H, 4),
+                     round((cx + hh) / W, 4), round((cy + hh) / H, 4)],
+        })
+    try:
+        items += _valves_in(req.filename, [0.0, 0.0, 1.0, 1.0], hits, W, H)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 設備編號族群一致性：同一張圖的設備編號通常同族（本圖 E651/E652/V613 皆 6xx）。
+    # 混進 R101/T108/D181 這種 1xx 幾乎都是把註記或圖框文字誤讀成位號。
+    # 這比信心度可靠——OCR 給 R101 的信心是 1.0，它只是確定「字元讀對了」，
+    # 不代表「這是有效設備位號」。
+    fam = {}
+    for t in equips:
+        m = re.search(r"(\d)\d{2}$", t)
+        if m:
+            fam[m.group(1)] = fam.get(m.group(1), 0) + 1
+    top_fam = max(fam, key=lambda k: fam[k]) if fam else None
+    if top_fam and fam[top_fam] >= 2:
+        for it in items:
+            if it["kind"] != "equipment":
+                continue
+            m = re.search(r"(\d)\d{2}$", it["tag"])
+            if m and m.group(1) != top_fam:
+                it["warn"] = (f"設備編號 {m.group(1)}xx 與本圖主族 {top_fam}xx 不同，"
+                              "可能是註記或圖框文字被誤讀成位號，請對照原圖確認")
+                it["confidence"] = min(it["confidence"], 0.45)
+                it.setdefault("evidence", []).append({
+                    "stage": "設備編號族群檢查", "ok": False, "score": 0.3,
+                    "detail": f"本圖設備多為 {top_fam}xx（{fam[top_fam]} 個），"
+                              f"本項為 {m.group(1)}xx → 誤讀嫌疑"})
+
+    # 自動通過規則：只有「儀錶」且信心滿分、無警示才免審。
+    # 儀錶位號受 INST_RE 嚴格約束（已知功能字母＋3-5 碼），誤判率低；
+    # 設備只有「單字母＋3 碼」太鬆，一律要人工看。
+    for it in items:
+        it["auto_ok"] = (it["kind"] == "instrument"
+                         and it["confidence"] >= 1.0 and not it.get("warn"))
+
+    order = {"equipment": 0, "instrument": 1, "valve": 2}
+    items.sort(key=lambda x: (order.get(x["kind"], 9), x["tag"]))
+    return {"items": items,
+            "stats": {"instruments": len(insts), "equipment": len(equips),
+                      "valves": sum(1 for i in items if i["kind"] == "valve"),
+                      "total": len(items)}}
+
+
+class ClassifyOneReq(BaseModel):
+    filename: str
+    bbox: list = Field(..., min_length=4, max_length=4)
+    provider: str = "local"
+
+
+@router.post("/classify_one")
+def classify_one(req: ClassifyOneReq) -> dict:
+    """單一儀錶氣泡的安裝別判定——審核到哪一項才算哪一項，不必先等全部。"""
+    from PIL import Image
+
+    img_p, meta = _ensure_base(req.filename)
+    W, H = meta["w"], meta["h"]
+    x0, y0, x1, y1 = (float(v) for v in req.bbox)
+    cx, cy = (x0 + x1) / 2 * W, (y0 + y1) / 2 * H
+    r = max((x1 - x0) * W, (y1 - y0) * H) * 1.6
+    r = max(r, 26)
+    with Image.open(img_p) as im:
+        c = im.crop((int(max(0, cx - r)), int(max(0, cy - r)),
+                     int(min(W, cx + r)), int(min(H, cy + r))))
+        if c.width < 240:
+            k = 240 / max(c.width, 1)
+            c = c.resize((int(c.width * k), int(c.height * k)), Image.LANCZOS)
+        buf = io.BytesIO()
+        c.save(buf, format="JPEG", quality=92)
+    letter, conf, raw = _classify_bubble(
+        base64.b64encode(buf.getvalue()).decode(), req.provider)
+    rules = _load_rules().get("bubble_choices", {})
+    return {"mounting": rules.get("mounting", {}).get(letter, ""),
+            "mount_conf": round(conf, 2),
+            "detail": f"選 {letter}：{(rules.get('options', {}) or {}).get(letter, '')}"
+                      f"｜原始回答「{raw}」"}
+
+
+class DescribeReq(BaseModel):
+    filename: str
+    feedback: str = ""       # 使用者意見（要求修正／補充）
+    previous: str = ""       # 前一版描述——有的話就是「修訂」而不是重寫
+
+
+DESCRIBE_SYS = (
+    "你是資深製程工程師，要為同事寫一份這張 P&ID 的完整判讀報告。\n"
+    "你會同時拿到**整張圖面影像**與圖上**經工程師逐項人工確認過**的位號清單。\n"
+    "務必先看圖，特別是：右下角**標題欄**（會寫明是哪個廠、哪個製程單元、圖號）、"
+    "圖面上的**中文/英文註記 note**（常是變更履歷與設計決策）、"
+    "設備之間的**管線連接與流向箭頭**、管線編號。"
+    "清單只給你位號，看不出流程走向與單元名稱——那些要靠看圖。\n"
+    "請以繁體中文寫一份**詳盡**的報告，涵蓋下列七個部分，每部分至少一段、"
+    "內容要具體到位號層級，不要只給空泛的通則：\n"
+    "一、製程單元判定：這是什麼單元？從設備組合與位號編碼規則推斷，"
+    "並說明你的判斷依據。\n"
+    "二、主要流程走向：物料從哪裡進、經過哪些設備、往哪裡出，"
+    "盡量把設備串成一條或多條路徑。\n"
+    "三、關鍵設備逐台說明：每一台設備各自的作用、在流程中的位置與角色。\n"
+    "四、控制策略：逐一分析控制迴路。從儀錶字母碼推斷"
+    "（LIC＝液位指示控制、PIC＝壓力指示控制、TIC＝溫度指示控制、"
+    "FIC＝流量指示控制、LV/FV/TV＝對應的控制閥），"
+    "說明每個迴路在控什麼、量測點在哪、操作端是哪顆閥。\n"
+    "五、量測佈署分析：哪些是就地表、哪些上盤面/DCS，"
+    "從這個分佈看出操作員在控制室看得到什麼、必須到現場看什麼。\n"
+    "六、安全與連鎖：安全閥、警報（字尾 H/L/HH/LL）、開關類儀錶"
+    "（字母含 S）代表的保護邏輯與可能的連鎖動作。\n"
+    "七、操作與維護重點：開俥停俥、日常巡檢、易故障點的提醒。\n"
+    "規則：只根據清單推論，**絕對不要編造清單裡沒有的設備、位號或數值**；"
+    "凡是推論都要明說「研判／推測」；清單資訊不足以判斷的部分，"
+    "直接寫明「此圖清單不足以判斷，需再查閱原圖某某處」。"
+    "不要 markdown 標題符號與粗體，用「一、」「二、」這種中文編號分段。"
+)
+
+REVISE_SYS = (
+    "你是資深製程工程師，正在**修訂**一份既有的 P&ID 製程說明。\n"
+    "你會拿到三樣東西：(1) 目前已確認的位號清單（可能已被工程師更正過）、"
+    "(2) 前一版說明、(3) 工程師的意見。\n"
+    "請輸出修訂後的完整說明，並遵守：\n"
+    "· 只要是這次**有更動或修正**的句子，整句用 ⟪ 與 ⟫ 包起來"
+    "（例：⟪這一段原本寫錯了，實際上是液位控制。⟫），沒動到的句子不要加。\n"
+    "· 如果前一版有與清單牴觸的敘述（例如提到清單裡不存在的設備），"
+    "必須改掉並包在 ⟪⟫ 裡。\n"
+    "· 不要編造清單裡沒有的東西；不要 markdown 標題與粗體；"
+    "不要輸出「修訂說明」之類的前言，直接給正文。"
+)
+
+
+@router.post("/describe")
+def describe(req: DescribeReq) -> dict:
+    """依已確認標註生成製程說明。
+
+    刻意要求審核完成才可呼叫——說明是給人看的結論，
+    建立在未經確認的模型輸出上就是把幻覺包裝成報告。
+    """
+    _safe_pdf(req.filename)
+    d = _load_annots(req.filename)
+    items = d["items"]
+    if len(items) < 3:
+        raise HTTPException(422, "已確認的標註太少（至少 3 項），無法據以描述製程")
+
+    def fmt(kind, label):
+        rows = [i for i in items if i.get("kind") == kind]
+        if not rows:
+            return ""
+        body = "、".join(
+            f"{i.get('tag') or '(無位號)'}"
+            + (f"［{i.get('symbol')}" + (f"／{i['mounting']}" if i.get("mounting") else "") + "］"
+               if i.get("symbol") else "")
+            for i in rows[:80])
+        return f"{label}（{len(rows)}）：{body}\n"
+
+    ctx = (f"圖面：{Path(req.filename).stem}\n"
+           + fmt("equipment", "設備") + fmt("instrument", "儀錶") + fmt("valve", "閥件"))
+
+    # 連圖面一起餵——只給位號清單等於要模型腦補流程走向。
+    # 標題欄、圖面註記（常是 MOC 變更履歷）、管線怎麼串、符號外框，
+    # 這些只有看圖才讀得到，清單裡一個字都沒有。
+    sheet_b64 = None
+    try:
+        sheet_b64 = _sheet_b64(req.filename)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 分塊導讀：整張 A3 縮到 1800px 餵進 7B，只剩標題欄那種大字讀得到
+    # （實測位號氣泡、管線編號、中文 note 全糊掉）。先讓模型逐塊細看再彙總，
+    # 圖面註記與管線走向才進得了報告。
+    survey = ""
+    if sheet_b64 and not (req.previous.strip() or req.feedback.strip()):
+        try:
+            survey = _tile_survey(req.filename, "local")
+        except Exception:  # noqa: BLE001
+            survey = ""
+    if survey:
+        ctx += ("\n【分塊細看圖面所得（同一張圖放大後逐塊判讀）】\n" + survey)
+
+    if req.previous.strip() or req.feedback.strip():
+        # 修訂模式：帶上前一版與工程師意見，要求標出改動處
+        user = (f"【目前已確認清單】\n{ctx}\n"
+                f"【前一版說明】\n{req.previous.strip() or '（無）'}\n"
+                f"【工程師意見】\n{req.feedback.strip() or '（無特別意見，請依最新清單自行校正牴觸之處）'}")
+        return {"text": _complete_text(REVISE_SYS, user, image_b64=sheet_b64),
+                "based_on": len(items), "revised": True, "with_image": bool(sheet_b64)}
+    return {"text": _complete_text(DESCRIBE_SYS, ctx, image_b64=sheet_b64),
+            "based_on": len(items), "revised": False, "with_image": bool(sheet_b64)}
+
+
+@router.get("/crop/{filename}")
+def crop_image(filename: str, bbox: str, z: float = 7.0):
+    """回傳以該元件為中心的局部圖——審核時最有用的東西其實是「讓人自己看」。
+    任何文字描述都可能出錯，像素不會。"""
+    from fastapi.responses import Response
+
+    try:
+        x0, y0, x1, y1 = (float(v) for v in bbox.split(","))
+    except ValueError:
+        raise HTTPException(422, "bbox 格式須為 x0,y0,x1,y1") from None
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    w = max(x1 - x0, 0.010) * z
+    h = max(y1 - y0, 0.010) * z
+    box = [max(0.0, cx - w / 2), max(0.0, cy - h / 2),
+           min(1.0, cx + w / 2), min(1.0, cy + h / 2)]
+    b64, _ = _crop_b64(filename, box)
+    return Response(content=base64.b64decode(b64), media_type="image/jpeg",
+                    headers={"Cache-Control": "public, max-age=3600"})
+
+
+# 有警示的項目不能用「描述它的功能」問法——那等於預設它存在，模型只好編。
+# 改成查核問法：先問「這裡到底有沒有這個位號」。
+VERIFY_SYS = (
+    "你是資深製程工程師，正在**查核**一個可疑的 P&ID 判讀結果。"
+    "系統宣稱畫面正中央有一個位號，但這個判讀被標記為可疑，很可能是"
+    "把圖面註記、標題欄、尺寸標註或其他文字誤讀成位號。\n"
+    "請用繁體中文 2～4 句回答：\n"
+    "① 畫面正中央實際上是什麼？（是儀錶氣泡／設備輪廓／純文字註記／尺寸標註？）\n"
+    "② 那個宣稱的位號，圖上真的有嗎？如果有，長什麼樣；如果沒有，"
+    "那個位置實際寫的是什麼字？\n"
+    "**不要假設它存在。看不清楚就直說看不清楚，絕對不要臆造連接關係或功能。**"
+    "不要 markdown 標題與粗體。"
+)
+
+
+class ContextReq(BaseModel):
+    filename: str
+    bbox: list = Field(..., min_length=4, max_length=4)
+    tag: str = ""
+    kind: str = ""
+    symbol: str = ""
+    provider: str = "local"
+    verify: bool = False       # True＝可疑項目，改用查核問法而非功能描述
+
+
+CONTEXT_SYS = (
+    "你是資深製程工程師。使用者正在審核 P&ID 上的某一個元件，"
+    "畫面是以該元件為中心、往外擴大的一塊區域，元件大約在正中央。\n"
+    "請用繁體中文寫 2～4 句，說明：這顆元件裝在哪條管線或哪台設備上、"
+    "它的前後接什麼、放在這個位置的作用是什麼。\n"
+    "看得到的鄰近位號與管線編號請直接引用。"
+    "**看不清楚就說看不清楚，絕對不要臆造位號或數值。**"
+    "不要 markdown 標題與粗體。"
+)
+
+
+@router.post("/context")
+def context(req: ContextReq) -> dict:
+    """單一元件的情境描述——審到哪一項，就說明它在圖上扮演什麼角色。
+
+    裁切以元件為中心往外放大數倍，讓模型看得到前後接了什麼；
+    只看元件本身的小框是講不出上下游關係的。
+    """
+    x0, y0, x1, y1 = (float(v) for v in req.bbox)
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    w = max(x1 - x0, 0.012) * 9      # 往外拉 9 倍，含得到上下游管線與鄰居
+    h = max(y1 - y0, 0.012) * 9
+    box = [max(0.0, cx - w / 2), max(0.0, cy - h / 2),
+           min(1.0, cx + w / 2), min(1.0, cy + h / 2)]
+    img_b64, _ = _crop_b64(req.filename, box)
+    if req.verify:
+        txt = _vlm(req.provider, VERIFY_SYS,
+                   f"系統宣稱畫面正中央是「{req.tag}」"
+                   + (f"（判定為{req.symbol}）" if req.symbol else "")
+                   + "。請查核這個判讀是否成立。", img_b64)
+    else:
+        who = f"元件位號 {req.tag}" + (f"（{req.symbol}）" if req.symbol else "")
+        txt = _vlm(req.provider, CONTEXT_SYS + "\n\n" + _rules_prompt(),
+                   f"{who}，位於畫面中央。請說明它在這張圖上的角色與前後連接。", img_b64)
+    return {"text": txt or "（模型沒有回應，可放大框選範圍再試）", "verify": req.verify}
+
+
+TILE_SYS = (
+    "你是資深製程工程師，正在逐塊細看一張 P&ID。"
+    "這是整張圖的其中一塊（已放大）。請用繁體中文條列你在這塊看到的："
+    "設備名稱與說明文字、圖面註記（note）、管線編號與流向、"
+    "標題欄資訊（若這塊含標題欄）。"
+    "**只寫你真的看得到的文字，看不清楚就略過，絕對不要臆造。**"
+    "最多 6 行，每行一則。不要 markdown 標題與粗體。"
+)
+
+
+def _tile_survey(filename: str, provider: str, tc: int = 3, tr: int = 2) -> str:
+    """把整張圖切塊放大逐塊判讀 → 彙整成文字，供撰寫報告時參考。"""
+    out = []
+    for r in range(tr):
+        for c in range(tc):
+            box = [max(0.0, c / tc - 0.02), max(0.0, r / tr - 0.02),
+                   min(1.0, (c + 1) / tc + 0.02), min(1.0, (r + 1) / tr + 0.02)]
+            try:
+                b64, _ = _crop_b64(filename, box)
+                t = _vlm(provider, TILE_SYS, "請條列這一塊看到的內容。", b64)
+            except Exception:  # noqa: BLE001
+                continue
+            if t:
+                out.append(f"[第 {r * tc + c + 1} 塊]\n{t.strip()}")
+    return "\n".join(out)
+
+
+def _sheet_b64(filename: str, width: int = 1800) -> str:
+    """整張圖面縮圖 → base64，餵給模型看標題欄／註記／管線走向。"""
+    from PIL import Image
+
+    img_p, _ = _ensure_base(filename)
+    with Image.open(img_p) as im:
+        if im.width > width:
+            im = im.resize((width, round(im.height * width / im.width)), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.convert("RGB").save(buf, format="JPEG", quality=88)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def _complete_text(system: str, user: str, timeout: int = 240,
+                   image_b64: str | None = None) -> str:
+    """製程說明推論。
+
+    帶圖時走 Ollama 視覺模型（純文字的 Qwen3.6 看不到圖）；
+    沒帶圖才優先用 8787 的大模型。
+    """
+    if image_b64:
+        body = {"model": VLM_MODEL, "stream": False,
+                "options": {"temperature": 0.4, "num_predict": 3000},
+                "messages": [{"role": "system", "content": system},
+                             {"role": "user", "content": user, "images": [image_b64]}]}
+        req = urllib.request.Request(
+            f"{OLLAMA}/api/chat", data=json.dumps(body).encode(), method="POST",
+            headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                out = json.loads(resp.read())
+            txt = (out.get("message", {}).get("content") or "").strip()
+            if txt:
+                return txt
+        except Exception:  # noqa: BLE001
+            pass                      # 看圖失敗 → 退回純文字
+
+    key = os.environ.get("AI_API_KEY")
+    if not key:
+        p = Path.home() / "llamacpp" / "api_key.txt"
+        key = p.read_text(encoding="utf-8").strip() if p.exists() else None
+    base = os.environ.get("AI_BASE_URL", "http://127.0.0.1:8787/v1")
+    if key:
+        body = {"model": "qwen3.6", "max_tokens": 3000, "temperature": 0.4,
+                "chat_template_kwargs": {"enable_thinking": False},
+                "messages": [{"role": "system", "content": system},
+                             {"role": "user", "content": user}]}
+        r = urllib.request.Request(
+            f"{base}/chat/completions", data=json.dumps(body).encode(), method="POST",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(r, timeout=timeout) as resp:
+                out = json.loads(resp.read())
+            txt = (out["choices"][0]["message"].get("content") or "").strip()
+            if txt:
+                return txt
+        except Exception:  # noqa: BLE001
+            pass                      # 落到 Ollama
+
+    body = {"model": VLM_MODEL, "stream": False,
+            "options": {"temperature": 0.4, "num_predict": 3000},
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}]}
+    req = urllib.request.Request(
+        f"{OLLAMA}/api/chat", data=json.dumps(body).encode(), method="POST",
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            out = json.loads(resp.read())
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            503, f"文字引擎皆無回應（{type(e).__name__}）——"
+                 "請啟動本機 Qwen3.6（8787）或確認 Ollama 運作中") from None
+    return (out.get("message", {}).get("content") or "").strip()
+
+
 class RejectReq(BaseModel):
     tag: str = ""
     kind: str = ""

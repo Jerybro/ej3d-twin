@@ -113,6 +113,10 @@ $('scan-all-btn').addEventListener('click', async () => {
         body: JSON.stringify({ ...it, source: 'auto' }),
       }).catch(() => {});
     }
+    // 可疑項排前面：有警示 → 低信心 → 其餘。讓工程師先處理最需要判斷的，
+    // 而不是從字母序第一項慢慢翻到最後才遇到問題。
+    const rank = i => (i.warn ? 0 : (i.confidence < 0.7 ? 1 : 2));
+    items.sort((a, b) => rank(a) - rank(b) || a.confidence - b.confidence);
     curIdx = items.findIndex(i => i.state === 'pending');
     if (curIdx < 0) curIdx = 0;
     render(); focusItem(curIdx);
@@ -192,8 +196,8 @@ function renderReviewCard() {
         ? esc(it._ctx)
         : '<span class="spin"></span> ' + (it.warn ? '查核這個判讀是否成立…' : '判讀這顆在圖上的角色與前後連接…')}</div>
       <div class="rev-act">
-        <button class="mini-btn primary" id="acc-b">確認正確</button>
-        <button class="mini-btn" id="rej-b">不是</button>
+        <button class="mini-btn primary" id="acc-b">確認正確 <span style="opacity:.75">(Y)</span></button>
+        <button class="mini-btn" id="rej-b">不是 <span style="opacity:.6">(N)</span></button>
       </div>
     </div>`;
   $('prev-b').onclick = () => focusItem(Math.max(0, curIdx - 1));
@@ -555,5 +559,18 @@ $('cmp-btn').addEventListener('click', async () => {
   } catch { $('eng-pill').textContent = '狀態未知'; }
 })();
 $('engine').addEventListener('change', () => location.reload());
+
+// 鍵盤快捷：一兩百項用滑鼠點不完。Y/Enter 確認、N 否決、方向鍵切換。
+document.addEventListener('keydown', e => {
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName || '')) || !items.length) return;
+  const k = e.key.toLowerCase();
+  if (k === 'y' || e.key === 'Enter') { e.preventDefault(); decide('accepted'); }
+  else if (k === 'n') { e.preventDefault(); decide('rejected'); }
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+    e.preventDefault(); focusItem(Math.min(items.length - 1, curIdx + 1));
+  } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+    e.preventDefault(); focusItem(Math.max(0, curIdx - 1));
+  }
+});
 
 loadFiles();

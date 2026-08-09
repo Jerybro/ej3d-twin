@@ -918,6 +918,21 @@ def scan_all(req: ScanAllReq) -> dict:
             if t not in equips or conf > equips[t][2]:
                 equips[t] = (cx, cy, conf, hh)
 
+    # 位號被截斷的收尾：OCR 常把 65101 讀成 6510、PI61301E 讀成 PI01301E。
+    # 若某個位號是另一個位號的前綴、且位置相近，視為同一個的殘缺版本丟棄——
+    # 留著會讓審核清單多出一堆看起來像真的假位號。
+    for pool in (insts, equips):
+        drop = []
+        for a in pool:
+            for b in pool:
+                if a == b or len(a) >= len(b) or not b.startswith(a):
+                    continue
+                if math.dist(pool[a][:2], pool[b][:2]) < max(pool[b][3] * 6, 60):
+                    drop.append(a)
+                    break
+        for a in drop:
+            pool.pop(a, None)
+
     items = []
     for tag, (cx, cy, conf, hh) in insts.items():
         dec = _decode_isa(tag)

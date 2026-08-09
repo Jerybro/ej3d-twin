@@ -102,35 +102,69 @@ $('scan-all-btn').addEventListener('click', async () => {
       body: JSON.stringify({ filename: curFile }),
     }).then(r => r.json());
     if (d.detail) throw new Error(d.detail);
-    // 滿分且無警示的儀錶自動通過，人只審真正有疑慮的——
-    // 但設備一律要人看：OCR 給 R101 的信心也是 1.0，那只代表「字元讀對了」，
-    // 不代表「這是有效設備位號」（實測 7 個設備有 4 個是誤讀）。
-    items = (d.items || []).map(i => ({ ...i, state: i.auto_ok ? 'accepted' : 'pending' }));
-    const auto = items.filter(i => i.state === 'accepted');
-    for (const it of auto) {
-      fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...it, source: 'auto' }),
-      }).catch(() => {});
-    }
+    items = (d.items || []).map(i => ({ ...i, state: 'pending' }));
     // 可疑項排前面：有警示 → 低信心 → 其餘。讓工程師先處理最需要判斷的，
     // 而不是從字母序第一項慢慢翻到最後才遇到問題。
     const rank = i => (i.warn ? 0 : (i.confidence < 0.7 ? 1 : 2));
     items.sort((a, b) => rank(a) - rank(b) || a.confidence - b.confidence);
-    curIdx = items.findIndex(i => i.state === 'pending');
-    if (curIdx < 0) curIdx = 0;
-    render(); focusItem(curIdx);
-    if (auto.length) {
-      $('prog-txt').insertAdjacentHTML('beforeend',
-        `<br><span style="color:var(--hi)">滿分儀錶 ${auto.length} 項已自動通過，
-         只需人工確認其餘 ${items.length - auto.length} 項</span>`);
-    }
+    curIdx = 0;
+    render(); focusItem(0);
+    startCrossCheck();          // 背景跑 OCR×VLM 雙重檢查
   } catch (e) {
     alert('辨識失敗：' + (e.message || ''));
   } finally {
     b.disabled = false; b.textContent = '重新辨識整張圖面';
   }
 });
+
+// ------------------------------------- OCR × VLM 雙重檢查（背景逐項跑）
+// 不能只靠 OCR：它的信心只代表「字元讀對了」，不代表「這裡真的有這個位號」
+// （實測 R101 信心 1.0 但圖上不存在）。讓 VLM 獨立再讀一次同一塊區域，
+// 兩個方法一致才算真的可信，也才自動放行；不一致的一律留給人審。
+let ccStop = false;
+
+async function startCrossCheck() {
+  ccStop = false;
+  const queue = items.filter(i => i.state === 'pending' && i.kind !== 'valve');
+  let done = 0, agreed = 0, flagged = 0;
+  for (const it of queue) {
+    if (ccStop || !curFile) break;
+    try {
+      const d = await fetch('/api/pid/vlm/crosscheck', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: curFile, bbox: it.bbox, tag: it.tag,
+                               provider: engine() }),
+      }).then(r => r.json());
+      it.cross = d;
+      it.confidence = Math.max(0.05, Math.min(1, it.confidence + (d.delta || 0)));
+      (it.evidence = it.evidence || []).push({
+        stage: 'OCR × VLM 雙重檢查', ok: d.verdict === 'agree',
+        score: d.verdict === 'agree' ? 1.0 : (d.verdict === 'unclear' ? 0.5 : 0.2),
+        detail: d.detail,
+      });
+      if (d.verdict === 'none' || d.verdict === 'conflict') {
+        it.warn = (it.warn ? it.warn + '｜' : '') + d.detail;
+        flagged++;
+      }
+      // 雙重確認通過、又是規則約束嚴格的儀錶 → 自動放行
+      if (d.verdict === 'agree' && it.kind === 'instrument' && !it.warn) {
+        it.state = 'accepted';
+        agreed++;
+        fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...it, source: 'auto-crosscheck' }),
+        }).catch(() => {});
+      }
+    } catch { /* 單項失敗不中斷整批 */ }
+    done++;
+    $('cc-state').innerHTML =
+      `雙重檢查 ${done}/${queue.length}｜<b style="color:var(--hi)">${agreed}</b> 項雙重確認自動通過`
+      + (flagged ? `｜<b style="color:var(--lo)">${flagged}</b> 項不一致待判` : '');
+    if (done % 4 === 0 || done === queue.length) { render(); scheduleDesc(); }
+  }
+  $('cc-state').innerHTML += '　✓ 完成';
+  render();
+}
 
 // ------------------------------------------------------- 審核
 function reviewedCount() { return items.filter(i => i.state !== 'pending').length; }
@@ -182,6 +216,12 @@ function renderReviewCard() {
       </div>
       <div class="rev-sub">${esc(it.symbol || '')}${mount}
         ${it.mount_conf ? `<span class="hint">（安裝別信心 ${Math.round(it.mount_conf * 100)}%）</span>` : ''}</div>
+      ${it.cross ? `<div class="cross ${it.cross.verdict}">
+        ${it.cross.verdict === 'agree' ? '✓ OCR 與 AI 讀到相同位號'
+          : it.cross.verdict === 'none' ? '✕ AI 判定該處沒有位號'
+          : it.cross.verdict === 'unclear' ? '？ AI 讀不清楚，無法交叉驗證'
+          : it.cross.verdict === 'partial' ? '△ 兩者部分相符'
+          : `✕ 兩者不一致：AI 讀為「${esc(it.cross.vlm_tag)}」`}</div>` : ''}
       ${it.note ? `<div class="rev-sub" style="opacity:.85">${esc(it.note)}</div>` : ''}
       ${it.warn ? `<div class="rev-sub" style="color:#8a5b00">⚠ ${esc(it.warn)}</div>` : ''}
       ${(it.evidence || []).length ? `<details class="ev"><summary>判讀依據（${it.evidence.length} 步）</summary>

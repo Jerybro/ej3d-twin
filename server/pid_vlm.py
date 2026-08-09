@@ -1151,6 +1151,71 @@ def describe(req: DescribeReq) -> dict:
             "based_on": len(items), "revised": False, "with_image": bool(sheet_b64)}
 
 
+CROSS_SYS = (
+    "你是 P&ID 判讀助手。畫面正中央有一個元件，請只回答它的位號本身。\n"
+    "規則：\n"
+    "· 儀錶氣泡的位號分上下兩半（上為功能字母如 PI/TT/LIC，下為編號如 65103），"
+    "請合併成一個，中間留一個空白，例如「PI 65103」。\n"
+    "· 設備位號如「V 613」「E 651」也照樣輸出。\n"
+    "· **只輸出位號本身，不要任何說明文字。**\n"
+    "· 畫面裡可能同時出現好幾個位號（P&ID 上元件很密），"
+    "**一律回答最靠近畫面正中心的那一個**，不要回答旁邊的鄰居。\n"
+    "· 如果正中央沒有位號（是純文字註記、尺寸標註、管線或空白），"
+    "只回答「NONE」。\n"
+    "· 看得到但讀不清楚，只回答「UNCLEAR」。"
+)
+
+
+class CrossReq(BaseModel):
+    filename: str
+    bbox: list = Field(..., min_length=4, max_length=4)
+    tag: str = ""
+    provider: str = "local"
+
+
+def _norm_tag(t: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (t or "").upper())
+
+
+@router.post("/crosscheck")
+def crosscheck(req: CrossReq) -> dict:
+    """OCR × VLM 雙重檢查：同一塊區域讓 VLM 獨立再讀一次位號，與 OCR 結果比對。
+
+    兩個獨立方法一致 ＝ 真正可信；只有 OCR 說「我很確定字元讀對了」不算數
+    （實測 R101 的 OCR 信心 1.0，但圖上根本沒這個位號）。
+    """
+    x0, y0, x1, y1 = (float(v) for v in req.bbox)
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    # 只框住元件本身＋一點邊。P&ID 元件很密，框太大就會讀到隔壁位號
+    # （實測 3.2 倍時 E651 被讀成鄰居的 PDI 65106）
+    w = max(x1 - x0, 0.006) * 2.2
+    h = max(y1 - y0, 0.006) * 2.2
+    box = [max(0.0, cx - w / 2), max(0.0, cy - h / 2),
+           min(1.0, cx + w / 2), min(1.0, cy + h / 2)]
+    img_b64, _ = _crop_b64(req.filename, box)
+    raw = (_vlm(req.provider, CROSS_SYS, "這個元件的位號是什麼？", img_b64) or "").strip()
+    vlm_tag = raw.splitlines()[0].strip()[:24] if raw else ""
+
+    a, b = _norm_tag(req.tag), _norm_tag(vlm_tag)
+    if b in ("NONE",):
+        verdict, delta = "none", -0.45
+        detail = f"VLM 判定該處沒有位號（OCR 讀成「{req.tag}」）→ 高度可疑"
+    elif b in ("UNCLEAR", "") or not b:
+        verdict, delta = "unclear", 0.0
+        detail = f"VLM 表示讀不清楚，無法交叉驗證（OCR 讀為「{req.tag}」）"
+    elif a == b:
+        verdict, delta = "agree", 0.0
+        detail = f"VLM 獨立判讀為「{vlm_tag}」，與 OCR 一致 → 雙重確認通過"
+    elif a and (a.startswith(b) or b.startswith(a)):
+        verdict, delta = "partial", -0.15
+        detail = f"VLM 讀為「{vlm_tag}」，與 OCR「{req.tag}」部分相符（可能有字元缺漏）"
+    else:
+        verdict, delta = "conflict", -0.35
+        detail = f"VLM 讀為「{vlm_tag}」，與 OCR「{req.tag}」不一致 → 需人工判定"
+    return {"vlm_tag": vlm_tag, "verdict": verdict, "delta": delta, "detail": detail,
+            "agree": verdict == "agree"}
+
+
 @router.get("/crop/{filename}")
 def crop_image(filename: str, bbox: str, z: float = 7.0):
     """回傳以該元件為中心的局部圖——審核時最有用的東西其實是「讓人自己看」。

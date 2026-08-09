@@ -1186,34 +1186,65 @@ def crosscheck(req: CrossReq) -> dict:
     """
     x0, y0, x1, y1 = (float(v) for v in req.bbox)
     cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-    # 只框住元件本身＋一點邊。P&ID 元件很密，框太大就會讀到隔壁位號
-    # （實測 3.2 倍時 E651 被讀成鄰居的 PDI 65106）
-    w = max(x1 - x0, 0.006) * 2.2
-    h = max(y1 - y0, 0.006) * 2.2
-    box = [max(0.0, cx - w / 2), max(0.0, cy - h / 2),
-           min(1.0, cx + w / 2), min(1.0, cy + h / 2)]
-    img_b64, _ = _crop_b64(req.filename, box)
-    raw = (_vlm(req.provider, CROSS_SYS, "這個元件的位號是什麼？", img_b64) or "").strip()
-    vlm_tag = raw.splitlines()[0].strip()[:24] if raw else ""
+    bw, bh = max(x1 - x0, 0.006), max(y1 - y0, 0.006)
+
+    # 多尺度投票：同一個位置裁三種大小各判一次，取眾數。
+    # 單一裁切兩面不討好——框小了讀不到、框大了讀到隔壁（實測 3.2 倍時
+    # E651 被讀成鄰居的 PDI 65106）。三塊投票同時解掉兩個問題，
+    # 而且票數本身就是信心度：3/3 一致遠比 2/3 可信。
+    votes, reads = [], []
+    for scale in (1.6, 2.4, 3.4):
+        w, h = bw * scale, bh * scale
+        box = [max(0.0, cx - w / 2), max(0.0, cy - h / 2),
+               min(1.0, cx + w / 2), min(1.0, cy + h / 2)]
+        try:
+            b64, _ = _crop_b64(req.filename, box)
+            raw = (_vlm(req.provider, CROSS_SYS, "這個元件的位號是什麼？", b64) or "").strip()
+        except Exception:  # noqa: BLE001
+            continue
+        t = raw.splitlines()[0].strip()[:24] if raw else ""
+        reads.append(f"{scale:g}x→{t or '(空)'}")
+        if t:
+            votes.append(t)
+
+    if not votes:
+        return {"vlm_tag": "", "verdict": "unclear", "delta": 0.0, "agree": False,
+                "detail": "三次裁切均無回應，無法交叉驗證", "reads": reads}
+
+    # 依正規化後的字串投票，取票數最高者
+    tally: dict = {}
+    for v in votes:
+        k = _norm_tag(v)
+        tally.setdefault(k, {"n": 0, "raw": v})
+        tally[k]["n"] += 1
+    best = max(tally.values(), key=lambda x: x["n"])
+    vlm_tag, n_agree = best["raw"], best["n"]
+    vote_txt = f"三塊投票 {n_agree}/{len(votes)}（{'、'.join(reads)}）"
 
     a, b = _norm_tag(req.tag), _norm_tag(vlm_tag)
-    if b in ("NONE",):
-        verdict, delta = "none", -0.45
-        detail = f"VLM 判定該處沒有位號（OCR 讀成「{req.tag}」）→ 高度可疑"
+    # 票數不足（三塊各說各話）代表這塊本來就難判，不該拿來下結論
+    weak = n_agree < 2
+    if b == "NONE":
+        verdict, delta = ("unclear", -0.1) if weak else ("none", -0.45)
+        detail = (f"{vote_txt}｜VLM 判定該處沒有位號（OCR 讀成「{req.tag}」）"
+                  + ("——但票數不足，僅供參考" if weak else "→ 高度可疑"))
     elif b in ("UNCLEAR", "") or not b:
         verdict, delta = "unclear", 0.0
-        detail = f"VLM 表示讀不清楚，無法交叉驗證（OCR 讀為「{req.tag}」）"
+        detail = f"{vote_txt}｜VLM 讀不清楚，無法交叉驗證（OCR 讀為「{req.tag}」）"
     elif a == b:
-        verdict, delta = "agree", 0.0
-        detail = f"VLM 獨立判讀為「{vlm_tag}」，與 OCR 一致 → 雙重確認通過"
+        verdict = "agree" if n_agree >= 2 else "partial"
+        delta = 0.0 if n_agree >= 2 else -0.05
+        detail = (f"{vote_txt}｜VLM 獨立判讀為「{vlm_tag}」，與 OCR 一致"
+                  + ("→ 雙重確認通過" if n_agree >= 2 else "，但票數僅 1/3"))
     elif a and (a.startswith(b) or b.startswith(a)):
         verdict, delta = "partial", -0.15
-        detail = f"VLM 讀為「{vlm_tag}」，與 OCR「{req.tag}」部分相符（可能有字元缺漏）"
+        detail = f"{vote_txt}｜VLM 讀為「{vlm_tag}」，與 OCR「{req.tag}」部分相符"
     else:
-        verdict, delta = "conflict", -0.35
-        detail = f"VLM 讀為「{vlm_tag}」，與 OCR「{req.tag}」不一致 → 需人工判定"
+        verdict, delta = ("unclear", -0.1) if weak else ("conflict", -0.35)
+        detail = (f"{vote_txt}｜VLM 讀為「{vlm_tag}」，與 OCR「{req.tag}」不一致"
+                  + ("——但票數不足，需人工看" if weak else "→ 需人工判定"))
     return {"vlm_tag": vlm_tag, "verdict": verdict, "delta": delta, "detail": detail,
-            "agree": verdict == "agree"}
+            "agree": verdict == "agree", "votes": n_agree, "reads": reads}
 
 
 @router.get("/crop/{filename}")

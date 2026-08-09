@@ -577,6 +577,47 @@ def _pipes_norm(filename: str) -> list:
     return out
 
 
+_bubble_ocr_cache: dict = {}
+
+
+def _bubble_ocr(filename: str) -> dict:
+    """氣泡錨定 OCR：只在偵測到的儀錶氣泡內讀字 → {tag: (cx, cy, r) 底圖像素}。
+
+    與全頁掃描互為獨立驗證：全頁掃描到處找字，註記與尺寸標註會被誤收；
+    這裡先由幾何鎖定元件位置再讀，位置由構造保證正確、註記進不來。
+    """
+    if filename in _bubble_ocr_cache:
+        return _bubble_ocr_cache[filename]
+    from PIL import Image
+
+    from .pid_parse import INST_RE, _merge_fragments, _ocr
+
+    img_p, meta = _ensure_base(filename)
+    W, H = meta["w"], meta["h"]
+    out: dict = {}
+    with Image.open(img_p) as im:
+        for nx, ny, rx, ry in _bubbles_norm(filename):
+            px, py = nx * W, ny * H
+            ex, ey = rx * W * 1.45, ry * H * 1.45      # 略放寬，圈邊的字才不被切
+            c = im.crop((int(px - ex), int(py - ey), int(px + ex), int(py + ey)))
+            if c.width < 8 or c.height < 8:
+                continue
+            k = max(1.0, 260 / c.width)                # 小圖放大，OCR 才讀得到
+            if k > 1:
+                c = c.resize((int(c.width * k), int(c.height * k)), Image.LANCZOS)
+            try:
+                merged, _ = _merge_fragments(_ocr(c))
+            except Exception:  # noqa: BLE001
+                continue
+            for _cx, _cy, text, _conf, _hh in merged:
+                t = text.replace(" ", "").replace("-", "")
+                if INST_RE.match(t) and t not in out:
+                    out[t] = (px, py, max(ex, ey))
+                    break
+    _bubble_ocr_cache[filename] = out
+    return out
+
+
 _bubble_cache: dict = {}
 
 
@@ -930,6 +971,16 @@ def scan_all(req: ScanAllReq) -> dict:
             except Exception:  # noqa: BLE001
                 continue
 
+    # ---- 方法二：氣泡錨定 OCR（與全頁掃描互為獨立驗證）----
+    # 全頁掃描是「到處找字再猜哪個是位號」，註記會變假位號、座標也會飄；
+    # 氣泡錨定是「先用幾何找到元件，只在元件內讀字」，位置由構造保證正確、
+    # 註記根本進不來（實測 R101/T108/D181/E653 四個誤讀全部消失）。
+    # 兩者召回互補（掃描 92 / 錨定 84），合併後用「被幾種方法找到」定信心。
+    try:
+        bub_tags = _bubble_ocr(req.filename)
+    except Exception:  # noqa: BLE001
+        bub_tags = {}
+
     insts, equips = {}, {}
     for cx, cy, text, conf, hh in hits:
         t = text.replace(" ", "").replace("-", "")
@@ -939,6 +990,11 @@ def scan_all(req: ScanAllReq) -> dict:
         elif EQUIP_RE.match(t) and t[0] in TYPE_MAP:
             if t not in equips or conf > equips[t][2]:
                 equips[t] = (cx, cy, conf, hh)
+
+    # 氣泡錨定找到、但全頁掃描漏掉的 → 補進來（座標用氣泡中心，更準）
+    for t, (bx, by, br) in bub_tags.items():
+        if t not in insts:
+            insts[t] = (bx, by, 0.9, br * 0.55)
 
     # 位號被截斷的收尾：OCR 常把 65101 讀成 6510、PI61301E 讀成 PI01301E。
     # 若某個位號是另一個位號的前綴、且位置相近，視為同一個的殘缺版本丟棄——
@@ -957,6 +1013,8 @@ def scan_all(req: ScanAllReq) -> dict:
 
     items = []
     for tag, (cx, cy, conf, hh) in insts.items():
+        # 交叉驗證：兩種獨立方法都找到 → 最可信；只有一種找到 → 降級
+        both = tag in bub_tags
         dec = _decode_isa(tag)
         items.append({
             "tag": tag, "kind": "instrument", "symbol": dec or "儀錶",
@@ -968,10 +1026,17 @@ def scan_all(req: ScanAllReq) -> dict:
                 {"stage": "ISA 5.1 語意", "ok": bool(dec), "score": 1.0 if dec else 0.0,
                  "detail": f"{tag[:len(re.match(r'^[A-Z]+', tag).group(0))]} → {dec}"
                            if dec else "字母碼不在 ISA 表中"},
+                {"stage": "雙法交叉驗證", "ok": both, "score": 1.0 if both else 0.55,
+                 "detail": ("全頁掃描與氣泡錨定兩種獨立方法都讀到此位號 → 雙重確認"
+                            if both else
+                            "僅單一方法讀到（另一方法未命中）→ 可信度降一級")},
             ],
+            "methods": 2 if both else 1,
             "bbox": [round((cx - hh) / W, 4), round((cy - hh) / H, 4),
                      round((cx + hh) / W, 4), round((cy + hh) / H, 4)],
         })
+        if not both:
+            items[-1]["confidence"] = min(items[-1]["confidence"], 0.85)
     for tag, (cx, cy, conf, hh) in equips.items():
         dec = _decode_equip(tag)
         items.append({

@@ -835,6 +835,67 @@ def detect_bubbles(pdf_path: Path) -> tuple[list, float, float]:
     return merged, pw, ph
 
 
+def detect_tables(pdf_path: Path, min_rows: int = 6) -> tuple[list, float, float]:
+    """偵測表格區域（設備清單、圖框標題欄、圖例）→ [(x0, y0, x1, y1)] PDF 座標。
+
+    為什麼一定要做：工程圖右上角常掛設備清單表，表內是「產能 3T/hr」
+    「75HP*4P」「16"」這類文字。OCR 到處找字時會把它們當成位號收進來，
+    產生一堆根本不存在於製程中的假元件——這不是模型判斷力的問題，
+    是根本不該把表格內容送進來。
+
+    幾何特徵：表格＝一群等長、等間距、互相平行的長線（列線）＋垂直的欄線。
+    偵測列線群即可框出表格範圍，不需要模型。
+    """
+    segs, pw, ph = page_segments(pdf_path)
+    span = max(pw, ph)
+    hor, ver = [], []
+    for a, b in segs:
+        dx, dy = abs(b[0] - a[0]), abs(b[1] - a[1])
+        L = math.hypot(dx, dy)
+        if L < span * 0.05:                       # 太短的不是表格框線
+            continue
+        if dy <= L * 0.02:
+            hor.append((min(a[0], b[0]), max(a[0], b[0]), (a[1] + b[1]) / 2))
+        elif dx <= L * 0.02:
+            ver.append((min(a[1], b[1]), max(a[1], b[1]), (a[0] + b[0]) / 2))
+
+    # 依 x 範圍相近把水平線分群 → 每群就是一個候選表格的列線束
+    hor.sort(key=lambda t: t[2])
+    out = []
+    used = [False] * len(hor)
+    for i, (x0, x1, y) in enumerate(hor):
+        if used[i]:
+            continue
+        grp = [(x0, x1, y)]
+        used[i] = True
+        for j in range(i + 1, len(hor)):
+            if used[j]:
+                continue
+            X0, X1, Y = hor[j]
+            # 左右邊界對齊（同一張表的列線起訖幾乎相同）
+            if abs(X0 - x0) < span * 0.02 and abs(X1 - x1) < span * 0.02:
+                grp.append((X0, X1, Y))
+                used[j] = True
+        if len(grp) < min_rows:
+            continue
+        ys = sorted(g[2] for g in grp)
+        box = (min(g[0] for g in grp), ys[0], max(g[1] for g in grp), ys[-1])
+        w, h = box[2] - box[0], box[3] - box[1]
+        if w < span * 0.08 or h < span * 0.04:
+            continue
+        if w > pw * 0.85 and h > ph * 0.85:
+            continue                              # 幾乎滿版＝圖框，不是表格
+        # 列距要夠一致才算表格（圖框的格線刻度間距雜亂）
+        gaps = [ys[k + 1] - ys[k] for k in range(len(ys) - 1) if ys[k + 1] - ys[k] > 0.5]
+        if len(gaps) < min_rows - 1:
+            continue
+        med = sorted(gaps)[len(gaps) // 2]
+        if med <= 0 or sum(1 for g in gaps if abs(g - med) <= med * 0.45) < len(gaps) * 0.6:
+            continue
+        out.append(box)
+    return out, pw, ph
+
+
 def pdf_to_norm(x: float, y: float, pw: float, ph: float, rot: int) -> tuple:
     """PDF 點座標 → 底圖正規化座標（0-1，左上原點），依 _render 實際套用的旋轉。"""
     u = x / pw

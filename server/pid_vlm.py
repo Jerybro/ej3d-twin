@@ -821,7 +821,7 @@ def scan(req: ScanReq) -> dict:
             dec = _decode_equip(tag)
             items.append({
                 "tag": tag, "kind": "equipment",
-                "symbol": dec or "設備", "note": "", "mounting": "", "mount_conf": 0.0,
+                "symbol": dec or ("設備項次" if is_pfd else "設備"), "note": "", "mounting": "", "mount_conf": 0.0,
                 "confidence": round(float(conf), 2),
                 "evidence": [
                     {"stage": "OCR 定位", "ok": True, "score": round(float(conf), 2),
@@ -943,6 +943,22 @@ class ScanAllReq(BaseModel):
     filename: str
 
 
+_profile_cache: dict = {}
+
+
+def _profile_of(filename: str) -> str:
+    """這張圖該套哪份規範（判一次就快取）。判錯圖種等於整套規則失效。"""
+    if filename in _profile_cache:
+        return _profile_cache[filename]
+    try:
+        r = convention(filename)
+        rules = r.get("rules_file") or "default.json"
+    except Exception:  # noqa: BLE001
+        rules = "default.json"
+    _profile_cache[filename] = rules
+    return rules
+
+
 @router.get("/linkset")
 def linkset() -> dict:
     """整組圖面的跨圖串接關係——單張是孤島，串起來才是廠。
@@ -1038,9 +1054,20 @@ def scan_all(req: ScanAllReq) -> dict:
     except Exception:  # noqa: BLE001
         bub_tags = {}
 
+    # 圖種決定用哪套位號規則。PFD 沒有 ISA 功能字母，硬套會把設備項次號
+    # 解成假儀錶；P&ID 則相反。判錯圖種等於整套規則失效，所以先判再掃。
+    is_pfd = _profile_of(req.filename) == "pfd.json"
+
     insts, equips = {}, {}
     for cx, cy, text, conf, hh in hits:
         t = text.replace(" ", "").replace("-", "")
+        if is_pfd:
+            # PFD：3 碼項次號，可帶小數分項（201、202.1）
+            if re.fullmatch(r"\d{3}(\.\d)?", text.strip()):
+                k = text.strip()
+                if k not in equips or conf > equips[k][2]:
+                    equips[k] = (cx, cy, conf, hh)
+            continue
         if INST_RE.match(t):
             if t not in insts or conf > insts[t][2]:
                 insts[t] = (cx, cy, conf, hh)
@@ -1049,7 +1076,7 @@ def scan_all(req: ScanAllReq) -> dict:
                 equips[t] = (cx, cy, conf, hh)
 
     # 氣泡錨定找到、但全頁掃描漏掉的 → 補進來（座標用氣泡中心，更準）
-    for t, (bx, by, br) in bub_tags.items():
+    for t, (bx, by, br) in (bub_tags.items() if not is_pfd else []):
         if t not in insts:
             insts[t] = (bx, by, 0.9, br * 0.55)
 
@@ -1095,16 +1122,20 @@ def scan_all(req: ScanAllReq) -> dict:
         if not both:
             items[-1]["confidence"] = min(items[-1]["confidence"], 0.85)
     for tag, (cx, cy, conf, hh) in equips.items():
-        dec = _decode_equip(tag)
+        # PFD 的項次號本身不帶語意——語意在圖面設備清單表裡，
+        # 硬用首字母對照表會給出假型別（項次號根本沒有字母）
+        dec = "" if is_pfd else _decode_equip(tag)
         items.append({
-            "tag": tag, "kind": "equipment", "symbol": dec or "設備",
+            "tag": tag, "kind": "equipment", "symbol": dec or ("設備項次" if is_pfd else "設備"),
             "note": "", "mounting": "", "mount_conf": 0.0,
             "confidence": round(float(conf), 2),
             "evidence": [
                 {"stage": "位號定位", "ok": True, "score": round(float(conf), 2),
                  "detail": f"辨識出「{tag}」，位置 ({int(cx)}, {int(cy)})"},
                 {"stage": "設備型別", "ok": bool(dec), "score": 1.0 if dec else 0.0,
-                 "detail": f"首字母 {tag[0]} → {dec}" if dec else "首字母不在型別表"},
+                 "detail": (f"首字母 {tag[0]} → {dec}" if dec else
+                                ("PFD 項次號，語意須對照圖面設備清單表"
+                                 if is_pfd else "首字母不在設備型別表中"))},
             ],
             "bbox": [round((cx - hh) / W, 4), round((cy - hh) / H, 4),
                      round((cx + hh) / W, 4), round((cy + hh) / H, 4)],

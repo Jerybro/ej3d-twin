@@ -94,6 +94,35 @@ async function openDoc(name) {
   renderZoneMap();
   await loadAnnots();
   render();
+  loadConvention(name);
+}
+
+// 開掃之前先告訴使用者這張圖是什麼體系、將套用哪份規範、信心多少。
+// 判錯圖種等於整套規則失效，所以這個要在最前面讓人有機會攔下來。
+async function loadConvention(name) {
+  const el = $('conv-box');
+  el.style.display = '';
+  el.className = 'conv';
+  el.innerHTML = '<span class="spin"></span> 判讀圖面體系…';
+  try {
+    const d = await fetch(`/api/pid/vlm/convention/${encodeURIComponent(name)}`)
+      .then(r => r.json());
+    if (d.detail) throw new Error(d.detail);
+    const pct = Math.round((d.confidence || 0) * 100);
+    const lvl = pct >= 70 ? 'ok' : (pct >= 40 ? 'mid' : 'lo');
+    el.className = 'conv ' + lvl;
+    el.innerHTML =
+      `<div class="conv-top"><b>${esc(d.profile)}</b>
+        <span class="conf ${lvl === 'ok' ? '' : (lvl === 'mid' ? 'mid' : 'lo')}">${pct}%</span></div>
+       <div class="conv-sub">套用規範：<b>${esc(d.rules_file || '未指定，將用預設')}</b></div>
+       ${(d.findings || []).length ? `<details class="ev"><summary>判定依據（${d.findings.length} 項）</summary>
+         ${d.findings.map(f => `<div class="ev-row"><span class="ev-dot ${f.ok ? 'ok' : 'no'}"></span>
+           <span class="ev-g"><b>${esc(f.stage)}</b><br>${esc(f.detail)}</span></div>`).join('')}
+       </details>` : ''}`;
+  } catch (e) {
+    el.className = 'conv lo';
+    el.textContent = '體系判讀失敗：' + (e.message || '');
+  }
 }
 
 // -------------------------------------------------------------------- 縮放

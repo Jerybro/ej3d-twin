@@ -943,6 +943,34 @@ class ScanAllReq(BaseModel):
     filename: str
 
 
+@router.get("/convention/{filename}")
+def convention(filename: str) -> dict:
+    """判定這張圖走哪套繪製慣例——決定該套用哪份判讀規範。
+
+    台灣沒有統一的 CNS P&ID 標準，實務是業主標準 > EPC > 授權商。
+    一份 rules 打天下會在第二個客戶就破功，所以要自動判、不是手動設定。
+    """
+    from .pid_convention import detect
+    from .pid_parse import EQUIP_RE, INST_RE, TYPE_MAP
+
+    hits, _ = _ocr_region(filename, [0.0, 0.0, 1.0, 1.0])
+    tags, equips, words = [], [], []
+    for _cx, _cy, text, _c, _h in hits:
+        t = text.replace(" ", "").replace("-", "")
+        words.append(text)
+        if INST_RE.match(t):
+            tags.append(t)
+        elif EQUIP_RE.match(t) and t[0] in TYPE_MAP:
+            equips.append(t)
+    d = _load_annots(filename)
+    kinds: dict = {}
+    for a in d["items"]:
+        if a.get("mounting"):
+            kinds[a["mounting"]] = kinds.get(a["mounting"], 0) + 1
+    return detect(tags, sorted(set(equips)), title_text=" ".join(words),
+                  notes_text=" ".join(words), bubble_kinds=kinds)
+
+
 @router.post("/scan_all")
 def scan_all(req: ScanAllReq) -> dict:
     """整張圖一次辨識——位號、設備、閥件全出，每項都帶精確座標。

@@ -83,12 +83,16 @@ def current_user(request: Request) -> dict | None:
 
 
 # ------------------------------------------------------ 守衛 middleware
-# 未登入可及的路徑前綴（登入流程本身＋靜態資源）
-PUBLIC_PREFIXES = ("/login", "/logout", "/static/", "/favicon", "/api/me", "/docs")
+# 未登入可及的路徑前綴——只留登入流程本身與靜態資源。
+#
+# 平台上已存放客戶 P&ID（台化、中油大林），首頁會列出圖面清單與專案資訊，
+# 說明書也含平台能力細節，兩者都不該對未登入者開放。
+# 原本 `/` 與 `/docs` 是公開的，此處一併收回。
+PUBLIC_PREFIXES = ("/login", "/logout", "/static/", "/favicon", "/api/me")
 
 
 async def auth_guard(request: Request, call_next):
-    if AUTH_DISABLED or request.url.path in ("/",) or any(
+    if AUTH_DISABLED or any(
             request.url.path.startswith(p) for p in PUBLIC_PREFIXES):
         return await call_next(request)
     if not current_user(request):

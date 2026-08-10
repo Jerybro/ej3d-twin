@@ -943,6 +943,35 @@ class ScanAllReq(BaseModel):
     filename: str
 
 
+@router.get("/linkset")
+def linkset() -> dict:
+    """整組圖面的跨圖串接關係——單張是孤島，串起來才是廠。
+
+    三種互相獨立的證據：圖上的跨圖接續標記（OPC）、圖號連號、共用位號。
+    未配對的接續標記一併回報——那代表圖組有缺口，這本身就是交付價值，
+    客戶常不知道自己的圖少了哪幾張。
+    """
+    from .pid_linkset import build_set, extract_links
+    from .pid_parse import EQUIP_RE, INST_RE, TYPE_MAP
+
+    per: dict = {}
+    for p in sorted(PID_DIR.glob("*.pdf")):
+        try:
+            hits, _ = _ocr_region(p.name, [0.0, 0.0, 1.0, 1.0])
+        except Exception:  # noqa: BLE001
+            continue
+        words = [h[2] for h in hits]
+        tags = []
+        for h in hits:
+            t = h[2].replace(" ", "").replace("-", "")
+            if INST_RE.match(t) or (EQUIP_RE.match(t) and t[0] in TYPE_MAP):
+                tags.append(t)
+        d = extract_links(p.stem, words)
+        d["tags"] = tags
+        per[p.stem] = d
+    return build_set(per)
+
+
 @router.get("/convention/{filename}")
 def convention(filename: str) -> dict:
     """判定這張圖走哪套繪製慣例——決定該套用哪份判讀規範。

@@ -36,6 +36,40 @@ async function loadFiles() {
   } catch { el.innerHTML = '<span class="hint">清單載入失敗。</span>'; }
 }
 
+// ------------------------------------------------------------------ 上傳
+async function uploadFiles(files) {
+  const st = $('up-state');
+  const list = [...files].filter(f => /\.(pdf|jpe?g|png)$/i.test(f.name));
+  if (!list.length) { st.textContent = '只接受 PDF／JPG／PNG'; return; }
+  let ok = 0;
+  for (const [i, f] of list.entries()) {
+    st.innerHTML = `<span class="spin"></span> 上傳中 ${i + 1}/${list.length}：${esc(f.name)}`;
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+      const r = await fetch('/api/pid/upload', { method: 'POST', body: fd });
+      if (r.ok) ok++;
+      else { const e = await r.json().catch(() => ({})); throw new Error(e.detail || r.status); }
+    } catch (e) {
+      st.innerHTML = `<span style="color:var(--lo)">${esc(f.name)} 上傳失敗：${esc(e.message || '')}</span>`;
+      return;
+    }
+  }
+  st.innerHTML = `<span style="color:var(--hi)">已上傳 ${ok} 個檔案</span>`;
+  await loadFiles();
+}
+
+$('file-input').addEventListener('change', e => {
+  uploadFiles(e.target.files); e.target.value = '';
+});
+['dragenter', 'dragover'].forEach(t => $('drop').addEventListener(t, e => {
+  e.preventDefault(); $('drop').classList.add('over');
+}));
+['dragleave', 'drop'].forEach(t => $('drop').addEventListener(t, e => {
+  e.preventDefault(); $('drop').classList.remove('over');
+}));
+$('drop').addEventListener('drop', e => uploadFiles(e.dataTransfer.files));
+
 async function openDoc(name) {
   curFile = name; items = []; curIdx = -1; sel = null;
   $('doc-name').textContent = name;

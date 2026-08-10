@@ -1,36 +1,38 @@
-"""案例圖匯入：把掃描 JPG 轉成 PDF 放進 uploads/pid。
+"""案例圖匯入：把 Downloads 下的流程圖複製進 uploads/pid。
 
-現有管線入口吃 PDF（pypdfium2 渲染），掃描圖轉封裝成 PDF 即可共用同一條路徑。
-注意：掃描圖沒有向量圖元，detect_valves / detect_bubbles 會全數落空，
-只有 OCR 路徑有效——這正是要拿它來驗證向量路線邊界的原因。
+原本誤把中油大林 HDS11 那批 JPG 當成 P&ID 匯入——那些其實是 PI Vision
+的畫面截圖（監控介面），不是工程圖，已移除。
 """
+import shutil
 from pathlib import Path
 
-from PIL import Image
-
-SRC = Path.home() / "Downloads" / "gdrive_download" / "HDS11"
+DL = Path.home() / "Downloads"
 DST = Path(__file__).resolve().parent.parent / "uploads" / "pid"
 
+# 潤泰精材：礦化／造粒／混合／燒結系統流程圖（向量 PDF）
 PICKS = [
-    "P2201AB/P-2001.PID.jpg",
-    "C2201/C-2201 (Compressor).30.jpg",
-    "C2201/C-2201 (Oil System).34.jpg",
-    "C2301AB/C-2301A (Process Gas).36.jpg",
+    "R-M0200-00-000-000-00 礦化及造粒系統流程圖_20260408.pdf",
+    "R-M0300-00-000-000-00 混合系統流程圖_20230728.pdf",
+    "R-M0400-00-000-000-00 燒結系統流程圖_20260107.pdf",
 ]
+
+# 先前誤匯入的 PI Vision 畫面截圖，不是工程圖
+STALE = "DALIN-"
 
 
 def main() -> None:
     DST.mkdir(parents=True, exist_ok=True)
+    for p in DST.glob(f"{STALE}*"):
+        p.unlink()
+        print(f"移除誤匯入：{p.name}")
     for rel in PICKS:
-        p = SRC / rel
-        if not p.exists():
+        src = DL / rel
+        if not src.exists():
             print(f"缺檔：{rel}")
             continue
-        im = Image.open(p).convert("RGB")
-        stem = Path(rel).stem.replace(" ", "_").replace("(", "").replace(")", "")
-        out = DST / f"DALIN-{stem}.pdf"
-        im.save(out, "PDF", resolution=200.0)
-        print(f"{out.name:<46} {im.size[0]}x{im.size[1]}")
+        out = DST / rel
+        shutil.copy2(src, out)
+        print(f"{out.name:<52} {out.stat().st_size // 1024} KB")
 
 
 if __name__ == "__main__":

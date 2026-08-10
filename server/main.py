@@ -420,10 +420,27 @@ PID_DIR.mkdir(parents=True, exist_ok=True)
 @app.post("/api/pid/upload")
 async def pid_upload(file: "UploadFile" = FastAPIFile(...)) -> dict:
     name = Path(file.filename or "upload.pdf").name  # 去除路徑成分
-    if not name.lower().endswith(".pdf"):
-        raise HTTPException(422, "僅接受 PDF")
+    low = name.lower()
+    data = await file.read()
+    if low.endswith((".jpg", ".jpeg", ".png")):
+        # 掃描圖／截圖：封裝成 PDF 走同一條管線。
+        # 注意這類圖沒有向量圖元，閥件與氣泡幾何偵測會全數落空，只有 OCR 有效。
+        import io as _io
+
+        from PIL import Image
+
+        try:
+            im = Image.open(_io.BytesIO(data)).convert("RGB")
+        except Exception:  # noqa: BLE001
+            raise HTTPException(422, "圖檔無法讀取") from None
+        name = Path(name).stem + ".pdf"
+        buf = _io.BytesIO()
+        im.save(buf, "PDF", resolution=200.0)
+        data = buf.getvalue()
+    elif not low.endswith(".pdf"):
+        raise HTTPException(422, "僅接受 PDF／JPG／PNG")
     dest = PID_DIR / name
-    dest.write_bytes(await file.read())
+    dest.write_bytes(data)
     return {"ok": True, "name": name, "size": dest.stat().st_size}
 
 

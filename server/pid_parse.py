@@ -835,6 +835,50 @@ def detect_bubbles(pdf_path: Path) -> tuple[list, float, float]:
     return merged, pw, ph
 
 
+def all_segments(pdf_path: Path) -> tuple[list, float, float]:
+    """整頁線段，**含折線拆解**——多點路徑逐段拆成兩點線段。
+
+    page_segments() 只收「恰好兩點」的子路徑，因為閥件偵測要的是獨立線段，
+    收了折線會混入字形筆劃干擾。但表格的列線通常是同一條折線路徑的一部分
+    （實測潤泰整張表 60 條列線一條都沒被 page_segments 收到，全頁只抽到
+    21 條長水平線），所以表格偵測必須用這份拆解版。
+    """
+    import ctypes
+
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as praw
+
+    doc = pdfium.PdfDocument(str(pdf_path))
+    try:
+        page = doc[0]
+        pw, ph = page.get_size()
+        out = []
+        for i in range(praw.FPDFPage_CountObjects(page.raw)):
+            obj = praw.FPDFPage_GetObject(page.raw, i)
+            if praw.FPDFPageObj_GetType(obj) != praw.FPDF_PAGEOBJ_PATH:
+                continue
+            m = praw.FS_MATRIX()
+            praw.FPDFPageObj_GetMatrix(obj, ctypes.byref(m))
+            cur: list = []
+            for j in range(praw.FPDFPath_CountSegments(obj)):
+                seg = praw.FPDFPath_GetPathSegment(obj, j)
+                x = ctypes.c_float()
+                y = ctypes.c_float()
+                praw.FPDFPathSegment_GetPoint(seg, ctypes.byref(x), ctypes.byref(y))
+                st = praw.FPDFPathSegment_GetType(seg)
+                X = m.a * x.value + m.c * y.value + m.e
+                Y = m.b * x.value + m.d * y.value + m.f
+                if st == praw.FPDF_SEGMENT_MOVETO:
+                    cur = [(X, Y)]
+                else:
+                    if cur:
+                        out.append((cur[-1], (X, Y)))
+                    cur.append((X, Y))
+    finally:
+        doc.close()
+    return out, pw, ph
+
+
 def detect_tables(pdf_path: Path, min_rows: int = 6) -> tuple[list, float, float]:
     """偵測表格區域（設備清單、圖框標題欄、圖例）→ [(x0, y0, x1, y1)] PDF 座標。
 
@@ -843,23 +887,40 @@ def detect_tables(pdf_path: Path, min_rows: int = 6) -> tuple[list, float, float
     產生一堆根本不存在於製程中的假元件——這不是模型判斷力的問題，
     是根本不該把表格內容送進來。
 
-    幾何特徵：表格＝一群等長、等間距、互相平行的長線（列線）＋垂直的欄線。
-    偵測列線群即可框出表格範圍，不需要模型。
+    幾何特徵：表格＝一群互相平行的水平列線＋垂直欄線切成格子。
+
+    ⚠️ 現況：**尚未能穩定偵測，回傳空清單**（不影響其他流程）。
+    已排除的錯誤假設，供後續接手參考：
+      1. 「列線是獨立兩點線段」→ 錯。表格列線是多點折線的一部分，
+         page_segments 收不到（全頁只抽到 21 條長水平線）。已改用 all_segments。
+      2. 「同表格列線左右邊界對齊」→ 錯。合併儲存格的列線較短，
+         用邊界對齊會把表拆散。已改用 x 範圍重疊分群。
+      3. 「列線長度 > 頁面對角線 5%」→ 錯。列線只跨表格寬度（約頁寬 15%），
+         門檻已降到 2%。
+      4. 「列距一致」→ 錯。多行說明的列特別高，實測一致率僅 29%。
+      5. 「有 ≥3 條欄線」→ 目前卡在這裡。分群後最接近的候選是
+         寬 16% / 高 20% / 8 列，但欄線比對不過，推測欄線同樣是折線的一部分
+         且 y 範圍未跨越整個 box，需改以「欄線片段累積覆蓋率」判定。
     """
-    segs, pw, ph = page_segments(pdf_path)
+    segs, pw, ph = all_segments(pdf_path)
     span = max(pw, ph)
     hor, ver = [], []
     for a, b in segs:
         dx, dy = abs(b[0] - a[0]), abs(b[1] - a[1])
         L = math.hypot(dx, dy)
-        if L < span * 0.05:                       # 太短的不是表格框線
+        # 門檻不能設太高：表格列線只跨越表格寬度，不是跨整張圖。
+        # 實測潤泰設備清單表的列線約佔頁寬 15%，用 5% 頁面對角線當門檻
+        # 只剩 4 條（表全滅），降到 2% 才抓得到 26 條。
+        if L < span * 0.02:
             continue
         if dy <= L * 0.02:
             hor.append((min(a[0], b[0]), max(a[0], b[0]), (a[1] + b[1]) / 2))
         elif dx <= L * 0.02:
             ver.append((min(a[1], b[1]), max(a[1], b[1]), (a[0] + b[0]) / 2))
 
-    # 依 x 範圍相近把水平線分群 → 每群就是一個候選表格的列線束
+    # 依 x 範圍**重疊**分群（不是邊界對齊）。
+    # 表格有合併儲存格時，該列的線會比較短，但仍與主體大幅重疊；
+    # 用邊界對齊會把它們拆成不同群，整張表因此散掉（實測潤泰表全滅）。
     hor.sort(key=lambda t: t[2])
     out = []
     used = [False] * len(hor)
@@ -868,14 +929,16 @@ def detect_tables(pdf_path: Path, min_rows: int = 6) -> tuple[list, float, float
             continue
         grp = [(x0, x1, y)]
         used[i] = True
+        lo, hi = x0, x1
         for j in range(i + 1, len(hor)):
             if used[j]:
                 continue
             X0, X1, Y = hor[j]
-            # 左右邊界對齊（同一張表的列線起訖幾乎相同）
-            if abs(X0 - x0) < span * 0.02 and abs(X1 - x1) < span * 0.02:
+            ov = min(hi, X1) - max(lo, X0)          # 與目前群體的重疊寬度
+            if ov > (hi - lo) * 0.55:
                 grp.append((X0, X1, Y))
                 used[j] = True
+                lo, hi = min(lo, X0), max(hi, X1)
         if len(grp) < min_rows:
             continue
         ys = sorted(g[2] for g in grp)
@@ -885,14 +948,18 @@ def detect_tables(pdf_path: Path, min_rows: int = 6) -> tuple[list, float, float
             continue
         if w > pw * 0.85 and h > ph * 0.85:
             continue                              # 幾乎滿版＝圖框，不是表格
-        # 列距要夠一致才算表格（圖框的格線刻度間距雜亂）
-        gaps = [ys[k + 1] - ys[k] for k in range(len(ys) - 1) if ys[k + 1] - ys[k] > 0.5]
-        if len(gaps) < min_rows - 1:
+        # 判準用「有沒有欄線」而不是「列距是否一致」。
+        # 真實設備清單表的列高本來就不一致（多行說明的列特別高），
+        # 用列距一致性會把真表格擋掉（實測潤泰表一致率僅 29%）。
+        # 表格與一堆平行線的本質差異在於「有垂直欄線把它切成格子」。
+        cols = 0
+        for vy0, vy1, vx in ver:
+            if box[0] - span * 0.01 <= vx <= box[2] + span * 0.01 and \
+                    min(vy1, box[3]) - max(vy0, box[1]) > (box[3] - box[1]) * 0.5:
+                cols += 1
+        if cols < 3:                              # 至少左右邊界＋一條欄線
             continue
-        med = sorted(gaps)[len(gaps) // 2]
-        if med <= 0 or sum(1 for g in gaps if abs(g - med) <= med * 0.45) < len(gaps) * 0.6:
-            continue
-        out.append(box)
+        out.append((box[0], box[1], box[2], box[3]))
     return out, pw, ph
 
 

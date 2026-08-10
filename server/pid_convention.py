@@ -115,15 +115,34 @@ def detect(tags: list, equips: list, title_text: str = "",
                             "註記常含 MOC 變更履歷，判讀時務必納入"})
 
     # ── 綜合 ────────────────────────────────────────────────
+    # PFD 判定：沒有 ISA 儀錶位號、但有大量純數字項次號 → 製程流程圖而非 P&ID。
+    # 這兩類要用完全不同的規範：P&ID 靠 ISA 字母碼解碼語意，
+    # PFD 的項次號本身不帶語意，語意在圖面的設備清單表裡。
+    item_no = sum(1 for t in tags if re.fullmatch(r"\d{3}(\.\d)?", (t or "").strip()))
+    if not tags and item_no == 0:
+        # 連候選 tag 都沒有時，用原始文字再看一次有沒有項次號樣態
+        item_no = sum(1 for w in re.findall(r"\b\d{3}(?:\.\d)?\b", blob))
+
     isa = next((x for x in f if x["stage"] == "ISA 5.1 位號文法"), None)
-    if isa and isa["score"] >= 0.85:
+    isa_ok = bool(isa and isa["score"] >= 0.85)
+
+    if not isa_ok and item_no >= 8:
+        f.append({"stage": "圖種判定", "ok": True, "score": 0.8,
+                  "detail": f"未見 ISA 功能字母位號，但有 {item_no} 個純數字項次號樣態"
+                            "（3 碼可帶小數分項）→ 研判為 PFD 製程流程圖，"
+                            "語意須由圖面設備清單表對照，不可套用 ISA 字母碼解碼"})
+        return {"profile": "PFD 製程流程圖（設備項次號 ＋ 清單表對照）",
+                "rules_file": "pfd.json", "confidence": 0.75,
+                "loop_digits": loop_digits, "findings": f}
+
+    if isa_ok:
         profile = "ISA 5.1 位號文法 ＋ 業主自訂編碼"
-        conf = round(min(0.95, 0.5 + isa["score"] * 0.5), 2)
+        rules, conf = "default.json", round(min(0.95, 0.5 + isa["score"] * 0.5), 2)
     elif isa:
         profile = "非 ISA 主流（自訂或他系文法），建議人工指定規範"
-        conf = 0.4
+        rules, conf = "", 0.4
     else:
         profile = "資訊不足，無法判定"
-        conf = 0.2
-    return {"profile": profile, "confidence": conf,
+        rules, conf = "", 0.2
+    return {"profile": profile, "rules_file": rules, "confidence": conf,
             "loop_digits": loop_digits, "findings": f}

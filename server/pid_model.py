@@ -168,6 +168,80 @@ def _near_attrs(cx: float, cy: float, hits: list, radius: float) -> dict:
     return out
 
 
+def _vert_texts(filename: str) -> list:
+    """直式文字補讀（快取）→ [[nx, ny, text, nh, 90], ...]。
+
+    左右圖緣的管線標示（14P 6029 E4B2(H)）沿管線豎排，水平 OCR 完全
+    看不見——不是讀錯，是根本不在偵測結果裡。這輪用 rotation_info
+    重掃，只收「瘦高框」的命中（寬高比 >1.5），渲染時轉 90° 畫回去。
+    """
+    from .pid_vlm import VLM_DIR, _ensure_base, _slug
+
+    cache = VLM_DIR / f"{_slug(Path(filename).stem)}.hits-vert.json"
+    if cache.exists():
+        try:
+            return json.loads(cache.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    try:
+        import numpy as np
+        from PIL import Image
+
+        from .pid_parse import OCR_LOCK, _get_reader
+
+        img_p, meta = _ensure_base(filename)
+        W, H = meta["w"], meta["h"]
+        out: list = []
+        TC, TR, OV = 3, 2, 0.04
+        with OCR_LOCK, Image.open(img_p) as im:
+            reader = _get_reader()
+            for r in range(TR):
+                for c in range(TC):
+                    x0 = int(max(0.0, c / TC - OV) * W)
+                    y0 = int(max(0.0, r / TR - OV) * H)
+                    x1 = int(min(1.0, (c + 1) / TC + OV) * W)
+                    y1 = int(min(1.0, (r + 1) / TR + OV) * H)
+                    crop = im.crop((x0, y0, x1, y1)).convert("RGB")
+                    k = max(1.0, 1900 / crop.width)
+                    if k > 1:
+                        crop = crop.resize((int(crop.width * k),
+                                            int(crop.height * k)), Image.LANCZOS)
+                    try:
+                        res = reader.readtext(np.array(crop),
+                                              rotation_info=[90, 270],
+                                              text_threshold=0.55, low_text=0.3)
+                    except TypeError:      # 舊版 easyocr 無 rotation_info
+                        return []
+                    except Exception:  # noqa: BLE001
+                        continue
+                    for box, text, conf in res:
+                        t = str(text).strip()
+                        if conf < 0.35 or len(t) < 3:
+                            continue
+                        xs = [p[0] / k for p in box]
+                        ys = [p[1] / k for p in box]
+                        bw, bh = max(xs) - min(xs), max(ys) - min(ys)
+                        if bh < bw * 1.5:          # 只收直式（瘦高框）
+                            continue
+                        cx = (min(xs) + max(xs)) / 2 + x0
+                        cy = (min(ys) + max(ys)) / 2 + y0
+                        # 直式文字的「字高」是框的寬度
+                        out.append([round(cx / W, 4), round(cy / H, 4), t,
+                                    round(bw / 2 / H, 4), 90])
+        seen: set = set()
+        ded: list = []
+        for e in out:
+            key = (e[2], round(e[0], 2), round(e[1], 2))
+            if key in seen:
+                continue
+            seen.add(key)
+            ded.append(e)
+        cache.write_text(json.dumps(ded, ensure_ascii=False), encoding="utf-8")
+        return ded
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _zh_texts(filename: str) -> list:
     """中文註記補讀（結果落地快取）→ [[nx, ny, text, nh], ...]，僅收含 CJK 的命中。
 
@@ -405,12 +479,14 @@ def build_model(filename: str) -> dict:
             if not garbage:
                 kept.append(e)
         texts = kept + zh
+    # 直式文字補讀：左右圖緣的豎排管線標示，水平 OCR 看不見
+    texts += _vert_texts(filename)
 
     # OPC 跨圖接續角旗：070-2/01＝去 C12070-2 圖第 01 接點。
     # 這是跨圖串接（pid_linkset）的圖面端證據，建模時一併實體化。
     opcs: list = []
     _opc_re = re.compile(r"(\d{2,4}-\d{1,2})/(\d{1,2}[A-Z]?)")
-    for tx, ty, txt, th in texts:
+    for tx, ty, txt, th, *_ in texts:
         mm = _opc_re.search(str(txt).replace(" ", ""))
         if mm:
             opcs.append({"code": mm.group(0), "target_dwg": mm.group(1),
@@ -428,7 +504,7 @@ def build_model(filename: str) -> dict:
             # 方框誤判源多（表格欄位、小設備框）——框內要有文字才收
             if shape == "square" and not any(
                     abs(tx - bx) < rx and abs(ty - by) < ry
-                    for tx, ty, _t, _h in texts):
+                    for tx, ty, _t, _h, *_ in texts):
                 continue
             bubbles.append([round(bx, 4), round(by, 4), round(rx, 4),
                             round(ry, 4), shape])
@@ -539,15 +615,41 @@ def _svg_of(m: dict) -> str:
          f'<rect width="{W}" height="{H}" fill="#FFFFFF"/>']
 
     # 0) OCR 文字層（墊底）：管線編號、註記、設備名。灰色，蓋不過語意層。
-    # 字級刻意壓小（×0.6、上限 13px）：OCR 的字高估計偏大，照畫會互疊成一片；
-    # 這層的任務是「查得到、對得上位置」，不是複刻原圖排版。
+    # 字級刻意壓小（×0.6、上限 13px）：OCR 的字高估計偏大，照畫會互疊成一片。
+    # 重疊抑制：同一行常被讀成多個殘缺片段（標題欄實測疊成亂碼牆），
+    # 長字串優先畫、蓋到已畫者跳過——留最完整的讀取，丟殘片。
     if g.get("texts"):
+        drawn: list = []
+
+        def _clash(r0) -> bool:
+            for r1 in drawn:
+                ix = min(r0[2], r1[2]) - max(r0[0], r1[0])
+                iy = min(r0[3], r1[3]) - max(r0[1], r1[1])
+                if ix <= 0 or iy <= 0:
+                    continue
+                a0 = (r0[2] - r0[0]) * (r0[3] - r0[1])
+                a1 = (r1[2] - r1[0]) * (r1[3] - r1[1])
+                if ix * iy > 0.4 * min(a0, a1):
+                    return True
+            return False
+
         p.append('<g opacity="0.78">')
-        for tx, ty, txt, th in g["texts"]:
+        for e in sorted(g["texts"], key=lambda e: -len(str(e[2]))):
+            tx, ty, txt, th = e[0], e[1], str(e[2]), e[3]
+            rotv = e[4] if len(e) > 4 else 0
             fs = min(max(th * 2 * H * 0.6, 5.5), 13.0)
-            p.append(f'<text x="{tx * W:.0f}" y="{ty * H + fs * 0.35:.0f}" '
+            wpx = max(len(txt), 1) * fs * 0.58
+            x, y = tx * W, ty * H
+            rect = ((x - fs * 0.6, y - wpx / 2, x + fs * 0.6, y + wpx / 2)
+                    if rotv else
+                    (x - wpx / 2, y - fs * 0.6, x + wpx / 2, y + fs * 0.6))
+            if _clash(rect):
+                continue
+            drawn.append(rect)
+            tr = f' transform="rotate(-90 {x:.0f} {y:.0f})"' if rotv else ""
+            p.append(f'<text x="{x:.0f}" y="{y + fs * 0.35:.0f}" '
                      f'font-size="{fs:.1f}" fill="#9AA3AE" '
-                     f'text-anchor="middle">{_x(txt)}</text>')
+                     f'text-anchor="middle"{tr}>{_x(txt)}</text>')
         p.append('</g>')
 
     # 1) 線稿層：按樣式分組畫——粗細/虛實還原原圖的資訊層級

@@ -1072,6 +1072,18 @@ def scan_all(req: ScanAllReq) -> dict:
             except Exception:  # noqa: BLE001
                 continue
 
+    # 整頁 OCR 花 ~30 秒，是全流程最貴的一步。落地快取讓建模階段
+    # （pid_model 的屬性充實：閥件尺寸、管線編號都要查鄰近文字）直接重用。
+    try:
+        hp = VLM_DIR / f"{_slug(Path(req.filename).stem)}.hits.json"
+        hp.write_text(json.dumps(
+            {"w": W, "h": H,
+             "hits": [[round(cx, 1), round(cy, 1), t, round(float(cf), 3),
+                       round(hh, 1)] for cx, cy, t, cf, hh in hits]},
+            ensure_ascii=False), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass            # 快取失敗不影響掃描本身，建模時會自己重跑 OCR
+
     # ---- 方法二：氣泡錨定 OCR（與全頁掃描互為獨立驗證）----
     # 全頁掃描是「到處找字再猜哪個是位號」，註記會變假位號、座標也會飄；
     # 氣泡錨定是「先用幾何找到元件，只在元件內讀字」，位置由構造保證正確、

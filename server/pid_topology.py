@@ -149,9 +149,11 @@ def control_loops(tags: list) -> dict:
 
     loops: dict = {}
     for t in tags:
-        m = re.match(r"^([A-Z]{1,5})[\s-]?(\d{3,6}[A-Z]?)$", (t or "").strip().upper())
+        m = re.match(r"^([A-Z]{1,5})[\s-]?(\d{3,6})[A-Z]?$", (t or "").strip().upper())
         if not m:
             continue
+        # 迴路號只取數字：PI61301E 的尾碼 E 是同迴路內的儀錶序號，
+        # 帶著分組會把一個迴路拆成兩個（實測 61301/61301E 重複成環）
         letters, num = m.group(1), m.group(2)
         loops.setdefault(num, {"members": [], "has_controller": False,
                                "has_transmitter": False, "has_element": False,

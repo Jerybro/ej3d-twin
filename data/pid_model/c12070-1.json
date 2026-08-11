@@ -1,0 +1,999 @@
+{
+  "drawing": "C12070-1.pdf",
+  "profile": "isa-5.1",
+  "built_at": "2026-08-11T16:10:50+08:00",
+  "gate": {
+    "accepted": 54,
+    "rejected": 1,
+    "rule": "實體只從已確認標註產生；清冊列與管線編號另標來源"
+  },
+  "equipment": [],
+  "instruments": [
+    {
+      "tag": "AI60001",
+      "function": "分析指示",
+      "mounting": "",
+      "loop": "60001",
+      "bbox": [
+        0.6128,
+        0.7905,
+        0.6246,
+        0.8071
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "AR61301",
+      "function": "分析記錄",
+      "mounting": "",
+      "loop": "61301",
+      "bbox": [
+        0.9098,
+        0.0712,
+        0.9215,
+        0.0878
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "FAL65101",
+      "function": "流量警報低",
+      "mounting": "",
+      "loop": "65101",
+      "bbox": [
+        0.2382,
+        0.77,
+        0.25,
+        0.7866
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "FE61301",
+      "function": "流量元件",
+      "mounting": "",
+      "loop": "61301",
+      "bbox": [
+        0.8744,
+        0.6435,
+        0.8862,
+        0.6601
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "FE65101",
+      "function": "流量元件",
+      "mounting": "",
+      "loop": "65101",
+      "bbox": [
+        0.0932,
+        0.7375,
+        0.1055,
+        0.7549
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "FIC65101",
+      "function": "流量指示控制",
+      "mounting": "",
+      "loop": "65101",
+      "bbox": [
+        0.2408,
+        0.8019,
+        0.2526,
+        0.8185
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "FR63101",
+      "function": "流量記錄",
+      "mounting": "",
+      "loop": "63101",
+      "bbox": [
+        0.6862,
+        0.5652,
+        0.698,
+        0.5818
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "FR65101",
+      "function": "流量記錄",
+      "mounting": "",
+      "loop": "65101",
+      "bbox": [
+        0.2742,
+        0.8014,
+        0.2865,
+        0.8188
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "FT63101B",
+      "function": "流量傳送器",
+      "mounting": "",
+      "loop": "63101",
+      "bbox": [
+        0.5443,
+        0.564,
+        0.5566,
+        0.5815
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "HV61301",
+      "function": "手動閥",
+      "mounting": "",
+      "loop": "61301",
+      "bbox": [
+        0.8401,
+        0.3011,
+        0.8519,
+        0.3177
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "LGR61302",
+      "function": "液位視鏡記錄",
+      "mounting": "",
+      "loop": "61302",
+      "bbox": [
+        0.7874,
+        0.4899,
+        0.7997,
+        0.5073
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "LI61303",
+      "function": "液位指示",
+      "mounting": "",
+      "loop": "61303",
+      "bbox": [
+        0.9116,
+        0.4625,
+        0.9239,
+        0.4799
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "LIC61301",
+      "function": "液位指示控制",
+      "mounting": "",
+      "loop": "61301",
+      "bbox": [
+        0.9614,
+        0.4912,
+        0.9738,
+        0.5086
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "LT61301",
+      "function": "液位傳送器",
+      "mounting": "",
+      "loop": "61301",
+      "bbox": [
+        0.8522,
+        0.4918,
+        0.8639,
+        0.5084
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "LV61301",
+      "function": "液位閥",
+      "mounting": "",
+      "loop": "61301",
+      "bbox": [
+        0.8232,
+        0.7323,
+        0.8355,
+        0.7497
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PDI65101",
+      "function": "壓差指示",
+      "mounting": "",
+      "loop": "65101",
+      "bbox": [
+        0.2354,
+        0.2724,
+        0.2471,
+        0.289
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PDI65104",
+      "function": "壓差指示",
+      "mounting": "",
+      "loop": "65104",
+      "bbox": [
+        0.4871,
+        0.1547,
+        0.4994,
+        0.1721
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PDI65105",
+      "function": "壓差指示",
+      "mounting": "",
+      "loop": "65105",
+      "bbox": [
+        0.2972,
+        0.2717,
+        0.3107,
+        0.2907
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PDI65106",
+      "function": "壓差指示",
+      "mounting": "",
+      "loop": "65106",
+      "bbox": [
+        0.4714,
+        0.3176,
+        0.4837,
+        0.335
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PI61301E",
+      "function": "壓力指示",
+      "mounting": "",
+      "loop": "61301",
+      "bbox": [
+        0.7069,
+        0.0777,
+        0.7192,
+        0.0951
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PI61302",
+      "function": "壓力指示",
+      "mounting": "",
+      "loop": "61302",
+      "bbox": [
+        0.7768,
+        0.4323,
+        0.7891,
+        0.4497
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PI65103",
+      "function": "壓力指示",
+      "mounting": "",
+      "loop": "65103",
+      "bbox": [
+        0.3545,
+        0.2724,
+        0.3663,
+        0.289
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PI65104",
+      "function": "壓力指示",
+      "mounting": "",
+      "loop": "65104",
+      "bbox": [
+        0.4719,
+        0.3544,
+        0.4837,
+        0.371
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PIC61301",
+      "function": "壓力指示控制",
+      "mounting": "",
+      "loop": "61301",
+      "bbox": [
+        0.8056,
+        0.3913,
+        0.8173,
+        0.408
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PR61301",
+      "function": "壓力記錄",
+      "mounting": "",
+      "loop": "61301",
+      "bbox": [
+        0.7802,
+        0.3606,
+        0.7919,
+        0.3772
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PR63103",
+      "function": "壓力記錄",
+      "mounting": "",
+      "loop": "63103",
+      "bbox": [
+        0.6801,
+        0.7186,
+        0.6918,
+        0.7353
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PT61301",
+      "function": "壓力傳送器",
+      "mounting": "",
+      "loop": "61301",
+      "bbox": [
+        0.8045,
+        0.4323,
+        0.8168,
+        0.4497
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PT61301E",
+      "function": "壓力傳送器",
+      "mounting": "",
+      "loop": "61301",
+      "bbox": [
+        0.6782,
+        0.101,
+        0.6905,
+        0.1185
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PT63103",
+      "function": "壓力傳送器",
+      "mounting": "",
+      "loop": "63103",
+      "bbox": [
+        0.6023,
+        0.7179,
+        0.6141,
+        0.7346
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PT65104",
+      "function": "壓力傳送器",
+      "mounting": "",
+      "loop": "65104",
+      "bbox": [
+        0.4715,
+        0.3949,
+        0.4838,
+        0.4123
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "PT65108",
+      "function": "壓力傳送器",
+      "mounting": "",
+      "loop": "65108",
+      "bbox": [
+        0.4646,
+        0.4703,
+        0.4763,
+        0.4869
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "SFS601",
+      "function": "速度比值開關",
+      "mounting": "",
+      "loop": "601",
+      "bbox": [
+        0.1028,
+        0.4883,
+        0.1146,
+        0.5049
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "SFS613",
+      "function": "速度比值開關",
+      "mounting": "",
+      "loop": "613",
+      "bbox": [
+        0.787,
+        0.56,
+        0.7988,
+        0.5766
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "STR65101",
+      "function": "速度傳送器記錄",
+      "mounting": "",
+      "loop": "65101",
+      "bbox": [
+        0.2263,
+        0.4132,
+        0.2387,
+        0.4306
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "STR65102",
+      "function": "速度傳送器記錄",
+      "mounting": "",
+      "loop": "65102",
+      "bbox": [
+        0.2261,
+        0.4953,
+        0.2384,
+        0.5128
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TDI65101",
+      "function": "溫差指示",
+      "mounting": "",
+      "loop": "65101",
+      "bbox": [
+        0.3564,
+        0.0684,
+        0.3687,
+        0.0858
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TE65101",
+      "function": "溫度元件",
+      "mounting": "",
+      "loop": "65101",
+      "bbox": [
+        0.3378,
+        0.379,
+        0.3495,
+        0.3956
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TE65103",
+      "function": "溫度元件",
+      "mounting": "",
+      "loop": "65103",
+      "bbox": [
+        0.3816,
+        0.2386,
+        0.394,
+        0.256
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TE65104",
+      "function": "溫度元件",
+      "mounting": "",
+      "loop": "65104",
+      "bbox": [
+        0.4778,
+        0.2649,
+        0.4896,
+        0.2816
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TE65105",
+      "function": "溫度元件",
+      "mounting": "",
+      "loop": "65105",
+      "bbox": [
+        0.4246,
+        0.7994,
+        0.4369,
+        0.8168
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TE65106",
+      "function": "溫度元件",
+      "mounting": "",
+      "loop": "65106",
+      "bbox": [
+        0.3876,
+        0.8208,
+        0.3999,
+        0.8382
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TE65108",
+      "function": "溫度元件",
+      "mounting": "",
+      "loop": "65108",
+      "bbox": [
+        0.468,
+        0.5388,
+        0.4798,
+        0.5554
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TI65106",
+      "function": "溫度指示",
+      "mounting": "",
+      "loop": "65106",
+      "bbox": [
+        0.3292,
+        0.8221,
+        0.341,
+        0.8387
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TIC65105",
+      "function": "溫度指示控制",
+      "mounting": "",
+      "loop": "65105",
+      "bbox": [
+        0.4524,
+        0.7562,
+        0.4647,
+        0.7737
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TIC65201",
+      "function": "溫度指示控制",
+      "mounting": "",
+      "loop": "65201",
+      "bbox": [
+        0.6804,
+        0.3058,
+        0.6921,
+        0.3224
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TR65105",
+      "function": "溫度記錄",
+      "mounting": "",
+      "loop": "65105",
+      "bbox": [
+        0.4848,
+        0.7565,
+        0.4965,
+        0.7732
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TT65105",
+      "function": "溫度傳送器",
+      "mounting": "",
+      "loop": "65105",
+      "bbox": [
+        0.4528,
+        0.7994,
+        0.4651,
+        0.8168
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TT65106",
+      "function": "溫度傳送器",
+      "mounting": "",
+      "loop": "65106",
+      "bbox": [
+        0.359,
+        0.8208,
+        0.3714,
+        0.8382
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TT65201",
+      "function": "溫度傳送器",
+      "mounting": "",
+      "loop": "65201",
+      "bbox": [
+        0.65,
+        0.3045,
+        0.6623,
+        0.322
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    },
+    {
+      "tag": "TV65105",
+      "function": "溫度閥",
+      "mounting": "",
+      "loop": "65105",
+      "bbox": [
+        0.3273,
+        0.666,
+        0.3397,
+        0.6834
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認"
+    }
+  ],
+  "valves": [
+    {
+      "id": "V01",
+      "bbox": [
+        0.3131,
+        0.7047,
+        0.3216,
+        0.7167
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認",
+      "net": 43,
+      "size": "2\"",
+      "size_src": "鄰近文字「2」（距 15px）；吋標疑被 OCR 吃掉，請覆核"
+    },
+    {
+      "id": "V02",
+      "bbox": [
+        0.334,
+        0.7133,
+        0.3426,
+        0.7254
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認",
+      "net": 47,
+      "size": "3/4\"",
+      "size_src": "鄰近文字「3/49」（距 25px）；吋標疑被 OCR 吃掉，請覆核"
+    },
+    {
+      "id": "V03",
+      "bbox": [
+        0.378,
+        0.7047,
+        0.3865,
+        0.7167
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認",
+      "net": 50,
+      "size": "2\"",
+      "size_src": "鄰近文字「2」（距 11px）；吋標疑被 OCR 吃掉，請覆核"
+    },
+    {
+      "id": "V04",
+      "bbox": [
+        0.1447,
+        0.7415,
+        0.1532,
+        0.7535
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認",
+      "net": 158,
+      "size": "3/4\"",
+      "size_src": "鄰近文字「3/4P」（距 16px）；吋標疑被 OCR 吃掉，請覆核"
+    }
+  ],
+  "lines": [],
+  "loops": [
+    {
+      "loop": "61301",
+      "members": [
+        "AR61301",
+        "FE61301",
+        "HV61301",
+        "LIC61301",
+        "LT61301",
+        "LV61301",
+        "PI61301E",
+        "PIC61301",
+        "PR61301",
+        "PT61301",
+        "PT61301E"
+      ],
+      "has_controller": true,
+      "has_transmitter": true,
+      "has_element": true,
+      "has_valve": true
+    },
+    {
+      "loop": "61302",
+      "members": [
+        "LGR61302",
+        "PI61302"
+      ],
+      "has_controller": false,
+      "has_transmitter": false,
+      "has_element": false,
+      "has_valve": false
+    },
+    {
+      "loop": "63101",
+      "members": [
+        "FR63101",
+        "FT63101B"
+      ],
+      "has_controller": false,
+      "has_transmitter": true,
+      "has_element": false,
+      "has_valve": false
+    },
+    {
+      "loop": "63103",
+      "members": [
+        "PR63103",
+        "PT63103"
+      ],
+      "has_controller": false,
+      "has_transmitter": true,
+      "has_element": false,
+      "has_valve": false
+    },
+    {
+      "loop": "65101",
+      "members": [
+        "FAL65101",
+        "FE65101",
+        "FIC65101",
+        "FR65101",
+        "PDI65101",
+        "STR65101",
+        "TDI65101",
+        "TE65101"
+      ],
+      "has_controller": true,
+      "has_transmitter": false,
+      "has_element": true,
+      "has_valve": false
+    },
+    {
+      "loop": "65103",
+      "members": [
+        "PI65103",
+        "TE65103"
+      ],
+      "has_controller": false,
+      "has_transmitter": false,
+      "has_element": true,
+      "has_valve": false
+    },
+    {
+      "loop": "65104",
+      "members": [
+        "PDI65104",
+        "PI65104",
+        "PT65104",
+        "TE65104"
+      ],
+      "has_controller": false,
+      "has_transmitter": true,
+      "has_element": true,
+      "has_valve": false
+    },
+    {
+      "loop": "65105",
+      "members": [
+        "PDI65105",
+        "TE65105",
+        "TIC65105",
+        "TR65105",
+        "TT65105",
+        "TV65105"
+      ],
+      "has_controller": true,
+      "has_transmitter": true,
+      "has_element": true,
+      "has_valve": true
+    },
+    {
+      "loop": "65106",
+      "members": [
+        "PDI65106",
+        "TE65106",
+        "TI65106",
+        "TT65106"
+      ],
+      "has_controller": false,
+      "has_transmitter": true,
+      "has_element": true,
+      "has_valve": false
+    },
+    {
+      "loop": "65108",
+      "members": [
+        "PT65108",
+        "TE65108"
+      ],
+      "has_controller": false,
+      "has_transmitter": true,
+      "has_element": true,
+      "has_valve": false
+    },
+    {
+      "loop": "65201",
+      "members": [
+        "TIC65201",
+        "TT65201"
+      ],
+      "has_controller": true,
+      "has_transmitter": true,
+      "has_element": false,
+      "has_valve": false
+    }
+  ],
+  "topology": {
+    "ok": true,
+    "bridge": {
+      "bridged": 83,
+      "orphan": 2
+    },
+    "stats": {
+      "nodes": 1533,
+      "edges": 1070,
+      "components": 555,
+      "jumps": 14,
+      "deg_max": 5,
+      "deg_mean": 1.4,
+      "endpoints": 959,
+      "tees": 28,
+      "crosses": 2
+    }
+  },
+  "stats": {
+    "equipment": 0,
+    "equipment_on_drawing": 0,
+    "instruments": 50,
+    "valves": 4,
+    "valves_on_net": 4,
+    "lines": 0,
+    "loops": 11
+  }
+}

@@ -185,6 +185,35 @@
     .zc:hover { border-color: var(--accent); }
     .zc.done { background: rgba(18,161,80,0.22); border-color: var(--hi); color: var(--hi); }
     #zonemap { display: grid; gap: 3px; margin-top: 8px; }
+
+    /* ------------------------------------------------- 資產庫（審核的下一步） */
+    .as-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;
+      margin-bottom: 10px; }
+    .as-stat { border: 1px solid var(--bdr); border-radius: 8px; padding: 7px 4px;
+      text-align: center; background: var(--panel2); }
+    .as-stat b { display: block; font-size: 16px; }
+    .as-stat span { font-size: 10.5px; color: var(--dim); }
+    .as-search { width: 100%; padding: 7px 10px; border-radius: 7px; margin-bottom: 9px;
+      border: 1px solid var(--bdr); background: var(--panel2); color: var(--text);
+      font-family: inherit; font-size: 12px; }
+    .as-search:focus { outline: none; border-color: var(--accent); background: #fff; }
+    .as-grp { font-size: 11px; font-weight: 700; color: var(--dim); letter-spacing: 0.5px;
+      margin: 11px 0 5px; display: flex; align-items: center; gap: 6px; }
+    .as-grp i { flex: 1; height: 1px; background: var(--bdr); }
+    .as-row { border: 1px solid var(--bdr); border-radius: 7px; background: var(--panel2);
+      padding: 6px 9px; margin-bottom: 4px; font-size: 12px; cursor: pointer; }
+    .as-row:hover { border-color: var(--accent); }
+    .as-row.nofix { cursor: default; opacity: 0.75; }
+    .as-row .t { display: flex; align-items: center; gap: 6px; }
+    .as-row .t b { font-size: 12.5px; }
+    .as-row .t .k { color: var(--dim); font-size: 11px; flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .as-chip { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 6px;
+      border-radius: 8px; background: rgba(4,106,251,0.10); color: var(--accent);
+      border: 1px solid rgba(4,106,251,0.25); margin: 2px 3px 0 0; cursor: help; }
+    .as-chip.sys { background: rgba(224,164,21,0.12); color: #6b4a05;
+      border-color: rgba(224,164,21,0.4); }
+    .as-src { font-size: 10px; color: var(--dim); margin-top: 2px; }
   </style>
 </head>
 <body>
@@ -245,7 +274,8 @@
 
     <div class="side">
       <div class="tabs">
-        <div class="tab on" data-tab="review">審核與製程說明</div>
+        <div class="tab on" data-tab="review">審核</div>
+        <div class="tab" data-tab="assets">資產庫</div>
         <div class="tab" data-tab="adv">進階</div>
       </div>
       <div class="side-scroll">
@@ -286,6 +316,17 @@
           <div id="li-list"><span class="hint">按上方按鈕辨識整張圖面。</span></div>
         </div>
 
+        <!-- ───────────────────────── 資產庫：審核結果 → 型別化資產物件 -->
+        <div id="tab-assets" style="display:none">
+          <div class="hint" style="margin-bottom:9px">審核通過的標註會編譯成
+            <b>帶屬性的資產物件</b>（閥件尺寸／狀態、儀錶迴路、設備規格、管線編號），
+            並掛上管網拓撲——這是建置全廠資料庫（Stage 2）的第一層。</div>
+          <button class="mini-btn primary" id="as-build"
+                  style="width:100%;padding:9px;margin-bottom:10px">建立／更新資產模型</button>
+          <div class="hint" id="as-state" style="margin-bottom:8px"></div>
+          <div id="as-body"></div>
+        </div>
+
         <!-- ───────────────────────── 進階 -->
         <div id="tab-adv" style="display:none">
           <div class="hint">分區逐格檢視、區域問答與雙引擎比對。整張辨識已涵蓋一般用途，
@@ -318,6 +359,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260810b"></script>
+  <script src="/static/js/pid-label.js?v=20260811a"></script>
 </body>
 </html>

@@ -391,6 +391,11 @@ from .pid_vlm import router as pid_vlm_router  # noqa: E402
 
 app.include_router(pid_vlm_router)
 
+# ------------------------------------ P&ID 資產實體層（審核結果 → 型別化資產）
+from .pid_model import router as pid_model_router  # noqa: E402
+
+app.include_router(pid_model_router)
+
 # --------------------------------------------------------- 登入與權限（Google OAuth）
 from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
 

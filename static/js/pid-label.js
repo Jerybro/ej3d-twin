@@ -110,6 +110,8 @@ async function openDoc(name) {
   await loadAnnots();
   render();
   loadConvention(name);
+  assetModel = null;
+  loadModel(true);           // 之前建過模就直接帶出資產庫（404 靜默）
 }
 
 // 開掃之前先告訴使用者這張圖是什麼體系、將套用哪份規範、信心多少。
@@ -294,11 +296,15 @@ function renderReviewCard() {
         <div class="rev-sub">共 ${items.length} 項：確認 <b>${acc}</b>、否決 <b>${rej}</b>。
           否決項已留稽核，不會入庫。</div>
         <div class="rev-act">
-          <a class="mini-btn primary" id="done-export"
-             href="/api/pid/vlm/export/${encodeURIComponent(curFile)}">匯出設備台帳 CSV</a>
+          <button class="mini-btn primary" id="done-model">建立資產模型 →</button>
+          <a class="mini-btn" id="done-export"
+             href="/api/pid/vlm/export/${encodeURIComponent(curFile)}">匯出 CSV</a>
           <button class="mini-btn" id="done-recheck">回頭複查</button>
         </div>
+        <div class="rev-sub" style="margin-top:8px">下一步：把已確認的標註編譯成
+          帶屬性的資產物件（閥件尺寸／儀錶迴路／管線編號），並掛上管網拓撲。</div>
       </div>`;
+    $('done-model').onclick = () => { switchTab('assets'); buildModel(); };
     $('done-recheck').onclick = () => focusItem(0);
     clearRing();
     return;
@@ -368,17 +374,14 @@ function renderList() {
     d.addEventListener('click', () => focusItem(+d.dataset.k)));
 }
 
-// 點到哪就在圖上高亮哪——使用者要能立刻找到「PDI65104 在圖中哪裡」
-function focusItem(k) {
-  curIdx = k;
-  const it = items[k];
-  render();
-  if (!it || !overlay) return;
+// 圖上高亮：審核卡與資產庫共用——「這一項在圖中哪裡」是兩邊共同的需求
+function showRing(bbox, label) {
+  if (!overlay || !Array.isArray(bbox)) return;
   clearRing();
-  const [x0, y0, x1, y1] = it.bbox;
+  const [x0, y0, x1, y1] = bbox;
   ring = document.createElement('div');
   ring.className = 'focus-ring';
-  ring.dataset.t = it.tag || KIND_TXT[it.kind] || '';
+  ring.dataset.t = label || '';
   const padX = Math.max(0.004, (x1 - x0) * 0.35), padY = Math.max(0.004, (y1 - y0) * 0.35);
   ring.style.cssText = `left:${(x0 - padX) * 100}%;top:${(y0 - padY) * 100}%;` +
     `width:${(x1 - x0 + padX * 2) * 100}%;height:${(y1 - y0 + padY * 2) * 100}%`;
@@ -387,6 +390,15 @@ function focusItem(k) {
   if (zoom < 0.6) { zoom = 0.7; applyZoom(); }
   requestAnimationFrame(() =>
     ring.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' }));
+}
+
+// 點到哪就在圖上高亮哪——使用者要能立刻找到「PDI65104 在圖中哪裡」
+function focusItem(k) {
+  curIdx = k;
+  const it = items[k];
+  render();
+  if (!it) return;
+  showRing(it.bbox, it.tag || KIND_TXT[it.kind] || '');
   if (it.kind === 'instrument' && !it.mounting) classifyOne(k);
   loadContext(k);
 }
@@ -607,9 +619,151 @@ $('man-add').addEventListener('click', async () => {
 // ------------------------------------------------------- 分頁
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
-  ['review', 'adv'].forEach(n =>
+  ['review', 'assets', 'adv'].forEach(n =>
     $('tab-' + n).style.display = n === t.dataset.tab ? '' : 'none');
 }));
+function switchTab(name) {
+  document.querySelector(`.tab[data-tab="${name}"]`)?.click();
+}
+
+// ------------------------------------------------------- 資產庫
+// 審核的下一步：已確認標註 → 型別化資產物件（屬性充實＋拓撲掛線）。
+// 機器推定的屬性（尺寸/狀態/掛網）用黃色籤標示，滑過可看依據——
+// 與審核流同一條鐵則：系統給的東西要能被查證。
+let assetModel = null;
+
+async function loadModel(silent) {
+  if (!curFile) return;
+  try {
+    assetModel = await getJSON(`/api/pid/model/${encodeURIComponent(curFile)}`);
+    renderModel();
+    $('as-state').textContent = '上次建模：' +
+      (assetModel.built_at || '').replace('T', ' ').slice(0, 16);
+  } catch (e) {
+    assetModel = null;
+    $('as-body').innerHTML = '';
+    $('as-state').textContent = silent ? '' : (e.message || '尚未建立資產模型');
+  }
+}
+
+async function buildModel() {
+  if (!curFile) return;
+  const b = $('as-build');
+  b.disabled = true;
+  $('as-state').innerHTML =
+    '<span class="spin"></span> 編譯資產模型中（若無 OCR 快取需重掃整頁，約 30 秒）…';
+  try {
+    assetModel = await getJSON(
+      `/api/pid/model/build/${encodeURIComponent(curFile)}`, { method: 'POST' });
+    renderModel();
+    $('as-state').textContent = '建模完成：' +
+      (assetModel.built_at || '').replace('T', ' ').slice(0, 16);
+  } catch (e) {
+    $('as-state').innerHTML =
+      `<span style="color:var(--lo)">${esc(e.message || '建模失敗')}</span>`;
+  } finally { b.disabled = false; }
+}
+
+function renderModel() {
+  const m = assetModel;
+  if (!m) return;
+  const s = m.stats || {};
+  const topoLine = m.topology && m.topology.ok
+    ? `管網拓撲：${m.topology.stats.nodes} 節點｜閥件橋接 ${m.topology.bridge.bridged} 顆`
+      + (m.topology.bridge.orphan ? `（${m.topology.bridge.orphan} 顆未掛上）` : '')
+    : '';
+  $('as-body').innerHTML = `
+    <div class="as-stats">
+      <div class="as-stat"><b>${s.equipment || 0}</b><span>設備</span></div>
+      <div class="as-stat"><b>${s.instruments || 0}</b><span>儀錶</span></div>
+      <div class="as-stat"><b>${s.valves || 0}</b><span>閥件</span></div>
+      <div class="as-stat"><b>${s.loops || 0}</b><span>控制迴路</span></div>
+      <div class="as-stat"><b>${s.lines || 0}</b><span>管線編號</span></div>
+      <div class="as-stat"><b>${s.valves_on_net || 0}</b><span>閥已掛網</span></div>
+    </div>
+    ${topoLine ? `<div class="hint" style="margin-bottom:8px">${esc(topoLine)}</div>` : ''}
+    <input class="as-search" id="as-q" placeholder="搜尋位號／名稱／屬性…" />
+    <div id="as-list"></div>`;
+  $('as-q').addEventListener('input', renderAssetList);
+  renderAssetList();
+}
+
+function chip(label, sys, src) {
+  return `<span class="as-chip${sys ? ' sys' : ''}"${src ? ` title="${esc(src)}"` : ''}>${esc(label)}</span>`;
+}
+
+function renderAssetList() {
+  const m = assetModel;
+  if (!m) return;
+  const q = ($('as-q')?.value || '').trim().toUpperCase();
+  const hit = (...fields) =>
+    !q || fields.some(f => String(f || '').toUpperCase().includes(q));
+  const rows = [];
+  const grp = (title, arr) => {
+    if (arr.length) rows.push(`<div class="as-grp">${title}（${arr.length}）<i></i></div>`, ...arr);
+  };
+
+  grp('設備', (m.equipment || []).filter(e => hit(e.tag, e.name, e.type, e.spec)).map((e, i) => `
+    <div class="as-row${e.bbox ? '' : ' nofix'}" data-g="equipment" data-i="${m.equipment.indexOf(e)}">
+      <div class="t"><b>${esc(e.tag)}</b>
+        <span class="k">${esc(e.name || e.type || '')}</span>
+        ${e.on_drawing ? '' : '<span class="as-chip sys" title="清冊有此列，但圖上尚未框到／未審核">未定位</span>'}</div>
+      ${e.spec ? chip(e.spec) : ''}${e.driver ? chip(e.driver) : ''}
+      ${e.vfd ? chip('變頻') : ''}${e.qty > 1 ? chip('×' + e.qty) : ''}
+      <div class="as-src">${esc(e.source)}${e.remark ? '｜' + esc(e.remark) : ''}${e.note ? '｜備註：' + esc(e.note) : ''}</div>
+    </div>`));
+
+  grp('儀錶', (m.instruments || []).filter(x => hit(x.tag, x.function, x.loop)).map(x => `
+    <div class="as-row" data-g="instruments" data-i="${m.instruments.indexOf(x)}">
+      <div class="t"><b>${esc(x.tag)}</b><span class="k">${esc(x.function || '')}</span></div>
+      ${x.mounting ? chip(x.mounting) : ''}${x.loop ? chip('迴路 ' + x.loop) : ''}
+      ${x.note ? `<div class="as-src">備註：${esc(x.note)}</div>` : ''}
+    </div>`));
+
+  grp('閥件', (m.valves || []).filter(v => hit(v.id, v.size, v.state)).map(v => `
+    <div class="as-row" data-g="valves" data-i="${m.valves.indexOf(v)}">
+      <div class="t"><b>${esc(v.id)}</b>
+        <span class="k">${v.net !== null && v.net !== undefined ? '管網 #' + v.net : '未掛上管網'}</span></div>
+      ${v.size ? chip(v.size + ' 系統推定', true, v.size_src) : ''}
+      ${v.state ? chip(v.state, true, v.state_src) : ''}
+      ${v.bore ? chip(v.bore, true, v.bore_src) : ''}
+      ${v.note ? `<div class="as-src">備註：${esc(v.note)}</div>` : ''}
+    </div>`));
+
+  grp('管線編號', (m.lines || []).filter(l => hit(l.raw, l.service, l.spec)).map(l => `
+    <div class="as-row" data-g="lines" data-i="${m.lines.indexOf(l)}">
+      <div class="t"><b>${esc(l.raw)}</b></div>
+      ${chip(l.size_in + '"')}${chip('流體 ' + l.service)}${l.spec ? chip('等級 ' + l.spec) : ''}
+      <div class="as-src">${esc(l.source)}</div>
+    </div>`));
+
+  grp('控制迴路', (m.loops || []).filter(l => hit(l.loop, ...(l.members || []))).map(l => `
+    <div class="as-row" data-g="loops" data-i="${m.loops.indexOf(l)}">
+      <div class="t"><b>迴路 ${esc(l.loop)}</b>
+        <span class="k">${(l.members || []).join('、')}</span></div>
+      ${l.has_controller ? chip('控制器') : ''}${l.has_transmitter ? chip('傳送器') : ''}
+      ${l.has_valve ? chip('控制閥') : ''}${l.has_element ? chip('感測元件') : ''}
+    </div>`));
+
+  $('as-list').innerHTML = rows.join('') ||
+    '<span class="hint">沒有符合搜尋的資產。</span>';
+  $('as-list').querySelectorAll('.as-row').forEach(r =>
+    r.addEventListener('click', () => {
+      const arr = assetModel[r.dataset.g] || [];
+      const it = arr[+r.dataset.i];
+      if (!it) return;
+      if (r.dataset.g === 'loops') {
+        // 迴路本身沒有座標——跳到迴路第一顆儀錶的位置
+        const first = (assetModel.instruments || [])
+          .find(x => (it.members || []).includes(x.tag));
+        if (first) showRing(first.bbox, '迴路 ' + it.loop);
+        return;
+      }
+      if (it.bbox) showRing(it.bbox, it.tag || it.id || it.raw || '');
+    }));
+}
+
+$('as-build').addEventListener('click', buildModel);
 
 // ------------------------------------------------------- 進階：分區/問答/比對
 function zoneBox(i) {

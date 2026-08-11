@@ -5,6 +5,21 @@
 //   2. 製程說明只能建立在「已確認」的清單上——用未經確認的輸出寫報告
 //      等於把幻覺包裝成結論
 
+// 伺服器 500 時回的是 HTML 錯誤頁，直接 JSON.parse 會炸出
+// 「Unexpected token 'I'」這種看不懂的訊息。統一在這裡吸收掉。
+async function getJSON(url, opt) {
+  const r = await fetch(url, opt);
+  const txt = await r.text();
+  let d = null;
+  try { d = JSON.parse(txt); } catch { /* 非 JSON */ }
+  if (!r.ok) {
+    throw new Error((d && d.detail) || `伺服器錯誤 ${r.status}`
+      + (r.status >= 500 ? '（後端例外，請看終端機訊息）' : ''));
+  }
+  if (d === null) throw new Error('伺服器回應格式異常');
+  return d;
+}
+
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g,
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -105,9 +120,7 @@ async function loadConvention(name) {
   el.className = 'conv';
   el.innerHTML = '<span class="spin"></span> 判讀圖面體系…';
   try {
-    const d = await fetch(`/api/pid/vlm/convention/${encodeURIComponent(name)}`)
-      .then(r => r.json());
-    if (d.detail) throw new Error(d.detail);
+    const d = await getJSON(`/api/pid/vlm/convention/${encodeURIComponent(name)}`);
     const pct = Math.round((d.confidence || 0) * 100);
     const lvl = pct >= 70 ? 'ok' : (pct >= 40 ? 'mid' : 'lo');
     el.className = 'conv ' + lvl;
@@ -160,11 +173,10 @@ $('scan-all-btn').addEventListener('click', async () => {
   const b = $('scan-all-btn');
   b.disabled = true; b.innerHTML = '<span class="spin"></span> 辨識中，整張圖需要一到兩分鐘…';
   try {
-    const d = await fetch('/api/pid/vlm/scan_all', {
+    const d = await getJSON('/api/pid/vlm/scan_all', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename: curFile }),
-    }).then(r => r.json());
-    if (d.detail) throw new Error(d.detail);
+    });
     items = (d.items || []).map(i => ({ ...i, state: 'pending' }));
     // 可疑項排前面：有警示 → 低信心 → 其餘。讓工程師先處理最需要判斷的，
     // 而不是從字母序第一項慢慢翻到最後才遇到問題。
@@ -272,11 +284,26 @@ function render() {
 function renderReviewCard() {
   const host = $('rev-host');
   const it = items[curIdx];
-  if (!it) {
-    host.innerHTML = items.length
-      ? '<div class="hint" style="margin-bottom:12px">全部審完了 ✓ 下方製程說明已依最終清單校正。</div>' : '';
-    clearRing(); return;
+  // 全部審完 → 給明確的完成畫面與後續動作，不要讓人點完最後一項沒反應
+  if (items.length && allReviewed()) {
+    const acc = items.filter(i => i.state === 'accepted').length;
+    const rej = items.length - acc;
+    host.innerHTML = `
+      <div class="rev" style="border-color:var(--hi);background:rgba(18,161,80,0.08)">
+        <div class="rev-top"><span class="rev-tag" style="color:#0b6b36">審核完成 ✓</span></div>
+        <div class="rev-sub">共 ${items.length} 項：確認 <b>${acc}</b>、否決 <b>${rej}</b>。
+          否決項已留稽核，不會入庫。</div>
+        <div class="rev-act">
+          <a class="mini-btn primary" id="done-export"
+             href="/api/pid/vlm/export/${encodeURIComponent(curFile)}">匯出設備台帳 CSV</a>
+          <button class="mini-btn" id="done-recheck">回頭複查</button>
+        </div>
+      </div>`;
+    $('done-recheck').onclick = () => focusItem(0);
+    clearRing();
+    return;
   }
+  if (!it) { host.innerHTML = ''; clearRing(); return; }
   const mount = it.mounting ? `｜安裝：${esc(it.mounting)}` : '';
   host.innerHTML = `
     <div class="nav-row">
@@ -313,6 +340,8 @@ function renderReviewCard() {
       <div class="ctx${it.warn ? ' verify' : ''}" id="ctx-box">${it._ctx
         ? esc(it._ctx)
         : '<span class="spin"></span> ' + (it.warn ? '查核這個判讀是否成立…' : '判讀這顆在圖上的角色與前後連接…')}</div>
+      <input class="rev-note" id="rev-note" placeholder="備註（選填，會寫進台帳 CSV）"
+             value="${esc(it.user_note || '')}" />
       <div class="rev-act">
         <button class="mini-btn primary" id="acc-b">確認正確 <span style="opacity:.75">(Y)</span></button>
         <button class="mini-btn" id="rej-b">不是 <span style="opacity:.6">(N)</span></button>
@@ -404,6 +433,12 @@ async function classifyOne(k) {
 async function decide(state) {
   const it = items[curIdx];
   if (!it || it.state !== 'pending') { focusItem(Math.min(items.length - 1, curIdx + 1)); return; }
+  // 人工備註優先於機器產生的描述——工程師寫的判斷理由才是台帳要留的東西
+  const nb = $('rev-note');
+  if (nb && nb.value.trim()) {
+    it.user_note = nb.value.trim();
+    it.note = it.user_note;
+  }
   it.state = state;
   try {
     if (state === 'accepted') {

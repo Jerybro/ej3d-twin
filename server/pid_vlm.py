@@ -333,6 +333,7 @@ class Annot(BaseModel):
     symbol: str = ""
     mounting: str = ""           # 就地／盤面 DCS／DCS 運算（智慧掃描判出的安裝別）
     note: str = ""
+    user_note: str = ""      # 工程師手寫備註，優先於系統描述
     confidence: float = 0.0
     source: str = "vlm"          # vlm-cloud | vlm-local | manual
     verified_by: str = ""
@@ -840,6 +841,8 @@ def scan(req: ScanReq) -> dict:
         except Exception:  # noqa: BLE001
             pass            # 閥件是加值資訊，抓不到不該讓整次掃描失敗
 
+    _flag_text_zone_valves(items, hits, W, H)
+
     # 迴路號離群標記：同區儀錶的迴路號通常同族（613xx），
     # 混進一個 552xx 幾乎都是 OCR 數字誤讀（實測 65201→55201）。
     # 規則抓得到的疑點就先標出來，不要讓工程師自己大海撈針。
@@ -937,6 +940,31 @@ def annot_add(filename: str, item: Annot) -> dict:
                        "by": rec.get("verified_by", "")})
     _save_annots(filename, d)
     return {"ok": True, "id": rec["id"], "count": len(d["items"])}
+
+
+def _flag_text_zone_valves(items: list, hits: list, W: float, H: float) -> None:
+    """標出「周圍全是文字、又沒接上管線」的閥件。
+
+    閥件幾何判準（兩條等長線段共用中點）在密集文字的筆劃交錯中偶爾會湊巧
+    成立，於是標題欄、圖例、註記區會冒出假閥件。這類位置周圍是文字而非管線，
+    直接標出來，審核者一眼就能判斷——這是「幫 AI 說清楚它為什麼可疑」。
+    """
+    if not hits:
+        return
+    for it in items:
+        if it.get("kind") != "valve" or it.get("on_pipe") is not None:
+            continue
+        bx0, by0, bx1, by1 = it["bbox"]
+        cx, cy = (bx0 + bx1) / 2 * W, (by0 + by1) / 2 * H
+        r = max((bx1 - bx0) * W, (by1 - by0) * H) * 4
+        near = sum(1 for hx, hy, *_ in hits if abs(hx - cx) < r and abs(hy - cy) < r)
+        if near >= 6:
+            w = (f"周圍 {near} 處文字、且未接上管線 → 高度可能是標題欄／圖例／"
+                 "註記區的筆劃湊巧構成蝴蝶結，並非真實閥件")
+            it["warn"] = (it["warn"] + "｜" + w) if it.get("warn") else w
+            it["confidence"] = min(it["confidence"], 0.3)
+            it.setdefault("evidence", []).append({
+                "stage": "文字密度檢查", "ok": False, "score": 0.2, "detail": w})
 
 
 class ScanAllReq(BaseModel):
@@ -1142,6 +1170,7 @@ def scan_all(req: ScanAllReq) -> dict:
         })
     try:
         items += _valves_in(req.filename, [0.0, 0.0, 1.0, 1.0], hits, W, H)
+        _flag_text_zone_valves(items, hits, W, H)
     except Exception:  # noqa: BLE001
         pass
 
@@ -1754,7 +1783,7 @@ def annot_export(filename: str):
     buf.write("﻿")                       # BOM：Excel 中文相容
     w = csv.writer(buf)
     w.writerow(["圖面", "位號", "類型", "語意", "安裝位置", "信心度",
-                "來源", "採納時間", "備註", "圖面X", "圖面Y"])
+                "來源", "採納時間", "備註", "備註來源", "圖面X", "圖面Y"])
     kind_txt = {"equipment": "設備", "valve": "閥件", "instrument": "儀錶",
                 "pipe": "管線", "other": "其他"}
     for a in d["items"]:
@@ -1765,7 +1794,9 @@ def annot_export(filename: str):
                     kind_txt.get(a.get("kind", ""), a.get("kind", "")),
                     a.get("symbol", ""), a.get("mounting", ""),
                     a.get("confidence", ""), a.get("source", ""),
-                    a.get("created_at", ""), a.get("note", ""), cx, cy])
+                    a.get("created_at", ""), a.get("note", ""),
+                    "人工" if a.get("user_note") else ("系統" if a.get("note") else ""),
+                    cx, cy])
     buf.seek(0)
     fn = f"{_slug(Path(filename).stem)}_tags.csv"
     return StreamingResponse(

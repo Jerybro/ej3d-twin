@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import re
+import threading
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -81,6 +82,13 @@ EQUIP_MIN_CONF = 0.65
 _reader = None  # EasyOCR 模型延遲載入（首次 ~數秒）
 
 
+# EasyOCR 的 reader 是全域單例，GPU 推論不是執行緒安全的。
+# 使用者快速切換圖面會同時觸發多個 OCR 請求，並行呼叫會讓整個請求 500
+# （前端收到 HTML 錯誤頁再去 JSON.parse，就是「Unexpected token 'I'」）。
+# 全部 OCR 走同一把鎖序列化——寧可慢，不要壞。
+OCR_LOCK = threading.Lock()
+
+
 def _get_reader():
     global _reader
     if _reader is None:
@@ -147,22 +155,23 @@ def _ocr(img, tile=2200, overlap=200):
     out = []
     W, H = img.width, img.height
     step = tile - overlap
-    for ty in range(0, H, step):
-        for tx in range(0, W, step):
-            crop = img.crop((tx, ty, min(tx + tile, W), min(ty + tile, H)))
-            results = reader.readtext(
-                np.array(crop.convert("RGB")),
-                # '/' 供跨圖接續標記（070-2/01）；位號不含 '/'，分類不受影響
-                allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/",
-                text_threshold=0.5, low_text=0.3,
-            )
-            for bbox, text, conf in results:
-                if conf < 0.35 or not text.strip():
-                    continue
-                cx = tx + sum(p[0] for p in bbox) / 4
-                cy = ty + sum(p[1] for p in bbox) / 4
-                hh = max(p[1] for p in bbox) - min(p[1] for p in bbox)
-                out.append((cx, cy, text.strip(), float(conf), hh))
+    with OCR_LOCK:                      # GPU 推論序列化，見 OCR_LOCK 註解
+        for ty in range(0, H, step):
+            for tx in range(0, W, step):
+                crop = img.crop((tx, ty, min(tx + tile, W), min(ty + tile, H)))
+                results = reader.readtext(
+                    np.array(crop.convert("RGB")),
+                    # '/' 供跨圖接續標記（070-2/01）；位號不含 '/'，分類不受影響
+                    allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/",
+                    text_threshold=0.5, low_text=0.3,
+                )
+                for bbox, text, conf in results:
+                    if conf < 0.35 or not text.strip():
+                        continue
+                    cx = tx + sum(p[0] for p in bbox) / 4
+                    cy = ty + sum(p[1] for p in bbox) / 4
+                    hh = max(p[1] for p in bbox) - min(p[1] for p in bbox)
+                    out.append((cx, cy, text.strip(), float(conf), hh))
     return out
 
 

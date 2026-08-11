@@ -682,6 +682,9 @@ function renderModel() {
       <div class="as-stat"><b>${s.valves_on_net || 0}</b><span>閥已掛網</span></div>
     </div>
     ${topoLine ? `<div class="hint" style="margin-bottom:8px">${esc(topoLine)}</div>` : ''}
+    <a class="mini-btn" style="width:100%;text-align:center;padding:8px;margin-bottom:9px"
+       href="/twin/pid/rebuild?f=${encodeURIComponent(curFile)}" target="_blank">盲測重建比對
+      <span style="opacity:.65">（只靠資料庫重畫這張圖）</span></a>
     <input class="as-search" id="as-q" placeholder="搜尋位號／名稱／屬性…" />
     <div id="as-list"></div>`;
   $('as-q').addEventListener('input', renderAssetList);

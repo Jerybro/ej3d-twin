@@ -176,12 +176,15 @@ def build_model(filename: str) -> dict:
     from .pid_topology import build_graph, control_loops, insert_valves, stats
     from .pid_vlm import _load_annots, _profile_of, _safe_pdf, _slug
 
+    from .pid_vlm import _ensure_base
+
     pdf = _safe_pdf(filename)
     annots = _load_annots(filename)
     accepted = annots.get("items", [])
     n_reject = sum(1 for a in annots.get("audit", [])
                    if a.get("action") == "reject")
     is_pfd = _profile_of(filename) == "pfd.json"
+    _, meta = _ensure_base(filename)
 
     hits, W, H = _load_hits(filename)
 
@@ -235,16 +238,17 @@ def build_model(filename: str) -> dict:
             "verified_by": "", "source": "設備清冊", "on_drawing": False})
     equipment.sort(key=lambda e: _num_key(e["tag"]))
 
-    # ---- 拓撲圖＋閥件掛線 ----
+    # ---- 拓撲圖＋閥件掛線＋幾何層 ----
+    # 幾何層（管線段座標）必須落進模型：盲測標準是「不看原圖、只讀這份
+    # JSON 就能把圖重畫回來」。重建不出來的地方＝資料庫的洞。
     topo: dict = {"ok": False}
     vnodes: list = []           # [(norm_x, norm_y, component_id)]
+    pipes: list = []            # [[u0, v0, u1, v1], ...] 正規化座標
     try:
         import networkx as nx
 
         from .pid_parse import detect_valves, pdf_to_norm
-        from .pid_vlm import _ensure_base
 
-        _, meta = _ensure_base(filename)
         rot, pw0, ph0 = meta.get("rot", 0), meta.get("pw", 0), meta.get("ph", 0)
         G = build_graph(pdf)
         raw_valves, pw, ph = detect_valves(pdf)
@@ -259,6 +263,14 @@ def build_model(filename: str) -> dict:
             x, y = d["pos"]
             u, v = pdf_to_norm(x, y, pw0 or pw, ph0 or ph, rot)
             vnodes.append((u, v, comp_of.get(n, -1)))
+        for _a, _b, ed in G.edges(data=True):
+            pts = ed.get("pts")
+            if not pts:
+                continue        # through_valve 橋接邊沒有實體線，由閥符號表達
+            (x0, y0), (x1, y1) = pts
+            u0, v0 = pdf_to_norm(x0, y0, pw0 or pw, ph0 or ph, rot)
+            u1, v1 = pdf_to_norm(x1, y1, pw0 or pw, ph0 or ph, rot)
+            pipes.append([round(u0, 4), round(v0, 4), round(u1, 4), round(v1, 4)])
         topo = {"ok": True, "bridge": bridge, "stats": stats(G)}
     except Exception as exc:  # noqa: BLE001
         topo = {"ok": False, "reason": str(exc)[:200]}
@@ -317,6 +329,12 @@ def build_model(filename: str) -> dict:
         "lines": sorted(lines.values(), key=lambda x: x["raw"]),
         "loops": [{"loop": k, **v} for k, v in sorted(loops.items())],
         "topology": topo,
+        "geometry": {
+            "aspect": round(meta["h"] / meta["w"], 4) if meta.get("w") else 0.7,
+            "pipes": pipes,
+            "valve_nodes": [[round(u, 4), round(v, 4), ci] for u, v, ci in vnodes],
+            "note": "向量幾何層（系統推定）——盲測重建的骨架，含設備輪廓線",
+        },
         "stats": {
             "equipment": len(equipment),
             "equipment_on_drawing": sum(1 for e in equipment if e["on_drawing"]),
@@ -331,10 +349,112 @@ def build_model(filename: str) -> dict:
     return model
 
 
+# ------------------------------------------------------------ 盲測重建（SVG）
+def _x(s: str) -> str:
+    return (str(s or "").replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;"))
+
+
+def _svg_of(m: dict) -> str:
+    """只讀模型 JSON 把圖重畫回來——不碰 PDF、不碰底圖。
+
+    這是資料庫完整度的驗收方式：重建圖與原圖並排，畫得出來的部分代表
+    資料真的進了庫；畫不出來（缺文字、缺符號、缺連線）的部分就是洞，
+    洞的清單就是下一輪工作的 backlog。
+    """
+    g = m.get("geometry") or {}
+    W = 1600
+    H = round(W * (g.get("aspect") or 0.7))
+    # width/height 要明寫：只有 viewBox 的 SVG 在 <object>/<img> 裡
+    # 會落到 300×150 的預設固有尺寸，版面撐不開
+    p = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" '
+         f'width="{W}" height="{H}" font-family="Inter,Arial,sans-serif">',
+         f'<rect width="{W}" height="{H}" fill="#FFFFFF"/>']
+
+    # 1) 線稿層（管線＋設備輪廓，向量幾何，系統推定）
+    seg = []
+    for u0, v0, u1, v1 in g.get("pipes", []):
+        seg.append(f"M{u0 * W:.0f},{v0 * H:.0f}L{u1 * W:.0f},{v1 * H:.0f}")
+    if seg:
+        p.append(f'<path d="{"".join(seg)}" stroke="#2A3441" stroke-width="1.1" '
+                 'fill="none" stroke-linecap="round"/>')
+
+    # 2) 閥件節點（拓撲層：蝴蝶結符號）
+    for u, v, _ci in g.get("valve_nodes", []):
+        x, y, s = u * W, v * H, 6
+        p.append(f'<path d="M{x - s:.0f},{y - s:.0f}L{x + s:.0f},{y + s:.0f}'
+                 f'L{x + s:.0f},{y - s:.0f}L{x - s:.0f},{y + s:.0f}Z" '
+                 'fill="#fff" stroke="#6B7683" stroke-width="1.3"/>')
+
+    # 3) 已確認閥件：accent 標記＋屬性
+    for vv in m.get("valves", []):
+        b = vv.get("bbox")
+        if not b:
+            continue
+        x, y = (b[0] + b[2]) / 2 * W, (b[1] + b[3]) / 2 * H
+        p.append(f'<circle cx="{x:.0f}" cy="{y:.0f}" r="11" fill="none" '
+                 'stroke="#046AFB" stroke-width="1.6"/>')
+        lab = vv.get("id", "")
+        if vv.get("size"):
+            lab += f'　{vv["size"]}'
+        p.append(f'<text x="{x:.0f}" y="{y + 24:.0f}" font-size="10" '
+                 f'fill="#046AFB" text-anchor="middle">{_x(lab)}</text>')
+
+    # 4) 已確認儀錶：ISA 氣泡（字母上排、迴路號下排）
+    for it in m.get("instruments", []):
+        b = it.get("bbox")
+        if not b:
+            continue
+        x, y = (b[0] + b[2]) / 2 * W, (b[1] + b[3]) / 2 * H
+        r = max((b[3] - b[1]) * H * 1.15, 13)
+        mm = re.match(r"^([A-Z]+)(.*)$", it.get("tag", ""))
+        top, bot = (mm.group(1), mm.group(2)) if mm else (it.get("tag", ""), "")
+        fs = max(r * 0.42, 6.5)
+        p.append(f'<circle cx="{x:.0f}" cy="{y:.0f}" r="{r:.0f}" fill="#fff" '
+                 'stroke="#046AFB" stroke-width="1.4"/>')
+        p.append(f'<text x="{x:.0f}" y="{y - r * 0.12:.0f}" font-size="{fs:.1f}" '
+                 f'fill="#061027" text-anchor="middle" font-weight="600">{_x(top)}</text>')
+        if bot:
+            p.append(f'<text x="{x:.0f}" y="{y + r * 0.52:.0f}" font-size="{fs:.1f}" '
+                     f'fill="#061027" text-anchor="middle">{_x(bot)}</text>')
+
+    # 5) 已確認且定位的設備
+    for e in m.get("equipment", []):
+        b = e.get("bbox")
+        if not b:
+            continue
+        x0, y0 = b[0] * W, b[1] * H
+        w, h = (b[2] - b[0]) * W, (b[3] - b[1]) * H
+        p.append(f'<rect x="{x0:.0f}" y="{y0:.0f}" width="{w:.0f}" height="{h:.0f}" '
+                 'fill="none" stroke="#0B8A46" stroke-width="1.8" rx="2"/>')
+        name = e.get("name") or e.get("type") or ""
+        p.append(f'<text x="{x0:.0f}" y="{y0 - 5:.0f}" font-size="11" fill="#0B8A46" '
+                 f'font-weight="600">{_x(e.get("tag", ""))}　{_x(name)}</text>')
+
+    # 6) 管線編號
+    for ln in m.get("lines", []):
+        b = ln.get("bbox")
+        if not b:
+            continue
+        p.append(f'<text x="{b[0] * W:.0f}" y="{(b[1] + b[3]) / 2 * H:.0f}" '
+                 f'font-size="9" fill="#8A5B00">{_x(ln.get("raw", ""))}</text>')
+
+    p.append("</svg>")
+    return "".join(p)
+
+
 # ---------------------------------------------------------------- endpoints
 @router.post("/build/{filename}")
 def model_build(filename: str) -> dict:
     return build_model(filename)
+
+
+@router.get("/{filename}/rebuild.svg")
+def model_rebuild_svg(filename: str):
+    from fastapi.responses import Response
+
+    return Response(content=_svg_of(model_get(filename)),
+                    media_type="image/svg+xml")
 
 
 @router.get("/{filename}")

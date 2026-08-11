@@ -1,0 +1,54 @@
+{
+ "flowsheet_id": "cpcpi_20250601_cw0j2r_filtered-d19c",
+ "name": "cpcpi_20250601_cw0j2r_filtered.csv 數據孿生",
+ "desc": "AI 嚮導建立（單區塊起手，於設計器擴充）",
+ "trains": [
+  [
+   "B-101"
+  ]
+ ],
+ "blocks": [
+  {
+   "id": "B-101",
+   "name": "8AR1_TIC70019 預測",
+   "model_key": "9641edbf_10002",
+   "kind": "regression",
+   "output_label": "8AR1_TIC70019",
+   "unit": "",
+   "better": "low",
+   "warn": null,
+   "crit": null,
+   "ico": "",
+   "pos": null,
+   "defaults": {
+    "8AR1_FIC70005": 318.29,
+    "8AR1_TIC70016": 95.0103,
+    "8AR1_FIC70004": 79.03,
+    "8AR1_TIC70038": 39.675,
+    "8AR1_FIC70010": 6.304,
+    "8AR1_PIC70013": 0.700015,
+    "8AR1_TIC70034A": 162.2745,
+    "8AR1_TIC70034B": 162.278,
+    "8AR1_AI70005": 18566.6,
+    "8AR1_TI70028": 125.85,
+    "8AR1_TI70044": 71.845,
+    "8AR1_PIC70024": -0.55,
+    "8AR1_FIC70018": 44.72,
+    "8AR1_LIC70014": 36.29,
+    "8AR1_TI70049": 175.03,
+    "8AR1_TI70050": 174.715,
+    "8AR1_AI70002S": 0.0,
+    "8AR1_AI70002-21": 0.41,
+    "8AR1_FIC70019A": 7862.2,
+    "8AR1_FIC70019B": 7857.32,
+    "8AR1_FIC70012": 9984.665,
+    "8AR1_FIC70008": 9989.09,
+    "8AR1_FQ70008P3": 118.847,
+    "8AR1_FQ70008P4": 238.716,
+    "8AR1_TIC70048A": 165.07
+   }
+  }
+ ],
+ "connections": [],
+ "scenarios": []
+}

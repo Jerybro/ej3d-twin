@@ -872,6 +872,16 @@ def scan(req: ScanReq) -> dict:
 
 
 # ----------------------------------------------------- 標註存檔（人工驗證關卡）
+# 台帳是整套人工驗證關卡的地基，寫入必須：
+#   1. 上鎖——整張辨識後的自動入庫是同一秒七、八筆並行 POST，
+#      無鎖的 read-modify-write 會互相蓋寫
+#   2. 原子寫入（tmp + replace）——write_text 直接覆寫時，並行讀取
+#      會讀到半截 JSON
+#   3. 毀損檔先備份再重來——靜默當成空台帳等於讓下一筆寫入抹掉整份稽核
+#      （實測 2026-08-11：54 筆稽核被自動入庫連發整份清空）
+ANNOT_LOCK = threading.Lock()
+
+
 def _annot_path(filename: str) -> Path:
     ANNOT_DIR.mkdir(parents=True, exist_ok=True)
     return ANNOT_DIR / f"{_slug(Path(filename).stem)}.json"
@@ -886,12 +896,20 @@ def _load_annots(filename: str) -> dict:
         return {"items": d.get("items", []), "audit": d.get("audit", []),
                 "zones": d.get("zones", {})}
     except (json.JSONDecodeError, OSError):
+        try:
+            import time
+
+            p.rename(p.with_name(f"{p.stem}.corrupt-{int(time.time())}.json"))
+        except OSError:
+            pass
         return {"items": [], "audit": [], "zones": {}}
 
 
 def _save_annots(filename: str, d: dict) -> None:
-    _annot_path(filename).write_text(
-        json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+    p = _annot_path(filename)
+    tmp = p.with_name(p.stem + ".tmp")
+    tmp.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, p)
 
 
 class ZoneReq(BaseModel):
@@ -905,15 +923,17 @@ def zone_mark(filename: str, req: ZoneReq) -> dict:
     from datetime import datetime, timezone
 
     _safe_pdf(filename)
-    d = _load_annots(filename)
-    if req.status == "todo":
-        d["zones"].pop(req.zone, None)
-    else:
-        d["zones"][req.zone] = {
-            "status": "done",
-            "at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
-        }
-    _save_annots(filename, d)
+    with ANNOT_LOCK:
+        d = _load_annots(filename)
+        if req.status == "todo":
+            d["zones"].pop(req.zone, None)
+        else:
+            d["zones"][req.zone] = {
+                "status": "done",
+                "at": datetime.now(timezone.utc).astimezone()
+                      .isoformat(timespec="seconds"),
+            }
+        _save_annots(filename, d)
     return {"ok": True, "zones": d["zones"]}
 
 
@@ -925,21 +945,47 @@ def annot_list(filename: str) -> dict:
 
 @router.post("/annot/{filename}")
 def annot_add(filename: str, item: Annot) -> dict:
-    """採納一筆標註。每筆都記稽核（誰、何時、來源）——模型輸出不會自己入庫。"""
+    """採納一筆標註。每筆都記稽核（誰、何時、來源）——模型輸出不會自己入庫。
+
+    Upsert 語意：同位號且位置相近（或無位號但框幾乎重合）視為同一元件的
+    重審，更新既有列而非疊加——重新辨識再審一輪不該讓台帳長出重複列。
+    """
     from datetime import datetime, timezone
 
     _safe_pdf(filename)
-    d = _load_annots(filename)
-    now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
     rec = item.model_dump()
-    rec["id"] = f"a{len(d['items']) + 1}-{int(len(d['audit']) + 1)}"
-    rec["created_at"] = now
-    d["items"].append(rec)
-    d["audit"].append({"at": now, "action": "accept", "id": rec["id"],
-                       "tag": rec.get("tag", ""), "source": rec.get("source", ""),
-                       "by": rec.get("verified_by", "")})
-    _save_annots(filename, d)
-    return {"ok": True, "id": rec["id"], "count": len(d["items"])}
+    with ANNOT_LOCK:
+        d = _load_annots(filename)
+        now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+        cx = (rec["bbox"][0] + rec["bbox"][2]) / 2
+        cy = (rec["bbox"][1] + rec["bbox"][3]) / 2
+        dup = None
+        for old in d["items"]:
+            ox = (old["bbox"][0] + old["bbox"][2]) / 2
+            oy = (old["bbox"][1] + old["bbox"][3]) / 2
+            close = math.hypot(ox - cx, oy - cy)
+            if rec.get("tag") and old.get("tag") == rec["tag"] and close < 0.02:
+                dup = old
+                break
+            if not rec.get("tag") and not old.get("tag") and close < 0.005:
+                dup = old
+                break
+        if dup is not None:
+            keep_id, keep_created = dup["id"], dup.get("created_at", now)
+            dup.update(rec)
+            dup["id"], dup["created_at"] = keep_id, keep_created
+            dup["updated_at"] = now
+            action, rid = "update", keep_id
+        else:
+            rec["id"] = f"a{len(d['items']) + 1}-{int(len(d['audit']) + 1)}"
+            rec["created_at"] = now
+            d["items"].append(rec)
+            action, rid = "accept", rec["id"]
+        d["audit"].append({"at": now, "action": action, "id": rid,
+                           "tag": rec.get("tag", ""), "source": rec.get("source", ""),
+                           "by": rec.get("verified_by", "")})
+        _save_annots(filename, d)
+    return {"ok": True, "id": rid, "count": len(d["items"])}
 
 
 def _flag_text_zone_valves(items: list, hits: list, W: float, H: float) -> None:
@@ -1773,11 +1819,12 @@ def annot_reject(filename: str, req: RejectReq) -> dict:
     from datetime import datetime, timezone
 
     _safe_pdf(filename)
-    d = _load_annots(filename)
-    d["audit"].append({
-        "at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
-        "action": "reject", "tag": req.tag, "kind": req.kind, "reason": req.reason})
-    _save_annots(filename, d)
+    with ANNOT_LOCK:
+        d = _load_annots(filename)
+        d["audit"].append({
+            "at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+            "action": "reject", "tag": req.tag, "kind": req.kind, "reason": req.reason})
+        _save_annots(filename, d)
     return {"ok": True, "rejected": sum(1 for a in d["audit"] if a.get("action") == "reject")}
 
 
@@ -1821,12 +1868,13 @@ def annot_delete(filename: str, item_id: str) -> dict:
     from datetime import datetime, timezone
 
     _safe_pdf(filename)
-    d = _load_annots(filename)
-    before = len(d["items"])
-    d["items"] = [i for i in d["items"] if i.get("id") != item_id]
-    if len(d["items"]) == before:
-        raise HTTPException(404, "標註不存在")
-    now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-    d["audit"].append({"at": now, "action": "delete", "id": item_id})
-    _save_annots(filename, d)
+    with ANNOT_LOCK:
+        d = _load_annots(filename)
+        before = len(d["items"])
+        d["items"] = [i for i in d["items"] if i.get("id") != item_id]
+        if len(d["items"]) == before:
+            raise HTTPException(404, "標註不存在")
+        now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+        d["audit"].append({"at": now, "action": "delete", "id": item_id})
+        _save_annots(filename, d)
     return {"ok": True, "count": len(d["items"])}

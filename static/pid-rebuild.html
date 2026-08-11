@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>盲測重建｜Process Intelligence</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #F6F7FA; --panel: #ffffff; --panel2: #F1F3F6;
+      --bdr: #DBDDE0; --accent: #046AFB; --accent-deep: #E3EDFE;
+      --text: #061027; --dim: #5C6773;
+      --hi: #12A150; --mid: #E0A415; --lo: #D93F3F;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; background: var(--bg); color: var(--text);
+      font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", sans-serif; font-size: 14px; }
+    .layout { display: flex; flex-direction: column; height: 100vh; }
+    .toolbar { height: 48px; flex-shrink: 0; border-bottom: 1px solid var(--bdr);
+      background: var(--panel); display: flex; align-items: center; gap: 10px;
+      padding: 0 14px; font-size: 12.5px; }
+    .toolbar .sp { flex: 1; }
+    .brand-home { display: inline-flex; align-items: center; justify-content: center;
+      width: 25px; height: 25px; border-radius: 6px; background: rgba(4,106,251,0.08);
+      border: 1px solid var(--bdr); color: var(--accent); font-size: 11px;
+      font-weight: 700; text-decoration: none; }
+    .mini-btn { padding: 5px 11px; border-radius: 6px; font-size: 11.5px; cursor: pointer;
+      background: var(--panel2); border: 1px solid var(--bdr); color: var(--text);
+      font-family: inherit; }
+    .mini-btn:hover { border-color: var(--accent); }
+    .mini-btn.on { background: var(--accent); border-color: var(--accent);
+      color: #fff; font-weight: 600; }
+    .hint { font-size: 11.5px; color: var(--dim); }
+    #board { flex: 1; display: flex; min-height: 0; }
+    .pane { flex: 1; min-width: 0; display: flex; flex-direction: column;
+      border-right: 1px solid var(--bdr); }
+    .pane:last-child { border-right: none; }
+    .pane-head { padding: 8px 13px; font-size: 12px; font-weight: 700;
+      border-bottom: 1px solid var(--bdr); background: var(--panel);
+      display: flex; align-items: center; gap: 8px; }
+    .pane-head span { font-weight: 400; color: var(--dim); font-size: 11px; }
+    .pane-body { flex: 1; overflow: auto; background: #E9EDF2; position: relative; }
+    .pane-body img, .pane-body object { display: block; width: 100%; }
+    /* 疊圖模式：重建 SVG 蓋在原圖上 */
+    #ov-wrap { position: relative; display: none; }
+    #ov-wrap object { position: absolute; inset: 0; opacity: 0.85; }
+    input[type=range] { accent-color: var(--accent); }
+    .gap-note { padding: 9px 13px; font-size: 11.5px; color: var(--dim);
+      border-top: 1px solid var(--bdr); background: var(--panel); line-height: 1.7; }
+    .gap-note b { color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="toolbar">
+      <a class="brand-home" href="/twin/pid/label" title="回判讀工作台">←</a>
+      <b>盲測重建</b>
+      <span class="hint" id="doc-name">載入中…</span>
+      <span class="sp"></span>
+      <button class="mini-btn on" id="mode-side">並排比對</button>
+      <button class="mini-btn" id="mode-ov">疊圖比對</button>
+      <span class="hint" id="op-box" style="display:none">
+        重建透明度 <input type="range" id="op" min="10" max="100" value="85" style="vertical-align:middle" />
+      </span>
+    </div>
+
+    <div id="board">
+      <!-- 並排：左原圖、右重建 -->
+      <div class="pane" id="p-orig">
+        <div class="pane-head">原圖 <span>PDF 渲染</span></div>
+        <div class="pane-body" id="b-orig"><img id="orig-img" alt="原圖" /></div>
+      </div>
+      <div class="pane" id="p-reb">
+        <div class="pane-head">重建圖 <span>只讀資產模型 JSON 畫出——沒碰過原圖</span></div>
+        <div class="pane-body" id="b-reb">
+          <object id="reb-svg" type="image/svg+xml"></object>
+          <div id="ov-wrap"><img id="ov-img" alt="原圖" /><object id="ov-svg" type="image/svg+xml"></object></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="gap-note" id="gaps">
+      <b>怎麼看：</b>重建圖畫得出來的＝資料真的進了庫；畫不出來的（文字、符號、連線）＝資料庫的洞，
+      洞的清單就是下一輪辨識／審核的工作項。
+    </div>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const f = new URLSearchParams(location.search).get('f');
+
+    async function init() {
+      if (!f) { $('doc-name').textContent = '缺少參數 ?f=圖檔名'; return; }
+      $('doc-name').textContent = f;
+      const svgUrl = `/api/pid/model/${encodeURIComponent(f)}/rebuild.svg?t=${Date.now()}`;
+      $('reb-svg').data = svgUrl;
+      $('ov-svg').data = svgUrl;
+      try {
+        const meta = await fetch(`/api/pid/vlm/base/${encodeURIComponent(f)}`)
+          .then(r => { if (!r.ok) throw new Error(); return r.json(); });
+        $('orig-img').src = meta.url;
+        $('ov-img').src = meta.url;
+      } catch { $('doc-name').textContent = f + '（原圖載入失敗）'; }
+      try {
+        const m = await fetch(`/api/pid/model/${encodeURIComponent(f)}`)
+          .then(r => { if (!r.ok) throw new Error('尚未建立資產模型'); return r.json(); });
+        const s = m.stats || {};
+        const gp = (m.geometry && m.geometry.pipes || []).length;
+        $('gaps').innerHTML = `<b>這張圖的庫存：</b>線稿 ${gp} 段｜閥節點 ${
+          (m.geometry && m.geometry.valve_nodes || []).length} 顆｜已確認儀錶 ${
+          s.instruments} 顆（氣泡＋位號畫得出來）｜已確認設備 ${
+          s.equipment_on_drawing}/${s.equipment} 台有座標｜管線編號 ${s.lines} 條
+          <b>→ 原圖上有、重建圖上沒有的，就是還沒進庫的部分。</b>`;
+      } catch (e) {
+        $('gaps').innerHTML = `<b style="color:var(--lo)">${e.message || '模型載入失敗'}</b>
+          ——先回工作台完成審核並按「建立資產模型」。`;
+      }
+    }
+
+    function setMode(ov) {
+      $('mode-side').classList.toggle('on', !ov);
+      $('mode-ov').classList.toggle('on', ov);
+      $('p-orig').style.display = ov ? 'none' : '';
+      $('reb-svg').style.display = ov ? 'none' : '';
+      $('ov-wrap').style.display = ov ? 'block' : 'none';
+      $('op-box').style.display = ov ? '' : 'none';
+    }
+    $('mode-side').onclick = () => setMode(false);
+    $('mode-ov').onclick = () => setMode(true);
+    $('op').oninput = () => { $('ov-svg').style.opacity = $('op').value / 100; };
+
+    init();
+  </script>
+</body>
+</html>

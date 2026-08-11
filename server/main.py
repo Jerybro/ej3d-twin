@@ -506,6 +506,7 @@ PAGES = {
     "/twin/editor": "editor.html",  # 舊路徑別名（既有連結相容）
     "/twin/pid": "pid.html",   # 產品3：P&ID 管理
     "/twin/pid/label": "pid-label.html",  # 產品3：P&ID 標示化協作工作台
+    "/twin/pid/rebuild": "pid-rebuild.html",  # 產品3：盲測重建（模型 JSON → 重畫）
     "/data": "data.html",      # 產品2：資料前處理
     "/docs": "docs.html",      # 操作說明（雙語）
     "/admin": "admin.html",    # 權限管理（admin）

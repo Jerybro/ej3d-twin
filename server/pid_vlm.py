@@ -280,10 +280,17 @@ def _claude_chat(system: str, prompt: str, image_b64: str,
             {"type": "text", "text": prompt},
         ]}],
     }
+    # ATPToken gateway（台灣 AI gateway，Anthropic 相容）走 Bearer 認證；
+    # Anthropic 官方走 x-api-key。依 key 前綴自動切換，兩邊都能接。
+    if key.startswith("atp-"):
+        auth = {"Authorization": f"Bearer {key}"}
+    else:
+        auth = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+    # UA 必帶：ATP 前面的 Cloudflare 會用 1010 擋掉無 User-Agent 的請求
     req = urllib.request.Request(
         f"{CLOUD_BASE}/v1/messages", data=json.dumps(body).encode(), method="POST",
-        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
-                 "content-type": "application/json"})
+        headers={**auth, "content-type": "application/json",
+                 "user-agent": "ej3d-twin-pid/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             out = json.loads(r.read())

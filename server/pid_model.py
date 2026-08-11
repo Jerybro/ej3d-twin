@@ -20,6 +20,7 @@ import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/pid/model", tags=["pid-model"])
 
@@ -1017,8 +1018,212 @@ def model_flow(filename: str, request: Request) -> dict:
         seen.add(e["tag"])
         eq.append({"tag": e["tag"], "name": e.get("name") or e.get("type", ""),
                    "bbox": b})
-    return build_flow(eq, g.get("pipes") or [], g.get("arrows") or [],
+    flow = build_flow(eq, g.get("pipes") or [], g.get("arrows") or [],
                       g.get("aspect") or 0.7)
+    return _apply_flow_overrides(flow, filename, current_domain_of(request))
+
+
+def _apply_flow_overrides(flow: dict, filename: str, domain: str) -> dict:
+    """套用 VLM／人工判過的方向，並重算分流匯流。
+
+    覆寫層與自動推導分開存：自動推導會隨重建而變，但「判過的方向」是結論，
+    不該被下一次重建洗掉。
+    """
+    if not flow.get("ok"):
+        return flow
+    p = _flow_override_path(filename, domain)
+    if not p.exists():
+        return flow
+    try:
+        ov = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return flow
+    if not ov:
+        return flow
+
+    src = {"vlm": ("AI 看圖判定", 0.8), "manual": ("人工判定", 1.0)}
+    n_applied = n_suspect = 0
+    for e in flow["edges"]:
+        k = f"{min(e['from'], e['to'])}|{max(e['from'], e['to'])}"
+        o = ov.get(k)
+        if not o:
+            continue
+        if o.get("by") == "vlm-suspect":
+            n_suspect += 1
+            e["suspect"] = True
+            e["confidence"] = 0.2
+            e["evidence"] = (f"AI 看圖後判定這兩台之間沒有可見連線："
+                             f"{o.get('detail', '')} → 這條連線可能是線稿誤接，"
+                             "請人工確認是否刪除")
+            continue
+        n_applied += 1
+        label, conf = src.get(o.get("by", "vlm"), ("判定", 0.8))
+        e["from"], e["to"] = o["from"], o["to"]
+        e["dir_by"] = o.get("by", "vlm")
+        e["confidence"] = conf
+        e["evidence"] = (f"{label}：{o.get('detail', '') or '依圖面判定方向'}"
+                         f"（{o['from']}→{o['to']}）")
+
+    # 方向改了，分流匯流要跟著重算——這兩個是圖論定義，不能沿用舊值
+    import networkx as nx
+
+    D = nx.DiGraph()
+    box = {n["tag"]: n["bbox"] for n in flow["nodes"]}
+    nm = {n["tag"]: n["name"] for n in flow["nodes"]}
+    D.add_nodes_from(box)
+    for e in flow["edges"]:
+        D.add_edge(e["from"], e["to"])
+    nodes = []
+    for t in D.nodes:
+        od, idg = D.out_degree(t), D.in_degree(t)
+        role = ("分流點" if od > 1 else "匯流點" if idg > 1 else
+                "起點" if idg == 0 and od > 0 else
+                "終點" if od == 0 and idg > 0 else
+                "串接" if od == 1 and idg == 1 else "孤立")
+        nodes.append({"tag": t, "name": nm.get(t, ""), "bbox": box.get(t),
+                      "in": idg, "out": od, "role": role,
+                      "downstream": sorted(D.successors(t), key=_num_key),
+                      "upstream": sorted(D.predecessors(t), key=_num_key)})
+    try:
+        level = {}
+        for t in nx.topological_sort(D):
+            pr = list(D.predecessors(t))
+            level[t] = (max((level[x] for x in pr), default=-1) + 1) if pr else 0
+    except nx.NetworkXUnfeasible:
+        level = {n["tag"]: i for i, n in enumerate(
+            sorted(nodes, key=lambda x: _num_key(x["tag"])))}
+    for n in nodes:
+        n["level"] = level.get(n["tag"], 0)
+    nodes.sort(key=lambda n: (n["level"], _num_key(n["tag"])))
+    flow["nodes"] = nodes
+    st = flow["stats"]
+    st.update({
+        "by_arrow": sum(1 for e in flow["edges"] if e["dir_by"] == "arrow"),
+        "by_item_no": sum(1 for e in flow["edges"] if e["dir_by"] == "item_no"),
+        "by_vlm": sum(1 for e in flow["edges"] if e["dir_by"] == "vlm"),
+        "by_manual": sum(1 for e in flow["edges"] if e["dir_by"] == "manual"),
+        "splits": sum(1 for n in nodes if n["role"] == "分流點"),
+        "merges": sum(1 for n in nodes if n["role"] == "匯流點"),
+        "starts": sum(1 for n in nodes if n["role"] == "起點"),
+        "ends": sum(1 for n in nodes if n["role"] == "終點"),
+        "isolated": sum(1 for n in nodes if n["role"] == "孤立"),
+        "overrides": n_applied, "suspect": n_suspect,
+    })
+    return flow
+
+
+class FlowVlmReq(BaseModel):
+    pairs: list = []             # [[from_tag, to_tag], ...]，空＝全部弱證據邊
+    provider: str = "cloud"
+    limit: int = 20              # 成本閘門：一次最多問幾條
+
+
+@router.post("/flow/{filename}/vlm")
+def model_flow_vlm(filename: str, req: FlowVlmReq, request: Request) -> dict:
+    """用 VLM 判流向——只問「沒有箭頭可判」的那些連線。
+
+    成本閘門：整張圖亂槍打鳥沒必要，箭頭已經定死的邊不必再花錢問。
+    每一條都裁出「涵蓋兩台設備與其間連線」的局部圖，讓模型看著圖回答，
+    並把模型的原話留進證據鏈——判錯了，人看得出它憑什麼這樣說。
+    """
+    from .pid_vlm import _crop_b64, _vlm
+
+    flow = model_flow(filename, request)
+    if not flow.get("ok"):
+        raise HTTPException(422, flow.get("reason", "無法推導流向"))
+    pos = {n["tag"]: n["bbox"] for n in flow["nodes"]}
+    name_of = {n["tag"]: n.get("name", "") for n in flow["nodes"]}
+
+    want = {(a, b) for a, b in req.pairs}
+    todo = [e for e in flow["edges"]
+            if (not want and e["dir_by"] != "arrow")
+            or (e["from"], e["to"]) in want or (e["to"], e["from"]) in want]
+    todo = todo[:max(1, min(req.limit, 40))]
+
+    SYSTEM = ("你是資深製程工程師，正在判讀 PFD／P&ID 局部圖。"
+              "只依圖面可見的箭頭、輸送機傾角、料斗出口方向、管線接點高低作答，"
+              "看不出來就說不確定，不要臆測。")
+    out, changed = [], 0
+    for e in todo:
+        a, b = e["from"], e["to"]
+        ba, bb = pos.get(a), pos.get(b)
+        if not ba or not bb:
+            continue
+        box = [max(0.0, min(ba[0], bb[0]) - 0.012), max(0.0, min(ba[1], bb[1]) - 0.012),
+               min(1.0, max(ba[2], bb[2]) + 0.012), min(1.0, max(ba[3], bb[3]) + 0.012)]
+        try:
+            img_b64, _ = _crop_b64(filename, box)
+            q = (f"圖中有兩台設備：{a}（{name_of.get(a, '')}）與 {b}（{name_of.get(b, '')}）。"
+                 f"物料是從哪一台流向哪一台？\n"
+                 f"只回一行，格式：<起點位號>-><終點位號>|<依據，20字內>\n"
+                 f"若圖上看不出方向，回：unknown|<原因>")
+            txt = (_vlm(req.provider, SYSTEM, q, img_b64) or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            out.append({"from": a, "to": b, "result": "error", "detail": str(exc)[:120]})
+            continue
+        line = txt.splitlines()[0][:160] if txt else ""
+        m = re.search(r"([A-Za-z0-9.\-]+)\s*->\s*([A-Za-z0-9.\-]+)", line)
+        why = line.split("|", 1)[1].strip() if "|" in line else line
+        if not m or {m.group(1), m.group(2)} != {a, b}:
+            out.append({"from": a, "to": b, "result": "unknown",
+                        "detail": why or line or "模型未給出方向"})
+            continue
+        src, dst = m.group(1), m.group(2)
+        flipped = (src, dst) != (a, b)
+        changed += 1
+        out.append({"from": src, "to": dst, "result": "ok", "flipped": flipped,
+                    "detail": why, "raw": line})
+
+    # 判定結果落地成覆寫層，之後 model_flow 會套用（人工仍可再改）
+    ov = _flow_override_path(filename, current_domain_of(request))
+    cur = {}
+    if ov.exists():
+        try:
+            cur = json.loads(ov.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            cur = {}
+    for r in out:
+        k = f"{min(r['from'], r['to'])}|{max(r['from'], r['to'])}"
+        if r["result"] == "ok":
+            cur[k] = {"from": r["from"], "to": r["to"], "by": "vlm",
+                      "detail": r.get("detail", ""), "at": _now_iso()}
+        elif r["result"] == "unknown" and re.search(
+                r"無.{0,6}(連接|相連|管線|關係)|沒有.{0,6}(連接|管線)|不相連",
+                r.get("detail", "")):
+            # 「這兩台根本沒接在一起」比「判不出方向」更有價值——那代表
+            # 拓撲抓到一條假連線。留下來讓人決定要不要刪，別靜默吞掉。
+            cur[k] = {"from": r["from"], "to": r["to"], "by": "vlm-suspect",
+                      "detail": r.get("detail", ""), "at": _now_iso()}
+    ov.parent.mkdir(parents=True, exist_ok=True)
+    ov.write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    return {"asked": len(todo), "resolved": changed,
+            "unknown": sum(1 for r in out if r["result"] == "unknown"),
+            "results": out}
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def current_domain_of(request: Request) -> str:
+    from .auth import current_domain
+
+    return current_domain(request)
+
+
+def _flow_override_path(filename: str, domain: str) -> Path:
+    """流向覆寫層：VLM 判定與人工修正都寫在這裡，與自動推導分開存。
+
+    分開的理由：自動推導會隨模型重建而變，但「人／VLM 判過的方向」
+    是要保留的結論，不該被下次重建洗掉。
+    """
+    from .pid_vlm import _slug
+
+    d = MODEL_DIR / re.sub(r"[^a-z0-9.-]+", "-", (domain or "dev.local").lower())
+    return d / f"{_slug(Path(filename).stem)}.flowdir.json"
 
 
 @router.get("/{filename}/rebuild.svg")

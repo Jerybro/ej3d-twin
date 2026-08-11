@@ -1,33 +1,32 @@
 {
   "drawing": "R-M0200-00-000-000-00 礦化及造粒系統流程圖_20260408.pdf",
   "profile": "pfd",
-  "built_at": "2026-08-11T20:15:41+08:00",
+  "built_at": "2026-08-11T23:49:49+08:00",
   "gate": {
-    "accepted": 5,
+    "accepted": 18,
     "rejected": 2,
     "rule": "實體只從已確認標註產生；清冊列與管線編號另標來源"
   },
   "equipment": [
     {
       "tag": "106",
-      "type": "",
+      "type": "斗昇機",
+      "bbox": [
+        0.7359,
+        0.0513,
+        0.7471,
+        0.0671
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認＋清冊",
+      "on_drawing": true,
       "name": "斗昇機",
       "spec": "產能：3T/hr",
       "driver": "3HP*4P",
       "qty": 1,
       "remark": "變頻控制",
-      "vfd": true,
-      "bbox": null,
-      "note": "",
-      "verified_by": "",
-      "source": "設備清冊＋定位器候選（待審）",
-      "on_drawing": false,
-      "candidate_bbox": [
-        0.2046,
-        0.1772,
-        0.2505,
-        0.2692
-      ]
+      "vfd": true
     },
     {
       "tag": "106.1",
@@ -70,6 +69,20 @@
         0.2899,
         0.2179
       ]
+    },
+    {
+      "tag": "167",
+      "type": "設備項次",
+      "bbox": [
+        0.8231,
+        0.1101,
+        0.8337,
+        0.1251
+      ],
+      "note": "無此資訊",
+      "verified_by": "",
+      "source": "審核確認",
+      "on_drawing": true
     },
     {
       "tag": "201",
@@ -550,45 +563,43 @@
     },
     {
       "tag": "301",
-      "type": "",
+      "type": "氣動雙向閥",
+      "bbox": [
+        0.7357,
+        0.2979,
+        0.7469,
+        0.3137
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認＋清冊",
+      "on_drawing": true,
       "name": "氣動雙向閥",
       "spec": "",
       "driver": "",
       "qty": 1,
       "remark": "",
-      "vfd": false,
-      "bbox": null,
-      "note": "",
-      "verified_by": "",
-      "source": "設備清冊＋定位器候選（待審）",
-      "on_drawing": false,
-      "candidate_bbox": [
-        0.5418,
-        0.5958,
-        0.5548,
-        0.6394
-      ]
+      "vfd": false
     },
     {
       "tag": "302",
-      "type": "",
+      "type": "雙向皮帶式輸送機",
+      "bbox": [
+        0.7359,
+        0.3062,
+        0.7471,
+        0.3221
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認＋清冊",
+      "on_drawing": true,
       "name": "雙向皮帶式輸送機",
       "spec": "產能：7T/hr",
       "driver": "2HP*4P",
       "qty": 1,
       "remark": "變頻控制",
-      "vfd": true,
-      "bbox": null,
-      "note": "",
-      "verified_by": "",
-      "source": "設備清冊＋定位器候選（待審）",
-      "on_drawing": false,
-      "candidate_bbox": [
-        0.5159,
-        0.5958,
-        0.5823,
-        0.7055
-      ]
+      "vfd": true
     },
     {
       "tag": "303.1",
@@ -643,123 +654,123 @@
     },
     {
       "tag": "306",
-      "type": "",
+      "type": "出料帶運機",
+      "bbox": [
+        0.7359,
+        0.3395,
+        0.7471,
+        0.3553
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認＋清冊",
+      "on_drawing": true,
       "name": "出料帶運機",
       "spec": "產能：7T/hr",
       "driver": "",
       "qty": 1,
       "remark": "",
-      "vfd": false,
-      "bbox": null,
-      "note": "",
-      "verified_by": "",
-      "source": "設備清冊",
-      "on_drawing": false
+      "vfd": false
     },
     {
       "tag": "307",
-      "type": "",
+      "type": "斗昇機",
+      "bbox": [
+        0.7357,
+        0.3478,
+        0.7469,
+        0.3636
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認＋清冊",
+      "on_drawing": true,
       "name": "斗昇機",
       "spec": "產能：3T/hr",
       "driver": "2HP*4P",
       "qty": 1,
       "remark": "變頻控制",
-      "vfd": true,
-      "bbox": null,
-      "note": "",
-      "verified_by": "",
-      "source": "設備清冊＋定位器候選（待審）",
-      "on_drawing": false,
-      "candidate_bbox": [
-        0.6449,
-        0.5401,
-        0.6813,
-        0.556
-      ]
+      "vfd": true
     },
     {
       "tag": "308",
-      "type": "",
+      "type": "設備項次",
+      "bbox": [
+        0.7359,
+        0.3561,
+        0.7471,
+        0.3719
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認＋清冊",
+      "on_drawing": true,
       "name": "氣動雙向閥",
       "spec": "法蘭規格：ø8\"",
       "driver": "",
       "qty": 1,
       "remark": "",
-      "vfd": false,
-      "bbox": null,
-      "note": "",
-      "verified_by": "",
-      "source": "設備清冊＋定位器候選（待審）",
-      "on_drawing": false,
-      "candidate_bbox": [
-        0.6633,
-        0.5637,
-        0.6885,
-        0.6327
-      ]
+      "vfd": false
     },
     {
       "tag": "309",
-      "type": "",
+      "type": "設備項次",
+      "bbox": [
+        0.7359,
+        0.3644,
+        0.7471,
+        0.3802
+      ],
+      "note": "尚未啟用",
+      "verified_by": "",
+      "source": "審核確認＋清冊",
+      "on_drawing": true,
       "name": "粉碎機",
       "spec": "產能：3T/hr",
       "driver": "50HP*4P",
       "qty": 1,
       "remark": "變頻控制",
-      "vfd": true,
-      "bbox": null,
-      "note": "",
-      "verified_by": "",
-      "source": "設備清冊＋定位器候選（待審）",
-      "on_drawing": false,
-      "candidate_bbox": [
-        0.6633,
-        0.5637,
-        0.7231,
-        0.6857
-      ]
+      "vfd": true
     },
     {
       "tag": "312",
-      "type": "",
+      "type": "雙層震篩機",
+      "bbox": [
+        0.7361,
+        0.3729,
+        0.7468,
+        0.388
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認＋清冊",
+      "on_drawing": true,
       "name": "雙層震篩機",
       "spec": "產能：3T/hr",
       "driver": "5HP*4P x 2set",
       "qty": 1,
       "remark": "",
-      "vfd": false,
-      "bbox": null,
-      "note": "",
-      "verified_by": "",
-      "source": "設備清冊＋定位器候選（待審）",
-      "on_drawing": false,
-      "candidate_bbox": [
-        0.6656,
-        0.5707,
-        0.7667,
-        0.7422
-      ]
+      "vfd": false
     },
     {
       "tag": "313",
-      "type": "",
+      "type": "圓篩機",
+      "bbox": [
+        0.7359,
+        0.381,
+        0.7471,
+        0.3969
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認＋清冊",
+      "on_drawing": true,
       "name": "圓篩機",
       "spec": "產能：1.5T/hr",
       "driver": "3HP*4P",
       "qty": 1,
       "remark": "",
-      "vfd": false,
-      "bbox": null,
-      "note": "",
-      "verified_by": "",
-      "source": "設備清冊＋定位器候選（待審）",
-      "on_drawing": false,
-      "candidate_bbox": [
-        0.8072,
-        0.5852,
-        0.8416,
-        0.6152
-      ]
+      "vfd": false
     },
     {
       "tag": "313-1",
@@ -892,18 +903,23 @@
     },
     {
       "tag": "314",
-      "type": "",
+      "type": "斗昇機",
+      "bbox": [
+        0.7359,
+        0.4475,
+        0.7471,
+        0.4634
+      ],
+      "note": "",
+      "verified_by": "",
+      "source": "審核確認＋清冊",
+      "on_drawing": true,
       "name": "斗昇機",
       "spec": "產能：3T/hr",
       "driver": "2HP*4P",
       "qty": 1,
       "remark": "變頻控制",
-      "vfd": true,
-      "bbox": null,
-      "note": "",
-      "verified_by": "",
-      "source": "設備清冊",
-      "on_drawing": false
+      "vfd": true
     },
     {
       "tag": "315",
@@ -1017,6 +1033,34 @@
       "verified_by": "",
       "source": "審核確認",
       "on_drawing": true
+    },
+    {
+      "tag": "503",
+      "type": "設備項次",
+      "bbox": [
+        0.4348,
+        0.3642,
+        0.4504,
+        0.3864
+      ],
+      "note": "尚未啟用",
+      "verified_by": "",
+      "source": "審核確認",
+      "on_drawing": true
+    },
+    {
+      "tag": "508",
+      "type": "設備項次",
+      "bbox": [
+        0.4747,
+        0.5337,
+        0.4903,
+        0.5558
+      ],
+      "note": "尚未啟用",
+      "verified_by": "",
+      "source": "審核確認",
+      "on_drawing": true
     }
   ],
   "instruments": [],
@@ -1105,50 +1149,6 @@
     "matched": 50,
     "cross_sheet": 1,
     "items": [
-      {
-        "tag": "106",
-        "kind": "equipment",
-        "symbol": "斗昇機",
-        "note": "",
-        "mounting": "",
-        "mount_conf": 0.0,
-        "confidence": 0.95,
-        "bbox": [
-          0.2046,
-          0.1772,
-          0.2505,
-          0.2692
-        ],
-        "n_segs": 19,
-        "registry_item": "106",
-        "evidence": [
-          {
-            "stage": "項次號錨定",
-            "ok": true,
-            "score": 1.0,
-            "detail": "清冊導向搜尋：清冊有「106」，圖上 (0.245, 0.172) 讀到「106-」數字骨架相符（小數點常被 OCR 吃掉），以此為錨"
-          },
-          {
-            "stage": "圖形塊區域成長",
-            "ok": true,
-            "score": 1.0,
-            "detail": "由錨點沿相鄰線段擴出 19 段輪廓線，框約 0.046×0.065（遇長幹管即停，不併入路過的管線）"
-          },
-          {
-            "stage": "清單表排除",
-            "ok": true,
-            "score": 1.0,
-            "detail": "已排除 x≈0.740 的清單表欄位文字（43 筆），本項在圖面區域內"
-          },
-          {
-            "stage": "設備清冊對照",
-            "ok": true,
-            "score": 1.0,
-            "detail": "對到清冊「斗昇機」｜產能：3T/hr"
-          }
-        ],
-        "source": "定位器"
-      },
       {
         "tag": "106.1",
         "kind": "equipment",
@@ -2695,94 +2695,6 @@
         "source": "定位器"
       },
       {
-        "tag": "301",
-        "kind": "equipment",
-        "symbol": "氣動雙向閥",
-        "note": "",
-        "mounting": "",
-        "mount_conf": 0.0,
-        "confidence": 0.95,
-        "bbox": [
-          0.5418,
-          0.5958,
-          0.5548,
-          0.6394
-        ],
-        "n_segs": 15,
-        "registry_item": "301",
-        "evidence": [
-          {
-            "stage": "項次號錨定",
-            "ok": true,
-            "score": 1.0,
-            "detail": "圖面文字「301」在 (0.561, 0.616)，以此為錨往外找設備輪廓"
-          },
-          {
-            "stage": "圖形塊區域成長",
-            "ok": true,
-            "score": 1.0,
-            "detail": "由錨點沿相鄰線段擴出 15 段輪廓線，框約 0.013×0.031（遇長幹管即停，不併入路過的管線）"
-          },
-          {
-            "stage": "清單表排除",
-            "ok": true,
-            "score": 1.0,
-            "detail": "已排除 x≈0.740 的清單表欄位文字（43 筆），本項在圖面區域內"
-          },
-          {
-            "stage": "設備清冊對照",
-            "ok": true,
-            "score": 1.0,
-            "detail": "對到清冊「氣動雙向閥」"
-          }
-        ],
-        "source": "定位器"
-      },
-      {
-        "tag": "302",
-        "kind": "equipment",
-        "symbol": "雙向皮帶式輸送機",
-        "note": "",
-        "mounting": "",
-        "mount_conf": 0.0,
-        "confidence": 0.95,
-        "bbox": [
-          0.5159,
-          0.5958,
-          0.5823,
-          0.7055
-        ],
-        "n_segs": 31,
-        "registry_item": "302",
-        "evidence": [
-          {
-            "stage": "項次號錨定",
-            "ok": true,
-            "score": 1.0,
-            "detail": "圖面文字「302」在 (0.572, 0.635)，以此為錨往外找設備輪廓"
-          },
-          {
-            "stage": "圖形塊區域成長",
-            "ok": true,
-            "score": 1.0,
-            "detail": "由錨點沿相鄰線段擴出 31 段輪廓線，框約 0.066×0.078（遇長幹管即停，不併入路過的管線）｜此項用放寬門檻才長出（長型設備如帶運機），框範圍請特別確認"
-          },
-          {
-            "stage": "清單表排除",
-            "ok": true,
-            "score": 1.0,
-            "detail": "已排除 x≈0.740 的清單表欄位文字（43 筆），本項在圖面區域內"
-          },
-          {
-            "stage": "設備清冊對照",
-            "ok": true,
-            "score": 1.0,
-            "detail": "對到清冊「雙向皮帶式輸送機」｜產能：7T/hr"
-          }
-        ],
-        "source": "定位器"
-      },
-      {
         "tag": "304-3",
         "kind": "equipment",
         "symbol": "手動閘閥",
@@ -2910,226 +2822,6 @@
             "ok": true,
             "score": 1.0,
             "detail": "對到清冊「手動閘閥」｜法蘭規格：16\""
-          }
-        ],
-        "source": "定位器"
-      },
-      {
-        "tag": "307",
-        "kind": "equipment",
-        "symbol": "斗昇機",
-        "note": "",
-        "mounting": "",
-        "mount_conf": 0.0,
-        "confidence": 0.77,
-        "bbox": [
-          0.6449,
-          0.5401,
-          0.6813,
-          0.556
-        ],
-        "n_segs": 8,
-        "registry_item": "307",
-        "evidence": [
-          {
-            "stage": "項次號錨定",
-            "ok": true,
-            "score": 1.0,
-            "detail": "圖面文字「307」在 (0.657, 0.536)，以此為錨往外找設備輪廓"
-          },
-          {
-            "stage": "圖形塊區域成長",
-            "ok": true,
-            "score": 0.6666666666666666,
-            "detail": "由錨點沿相鄰線段擴出 8 段輪廓線，框約 0.036×0.011（遇長幹管即停，不併入路過的管線）"
-          },
-          {
-            "stage": "清單表排除",
-            "ok": true,
-            "score": 1.0,
-            "detail": "已排除 x≈0.740 的清單表欄位文字（43 筆），本項在圖面區域內"
-          },
-          {
-            "stage": "設備清冊對照",
-            "ok": true,
-            "score": 1.0,
-            "detail": "對到清冊「斗昇機」｜產能：3T/hr"
-          }
-        ],
-        "source": "定位器"
-      },
-      {
-        "tag": "308",
-        "kind": "equipment",
-        "symbol": "氣動雙向閥",
-        "note": "",
-        "mounting": "",
-        "mount_conf": 0.0,
-        "confidence": 0.95,
-        "bbox": [
-          0.6633,
-          0.5637,
-          0.6885,
-          0.6327
-        ],
-        "n_segs": 44,
-        "registry_item": "308",
-        "evidence": [
-          {
-            "stage": "項次號錨定",
-            "ok": true,
-            "score": 1.0,
-            "detail": "圖面文字「308」在 (0.691, 0.561)，以此為錨往外找設備輪廓"
-          },
-          {
-            "stage": "圖形塊區域成長",
-            "ok": true,
-            "score": 1.0,
-            "detail": "由錨點沿相鄰線段擴出 44 段輪廓線，框約 0.025×0.049（遇長幹管即停，不併入路過的管線）"
-          },
-          {
-            "stage": "清單表排除",
-            "ok": true,
-            "score": 1.0,
-            "detail": "已排除 x≈0.740 的清單表欄位文字（43 筆），本項在圖面區域內"
-          },
-          {
-            "stage": "設備清冊對照",
-            "ok": true,
-            "score": 1.0,
-            "detail": "對到清冊「氣動雙向閥」｜法蘭規格：ø8\""
-          }
-        ],
-        "source": "定位器"
-      },
-      {
-        "tag": "309",
-        "kind": "equipment",
-        "symbol": "粉碎機",
-        "note": "",
-        "mounting": "",
-        "mount_conf": 0.0,
-        "confidence": 0.95,
-        "bbox": [
-          0.6633,
-          0.5637,
-          0.7231,
-          0.6857
-        ],
-        "n_segs": 85,
-        "registry_item": "309",
-        "evidence": [
-          {
-            "stage": "項次號錨定",
-            "ok": true,
-            "score": 1.0,
-            "detail": "圖面文字「309」在 (0.693, 0.606)，以此為錨往外找設備輪廓"
-          },
-          {
-            "stage": "圖形塊區域成長",
-            "ok": true,
-            "score": 1.0,
-            "detail": "由錨點沿相鄰線段擴出 85 段輪廓線，框約 0.060×0.086（遇長幹管即停，不併入路過的管線）"
-          },
-          {
-            "stage": "清單表排除",
-            "ok": true,
-            "score": 1.0,
-            "detail": "已排除 x≈0.740 的清單表欄位文字（43 筆），本項在圖面區域內"
-          },
-          {
-            "stage": "設備清冊對照",
-            "ok": true,
-            "score": 1.0,
-            "detail": "對到清冊「粉碎機」｜產能：3T/hr"
-          }
-        ],
-        "source": "定位器"
-      },
-      {
-        "tag": "312",
-        "kind": "equipment",
-        "symbol": "雙層震篩機",
-        "note": "",
-        "mounting": "",
-        "mount_conf": 0.0,
-        "confidence": 0.95,
-        "bbox": [
-          0.6656,
-          0.5707,
-          0.7667,
-          0.7422
-        ],
-        "n_segs": 76,
-        "registry_item": "312",
-        "evidence": [
-          {
-            "stage": "項次號錨定",
-            "ok": true,
-            "score": 1.0,
-            "detail": "圖面文字「312」在 (0.697, 0.646)，以此為錨往外找設備輪廓"
-          },
-          {
-            "stage": "圖形塊區域成長",
-            "ok": true,
-            "score": 1.0,
-            "detail": "由錨點沿相鄰線段擴出 76 段輪廓線，框約 0.101×0.121（遇長幹管即停，不併入路過的管線）"
-          },
-          {
-            "stage": "清單表排除",
-            "ok": true,
-            "score": 1.0,
-            "detail": "已排除 x≈0.740 的清單表欄位文字（43 筆），本項在圖面區域內"
-          },
-          {
-            "stage": "設備清冊對照",
-            "ok": true,
-            "score": 1.0,
-            "detail": "對到清冊「雙層震篩機」｜產能：3T/hr"
-          }
-        ],
-        "source": "定位器"
-      },
-      {
-        "tag": "313",
-        "kind": "equipment",
-        "symbol": "圓篩機",
-        "note": "",
-        "mounting": "",
-        "mount_conf": 0.0,
-        "confidence": 0.95,
-        "bbox": [
-          0.8072,
-          0.5852,
-          0.8416,
-          0.6152
-        ],
-        "n_segs": 19,
-        "registry_item": "313",
-        "evidence": [
-          {
-            "stage": "項次號錨定",
-            "ok": true,
-            "score": 1.0,
-            "detail": "圖面文字「313」在 (0.794, 0.595)，以此為錨往外找設備輪廓"
-          },
-          {
-            "stage": "圖形塊區域成長",
-            "ok": true,
-            "score": 1.0,
-            "detail": "由錨點沿相鄰線段擴出 19 段輪廓線，框約 0.034×0.021（遇長幹管即停，不併入路過的管線）"
-          },
-          {
-            "stage": "清單表排除",
-            "ok": true,
-            "score": 1.0,
-            "detail": "已排除 x≈0.740 的清單表欄位文字（43 筆），本項在圖面區域內"
-          },
-          {
-            "stage": "設備清冊對照",
-            "ok": true,
-            "score": 1.0,
-            "detail": "對到清冊「圓篩機」｜產能：1.5T/hr"
           }
         ],
         "source": "定位器"
@@ -3808,51 +3500,6 @@
         "warn": "清冊中查無此項次號，請確認是否為其他系統的設備"
       },
       {
-        "tag": "503",
-        "kind": "equipment",
-        "symbol": "設備（待確認類型）",
-        "note": "",
-        "mounting": "",
-        "mount_conf": 0.0,
-        "confidence": 0.95,
-        "bbox": [
-          0.4341,
-          0.3807,
-          0.4634,
-          0.4528
-        ],
-        "n_segs": 19,
-        "registry_item": "",
-        "evidence": [
-          {
-            "stage": "項次號錨定",
-            "ok": true,
-            "score": 1.0,
-            "detail": "圖面文字「503」在 (0.443, 0.375)，以此為錨往外找設備輪廓"
-          },
-          {
-            "stage": "圖形塊區域成長",
-            "ok": true,
-            "score": 1.0,
-            "detail": "由錨點沿相鄰線段擴出 19 段輪廓線，框約 0.029×0.051（遇長幹管即停，不併入路過的管線）"
-          },
-          {
-            "stage": "清單表排除",
-            "ok": true,
-            "score": 1.0,
-            "detail": "已排除 x≈0.740 的清單表欄位文字（43 筆），本項在圖面區域內"
-          },
-          {
-            "stage": "設備清冊對照",
-            "ok": false,
-            "score": 0.3,
-            "detail": "清冊中查無此項次號——可能是清冊續頁或圖上另一區的設備，請人工確認"
-          }
-        ],
-        "source": "定位器",
-        "warn": "清冊中查無此項次號，請確認是否為其他系統的設備"
-      },
-      {
         "tag": "504",
         "kind": "equipment",
         "symbol": "設備（待確認類型）",
@@ -4015,51 +3662,6 @@
             "ok": true,
             "score": 1.0,
             "detail": "由錨點沿相鄰線段擴出 66 段輪廓線，框約 0.042×0.062（遇長幹管即停，不併入路過的管線）"
-          },
-          {
-            "stage": "清單表排除",
-            "ok": true,
-            "score": 1.0,
-            "detail": "已排除 x≈0.740 的清單表欄位文字（43 筆），本項在圖面區域內"
-          },
-          {
-            "stage": "設備清冊對照",
-            "ok": false,
-            "score": 0.3,
-            "detail": "清冊中查無此項次號——可能是清冊續頁或圖上另一區的設備，請人工確認"
-          }
-        ],
-        "source": "定位器",
-        "warn": "清冊中查無此項次號，請確認是否為其他系統的設備"
-      },
-      {
-        "tag": "508",
-        "kind": "equipment",
-        "symbol": "設備（待確認類型）",
-        "note": "",
-        "mounting": "",
-        "mount_conf": 0.0,
-        "confidence": 0.95,
-        "bbox": [
-          0.4405,
-          0.4907,
-          0.4829,
-          0.6012
-        ],
-        "n_segs": 72,
-        "registry_item": "",
-        "evidence": [
-          {
-            "stage": "項次號錨定",
-            "ok": true,
-            "score": 1.0,
-            "detail": "圖面文字「508」在 (0.482, 0.545)，以此為錨往外找設備輪廓"
-          },
-          {
-            "stage": "圖形塊區域成長",
-            "ok": true,
-            "score": 1.0,
-            "detail": "由錨點沿相鄰線段擴出 72 段輪廓線，框約 0.042×0.078（遇長幹管即停，不併入路過的管線）"
           },
           {
             "stage": "清單表排除",
@@ -18369,8 +17971,8 @@
     "note": "向量幾何層（系統推定）——盲測重建的骨架：線稿（含線寬/虛線樣式）、流向箭頭、OCR 文字層（中英雙讀）、儀錶氣泡實測幾何（含形狀）"
   },
   "stats": {
-    "equipment": 51,
-    "equipment_on_drawing": 1,
+    "equipment": 54,
+    "equipment_on_drawing": 14,
     "instruments": 0,
     "valves": 4,
     "valves_on_net": 4,

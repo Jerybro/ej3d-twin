@@ -309,11 +309,21 @@ $('scan-all-btn').addEventListener('click', async () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename: curFile }),
     });
-    items = (d.items || []).map(i => ({ ...i, state: 'pending' }));
+    // 重掃時保留既有的已確認項——重掃是「補掃遺漏」，不是打掉重來。
+    // 同位號同位置的既有項不再排進待審佇列，工程師不用重審一次。
+    const kept = items.filter(i => i.state === 'accepted');
+    const near = (a, b) => Math.hypot(
+      (a.bbox[0] + a.bbox[2]) / 2 - (b.bbox[0] + b.bbox[2]) / 2,
+      (a.bbox[1] + a.bbox[3]) / 2 - (b.bbox[1] + b.bbox[3]) / 2) < 0.02;
+    const isDone = n => kept.some(k => k.kind === n.kind
+      && ((n.tag && k.tag === n.tag && near(k, n)) || (!n.tag && near(k, n))));
+    const fresh = (d.items || []).filter(i => !isDone(i))
+      .map(i => ({ ...i, state: 'pending' }));
     // 可疑項排前面：有警示 → 低信心 → 其餘。讓工程師先處理最需要判斷的，
     // 而不是從字母序第一項慢慢翻到最後才遇到問題。
     const rank = i => (i.warn ? 0 : (i.confidence < 0.7 ? 1 : 2));
-    items.sort((a, b) => rank(a) - rank(b) || a.confidence - b.confidence);
+    fresh.sort((a, b) => rank(a) - rank(b) || a.confidence - b.confidence);
+    items = fresh.concat(kept);
     // 幾何檢查（氣泡＋編號族群）已在後端完成，且與 OCR 完全獨立。
     // 通過幾何驗證、信心滿分的儀錶直接放行，人只審有疑慮的。
     let auto = 0;
@@ -731,12 +741,35 @@ function confClass2(a) {
   return a.confidence >= 0.9 ? 'hi' : (a.confidence >= 0.6 ? 'mid' : 'lo');
 }
 
+// 已經審過的圖再打開，要直接看到既有台帳，而不是又叫人按一次「辨識整張圖面」。
+// 重跑辨識既慢又會讓人以為前面白做——歷史資料先叫出來，要補掃再自己按。
 async function loadAnnots() {
   if (!curFile) return;
   const ex = $('export-btn');
   ex.href = `/api/pid/vlm/export/${encodeURIComponent(curFile)}`;
   loadHistory();
+  const btn = $('scan-all-btn');
+  try {
+    const d = await getJSON(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`);
+    const rej = (d.audit || []).filter(a => a.action === 'reject').length;
+    if (!(d.items || []).length) {
+      btn.textContent = '辨識整張圖面';
+      $('cc-state').textContent = '';
+      return;
+    }
+    items = d.items.map(i => ({ ...i, state: 'accepted' }));
+    items.sort((a, b) => (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9)
+      || String(a.tag).localeCompare(String(b.tag)));
+    curIdx = 0;
+    btn.textContent = '重新辨識（補掃遺漏）';
+    $('cc-state').innerHTML = `已載入既有建檔 <b style="color:var(--hi)">${items.length}</b> 筆`
+      + (rej ? `｜曾否決 ${rej} 筆（留稽核）` : '')
+      + `。要補掃遺漏的元件再按上方按鈕；<b>重掃不會覆蓋已確認的資料</b>（同位號同位置會更新，不會重複）。`;
+    render();
+    scheduleDesc();
+  } catch { /* 沒有台帳就照常顯示辨識按鈕 */ }
 }
+const KIND_ORDER = { equipment: 0, instrument: 1, valve: 2, pipe: 3, other: 4 };
 
 // ------------------------------------------------------- 製程順序圖
 // 資產庫回答「這張圖有什麼」，順序圖回答「物料怎麼走」。後者才是製程，
@@ -785,24 +818,60 @@ function renderFlow() {
       <div class="as-stat"><b>${s.isolated}</b><span>未接上</span></div>
     </div>
     <div class="hint" style="margin-bottom:9px">方向來源：
-      <b style="color:var(--hi)">${s.by_arrow}</b> 條由圖面流向箭頭判定（強證據）｜
+      <b style="color:var(--hi)">${s.by_arrow}</b> 條圖面箭頭（強證據）｜
+      ${s.by_vlm ? `<b style="color:var(--accent)">${s.by_vlm}</b> 條 AI 看圖判定｜` : ''}
+      ${s.by_manual ? `<b style="color:var(--hi)">${s.by_manual}</b> 條人工判定｜` : ''}
       <b style="color:var(--mid)">${s.by_item_no}</b> 條無箭頭可判，依項次號順序推測
       （工程慣例，非圖面證據，請人工確認）。
       ${s.isolated ? `另有 <b>${s.isolated}</b> 台設備沒有任何線接上，多半是內含元件或
         線稿沒抽到，需人工補。` : ''}</div>
-    <button class="mini-btn" id="flow-back" style="width:100%;margin-bottom:10px">← 回資產庫</button>
+    <div style="display:flex;gap:5px;margin-bottom:10px">
+      <button class="mini-btn primary" id="flow-vlm" style="flex:1">用 AI 判流向
+        <span style="opacity:.75">（只問沒箭頭的 ${s.by_item_no} 條）</span></button>
+      <button class="mini-btn" id="flow-back">← 回資產庫</button>
+    </div>
+    <div class="hint" id="flow-vlm-state" style="margin-bottom:9px"></div>
     <div class="fl">${lvls}</div>
+    ${s.suspect ? `<div class="hint" style="color:#8a5b00;margin-bottom:9px">
+      ⚠ AI 判定其中 <b>${s.suspect}</b> 條連線在圖上根本看不到——那多半是線稿誤接
+      （兩台設備被不相干的線串在一起），請在下方明細確認要不要刪。</div>` : ''}
     <div class="section-title">連線明細</div>
-    ${d.edges.map(e => `<div class="fl-e ${e.dir_by}">
-        <b>${esc(e.from)}</b> → <b>${esc(e.to)}</b>
+    ${d.edges.map(e => `<div class="fl-e ${e.suspect ? 'suspect' : e.dir_by}">
+        <b>${esc(e.from)}</b> ${e.suspect ? '⋯' : '→'} <b>${esc(e.to)}</b>
         <div>${esc(e.evidence)}</div></div>`).join('')}`;
 
   $('flow-back').onclick = () => renderModel();
+  $('flow-vlm').onclick = runFlowVlm;
   $('as-body').querySelectorAll('.fl-n').forEach(el =>
     el.addEventListener('click', () => {
       const n = d.nodes.find(x => x.tag === el.dataset.tag);
       if (n && n.bbox) showRing(n.bbox, n.tag);
     }));
+}
+
+// 用 VLM 判方向：只問「沒有箭頭可判」的那些連線。箭頭已定死的不必再花錢問，
+// 判定結果存成覆寫層——下次重建模型不會把判過的方向洗掉。
+async function runFlowVlm() {
+  const b = $('flow-vlm'), st = $('flow-vlm-state');
+  b.disabled = true;
+  st.innerHTML = '<span class="spin"></span> AI 正在逐條看圖判斷流向，一條約 3~5 秒…';
+  try {
+    const d = await getJSON(`/api/pid/model/flow/${encodeURIComponent(curFile)}/vlm`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: engine(), limit: 25 }),
+    });
+    flowData = await getJSON(`/api/pid/model/flow/${encodeURIComponent(curFile)}`);
+    renderFlow();
+    const detail = (d.results || []).filter(r => r.result === 'ok').slice(0, 6)
+      .map(r => `${r.from}→${r.to}${r.flipped ? '（推翻原方向）' : ''}：${esc(r.detail || '')}`)
+      .join('<br>');
+    $('flow-vlm-state').innerHTML =
+      `AI 判讀 <b>${d.asked}</b> 條，定出方向 <b style="color:var(--hi)">${d.resolved}</b> 條`
+      + (d.unknown ? `，<b style="color:var(--mid)">${d.unknown}</b> 條圖上看不出來（維持推測）` : '')
+      + (detail ? `<div style="margin-top:5px;line-height:1.7">${detail}</div>` : '');
+  } catch (e) {
+    st.innerHTML = `<span style="color:var(--lo)">${esc(e.message || '判讀失敗')}</span>`;
+  } finally { b.disabled = false; }
 }
 
 $('flow-btn').addEventListener('click', openFlow);

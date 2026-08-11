@@ -269,16 +269,22 @@ def _claude_chat(system: str, prompt: str, image_b64: str,
                  "請設定後重啟，或在引擎切換選 地端 Qwen")
     if want_json:
         prompt += "\n\n只輸出 JSON 本體，不要任何前後說明或程式碼圍欄。"
+    # 製程說明這種長文要比框選問答多的額度；沒帶圖時（純文字任務）
+    # 也要能跑——原本硬塞空的 image 區塊會被 API 拒收。
+    content: list = []
+    if image_b64:
+        content.append({"type": "image",
+                        "source": {"type": "base64", "media_type": "image/jpeg",
+                                   "data": image_b64}})
+    content.append({"type": "text", "text": prompt})
+    # ATP 的 sonnet-5 預設會產生 thinking 區塊，那些 token 也算在 max_tokens 裡。
+    # 製程說明給 6000 時實測 stop_reason=max_tokens、思考吃光額度、正文被截斷
+    # 甚至整個空掉。長文任務直接給足額度，別讓報告寫到一半斷掉。
     body = {
         "model": CLOUD_MODEL,
-        "max_tokens": 2000,
+        "max_tokens": 16000 if timeout >= 300 else 2000,
         "system": system,
-        "messages": [{"role": "user", "content": [
-            {"type": "image", "source": {"type": "base64",
-                                         "media_type": "image/jpeg",
-                                         "data": image_b64}},
-            {"type": "text", "text": prompt},
-        ]}],
+        "messages": [{"role": "user", "content": content}],
     }
     # ATPToken gateway（台灣 AI gateway，Anthropic 相容）走 Bearer 認證；
     # Anthropic 官方走 x-api-key。依 key 前綴自動切換，兩邊都能接。
@@ -1481,6 +1487,7 @@ class DescribeReq(BaseModel):
     filename: str
     feedback: str = ""       # 使用者意見（要求修正／補充）
     previous: str = ""       # 前一版描述——有的話就是「修訂」而不是重寫
+    provider: str = "local"  # cloud＝雲端（引用標記才跟得住）｜local＝地端（NDA）
 
 
 DESCRIBE_SYS = (
@@ -1521,20 +1528,25 @@ REVISE_SYS = (
     "（例：⟪這一段原本寫錯了，實際上是液位控制。⟫），沒動到的句子不要加。\n"
     "· 如果前一版有與清單牴觸的敘述（例如提到清單裡不存在的設備），"
     "必須改掉並包在 ⟪⟫ 裡。\n"
+    "· 若採用了「現場工程師評註」的內容，該句句尾要標 ⟦N1⟧ 這種引用編號；"
+    "前一版已有的引用標記若該句仍成立就保留。\n"
     "· 不要編造清單裡沒有的東西；不要 markdown 標題與粗體；"
     "不要輸出「修訂說明」之類的前言，直接給正文。"
 )
 
 
 @router.post("/describe")
-def describe(req: DescribeReq) -> dict:
+def describe(req: DescribeReq, request: Request) -> dict:
     """依已確認標註生成製程說明。
 
     刻意要求審核完成才可呼叫——說明是給人看的結論，
     建立在未經確認的模型輸出上就是把幻覺包裝成報告。
     """
+    from .auth import current_domain
+
     _safe_pdf(req.filename)
-    d = _load_annots(req.filename)
+    dom = current_domain(request)
+    d = _load_annots(req.filename, dom)
     items = d["items"]
     if len(items) < 3:
         raise HTTPException(422, "已確認的標註太少（至少 3 項），無法據以描述製程")
@@ -1580,15 +1592,46 @@ def describe(req: DescribeReq) -> dict:
     if kb:
         ctx += "\n\n" + kb
 
+    # 現場評註（RAG）：走過現場的人留下的知識，模型從圖上永遠讀不到
+    # 「這台去年改過」「這條線停用了」。可信度高於任何圖面推論，
+    # 且要求逐句標引用編號，讀者才查得回是誰說的、來自圖上哪裡。
+    from .pid_notes import list_notes, rag_block
+
+    notes = list_notes(req.filename, dom)
+    nb = rag_block(notes)
+    if nb:
+        ctx += "\n\n" + nb
+
     if req.previous.strip() or req.feedback.strip():
         # 修訂模式：帶上前一版與工程師意見，要求標出改動處
         user = (f"【目前已確認清單】\n{ctx}\n"
                 f"【前一版說明】\n{req.previous.strip() or '（無）'}\n"
                 f"【工程師意見】\n{req.feedback.strip() or '（無特別意見，請依最新清單自行校正牴觸之處）'}")
-        return {"text": _clean_md(_complete_text(REVISE_SYS, user, image_b64=sheet_b64)),
-                "based_on": len(items), "revised": True, "with_image": bool(sheet_b64)}
-    return {"text": _clean_md(_complete_text(DESCRIBE_SYS, ctx, image_b64=sheet_b64)),
-            "based_on": len(items), "revised": False, "with_image": bool(sheet_b64)}
+        return {"text": _clean_md(_describe_llm(REVISE_SYS, user, sheet_b64, req.provider)),
+                "based_on": len(items), "revised": True, "provider": req.provider,
+                "with_image": bool(sheet_b64), "notes": notes}
+    return {"text": _clean_md(_describe_llm(DESCRIBE_SYS, ctx, sheet_b64, req.provider)),
+            "based_on": len(items), "revised": False, "provider": req.provider,
+            "with_image": bool(sheet_b64), "notes": notes}
+
+
+def _describe_llm(system: str, user: str, sheet_b64: str | None,
+                  provider: str) -> str:
+    """製程說明的引擎分派。
+
+    地端 7B 跟不住「句尾標 ⟦N1⟧ 引用編號」這種格式指令（實測整篇零標記），
+    引用來源是這份報告可查證性的根本，所以雲端可用時走雲端；
+    NDA 場域切回地端，代價是失去引用標記——UI 上會講明白。
+    """
+    if provider == "cloud" and _cloud_key():
+        try:
+            txt = _claude_chat(system, user, sheet_b64 or "", timeout=300)
+            if txt.strip():
+                return txt
+        except Exception:  # noqa: BLE001
+            pass                        # 雲端不通就退回地端，不要整個失敗
+        # 雲端回空字串也要退回地端——回空等於整份報告消失，比降級更糟
+    return _complete_text(system, user, image_b64=sheet_b64)
 
 
 CROSS_SYS = (

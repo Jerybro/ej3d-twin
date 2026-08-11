@@ -401,6 +401,11 @@ from .pid_group import router as pid_group_router  # noqa: E402
 
 app.include_router(pid_group_router)
 
+# ------------------------------------ P&ID 現場評註（製程說明的 RAG 來源）
+from .pid_notes import router as pid_notes_router  # noqa: E402
+
+app.include_router(pid_notes_router)
+
 # --------------------------------------------------------- 登入與權限（Google OAuth）
 from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
 

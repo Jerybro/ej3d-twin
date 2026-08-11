@@ -56,8 +56,16 @@
     #stage { flex: 1; overflow: auto; background: #E9EDF2; position: relative; }
     #stage.empty { display: flex; align-items: center; justify-content: center; color: var(--dim); }
     #canvas-wrap { position: relative; display: inline-block; }
-    #sheet { display: block; user-select: none; -webkit-user-drag: none; }
+    #pane-a { position: relative; }
+    #sheet, #rebuild-img { display: block; user-select: none; -webkit-user-drag: none; }
     #overlay { position: absolute; inset: 0; }
+    /* 並排：兩欄同一個捲動與縮放，天生對齊 */
+    #canvas-wrap.side { display: flex; align-items: flex-start; gap: 10px; }
+    #canvas-wrap.side #pane-b { border-left: 1px dashed var(--bdr); padding-left: 10px; }
+    /* 疊圖：重建層蓋在原圖上，透明度可調 */
+    #canvas-wrap.ov #pane-b { position: absolute; inset: 0; pointer-events: none; }
+    #canvas-wrap.ov #rebuild-img { opacity: 0.8; }
+    #pane-b { display: none; }
 
     /* 標註框：顏色＝信心度、線型＝審核狀態。待審用虛線，已確認用實線，
        設備線較粗。有警示者一律紅色——警示的意思就是「別信那個數字」。 */
@@ -180,6 +188,32 @@
     /* 修訂後有更動的句子：高亮，讓工程師一眼看出這輪改了什麼 */
     .desc mark { background: rgba(224,164,21,0.30); border-bottom: 2px solid var(--mid);
       color: inherit; padding: 1px 2px; border-radius: 2px; }
+    /* 引用來源籤：報告的每一句都要能回溯出處 */
+    .desc .cite { display: inline-block; font-size: 10px; font-weight: 600;
+      padding: 0 5px; margin: 0 2px; border-radius: 7px; cursor: pointer;
+      background: rgba(4,106,251,0.10); color: var(--accent);
+      border: 1px solid rgba(4,106,251,0.30); vertical-align: 1px; }
+    .desc .cite:hover { background: var(--accent); color: #fff; }
+
+    /* ------------------------------------------------------ 現場評註 */
+    .nt { border: 1px solid var(--bdr); border-radius: 8px; background: var(--panel2);
+      padding: 7px 9px; margin-bottom: 5px; cursor: pointer; }
+    .nt:hover { border-color: var(--accent); }
+    .nt-h { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+    .nt-h b { color: var(--accent); }
+    .nt-h span { color: var(--dim); }
+    .nt-h .nt-by { flex: 1; text-align: right; }
+    .nt-h .x { flex: none; font-size: 13px; padding: 0 2px; }
+    .nt-h .x:hover { color: var(--lo); }
+    .nt-t { font-size: 12px; line-height: 1.65; margin-top: 3px; }
+    .nt-a { font-size: 10px; color: var(--dim); margin-top: 3px; }
+    /* 圖上的評註標記：實心角標，跟辨識框區分開 */
+    .nt-box { position: absolute; border: 1.5px solid var(--accent);
+      border-radius: 3px; background: rgba(4,106,251,0.07); pointer-events: auto;
+      cursor: help; }
+    .nt-box::before { content: '評'; position: absolute; top: -9px; left: -3px;
+      background: var(--accent); color: #fff; font-size: 9px; font-weight: 700;
+      padding: 0 3px; border-radius: 3px; }
     .spin { display: inline-block; width: 11px; height: 11px; border-radius: 50%;
       border: 2px solid var(--accent-deep); border-top-color: var(--accent);
       animation: sp 0.7s linear infinite; vertical-align: -1px; }
@@ -321,8 +355,16 @@
         <span id="zoom-val" style="color:var(--dim);min-width:40px;text-align:center">100%</span>
         <button class="mini-btn" id="zoom-in">＋</button>
         <button class="mini-btn" id="zoom-fit">全圖</button>
-        <a class="mini-btn" id="rebuild-link" href="#" target="_blank"
-           style="display:none">盲測重建比對</a>
+        <span id="cmp-grp" style="display:none">
+          <span class="hint" style="margin-right:2px">盲測重建</span>
+          <button class="mini-btn on" id="cmp-off">關</button>
+          <button class="mini-btn" id="cmp-side">並排</button>
+          <button class="mini-btn" id="cmp-ov">疊圖</button>
+          <span class="hint" id="cmp-ctl" style="display:none;margin-left:4px">
+            透明度 <input type="range" id="cmp-op" min="15" max="100" value="80"
+                        style="vertical-align:middle;width:80px;accent-color:var(--accent)" />
+          </span>
+        </span>
         <button class="mini-btn" id="flow-btn" style="display:none">製程順序圖</button>
         <span class="lg"><i style="border-color:var(--hi)"></i>高信心</span>
         <span class="lg"><i style="border-color:var(--mid);background:rgba(224,164,21,.15)"></i>待查</span>
@@ -369,6 +411,24 @@
           <div class="prog-txt" id="prog-txt">尚未辨識</div>
           <div class="prog-txt" id="cc-state" style="margin-top:-8px"></div>
           <div id="rev-host"></div>
+
+          <div class="section-title">現場評註 <span id="note-count"
+               style="color:var(--dim);font-weight:400"></span></div>
+          <div class="hint" style="margin-bottom:6px">走過現場才知道的事——「這台去年改過」
+            「這條線停用了」——寫在這裡。<b>製程說明會採用並標出引用來源</b>，
+            點說明裡的來源籤就跳回圖上位置。</div>
+          <div id="note-new" style="display:none;margin-bottom:8px">
+            <div class="hint" id="note-target" style="margin-bottom:4px"></div>
+            <textarea id="note-text" placeholder="例：209 捏和擠出機 2025 年改過押出馬達，實際產能約 2.4T/hr"
+              style="width:100%;min-height:52px;padding:7px 9px;border-radius:7px;
+                     border:1px solid var(--bdr);background:var(--panel2);
+                     font-family:inherit;font-size:12px"></textarea>
+            <div style="display:flex;gap:5px;margin-top:5px">
+              <button class="mini-btn primary" id="note-save" style="flex:1">新增評註</button>
+              <button class="mini-btn" id="note-cancel">取消</button>
+            </div>
+          </div>
+          <div id="note-list"><span class="hint">尚無評註。</span></div>
 
           <div class="section-title">手動標註</div>
           <div class="hint" id="man-hint">在圖面上直接拖曳框選一塊區域，即可補上 AI 沒抓到的元件。</div>
@@ -443,6 +503,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260811g"></script>
+  <script src="/static/js/pid-label.js?v=20260812b"></script>
 </body>
 </html>

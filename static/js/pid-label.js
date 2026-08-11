@@ -223,9 +223,16 @@ async function openDoc(name) {
     stage.innerHTML = '<span>圖面載入失敗。</span>'; return;
   }
   stage.className = '';
-  stage.innerHTML = `<div id="canvas-wrap"><img id="sheet" src="${esc(baseMeta.url)}" draggable="false" />
-    <div id="overlay"></div></div>`;
+  // 原圖與重建圖放在同一個 canvas-wrap 裡：並排時是 flex 兩欄、疊圖時
+  // 重建層絕對定位蓋上去。兩種模式都共用同一組縮放與捲動，不會對不齊，
+  // 也不必開新視窗把人帶離審核現場。
+  stage.innerHTML = `<div id="canvas-wrap">
+      <div id="pane-a"><img id="sheet" src="${esc(baseMeta.url)}" draggable="false" />
+        <div id="overlay"></div></div>
+      <div id="pane-b"><img id="rebuild-img" draggable="false" alt="重建圖" /></div>
+    </div>`;
   wrap = $('canvas-wrap'); sheet = $('sheet'); overlay = $('overlay');
+  setCompare('off');
   if (sheet.complete && sheet.naturalWidth) fitZoom();
   else sheet.addEventListener('load', fitZoom, { once: true });
   bindSelection();
@@ -237,11 +244,11 @@ async function openDoc(name) {
   assetModel = null;
   loadModel(true);           // 之前建過模就直接帶出資產庫（404 靜默）
   renderGroups();            // 高亮目前這張圖所屬的圖組
+  loadNotes();
   // 盲測重建與順序圖放工具列——原本埋在資產庫分頁裡，找不到
-  const rl = $('rebuild-link');
-  rl.href = `/twin/pid/rebuild?f=${encodeURIComponent(name)}`;
-  rl.style.display = '';
+  $('cmp-grp').style.display = '';
   $('flow-btn').style.display = '';
+  $('rebuild-img').dataset.for = '';        // 換圖要重抓重建圖
 }
 
 // 開掃之前先告訴使用者這張圖是什麼體系、將套用哪份規範、信心多少。
@@ -270,15 +277,49 @@ async function loadConvention(name) {
   }
 }
 
+// ------------------------------------------------------------ 盲測重建比對
+// 不開新視窗——把目前這一頁切成並排或疊圖。審核現場與重建圖擺在一起，
+// 才看得出「這一項到底有沒有進庫」，跳出去看等於中斷審核。
+let cmpMode = 'off';        // off | side | overlay
+
+function setCompare(mode) {
+  cmpMode = mode;
+  const w = $('canvas-wrap'), pb = $('pane-b'), img = $('rebuild-img');
+  if (!w || !pb) return;
+  w.classList.toggle('side', mode === 'side');
+  w.classList.toggle('ov', mode === 'overlay');
+  pb.style.display = mode === 'off' ? 'none' : '';
+  $('cmp-ctl').style.display = mode === 'off' ? 'none' : '';
+  ['cmp-off', 'cmp-side', 'cmp-ov'].forEach((id, i) =>
+    $(id).classList.toggle('on', ['off', 'side', 'overlay'][i] === mode));
+  if (mode !== 'off' && curFile && !img.dataset.for) {
+    img.dataset.for = curFile;
+    img.src = `/api/pid/model/${encodeURIComponent(curFile)}/rebuild.svg?t=${Date.now()}`;
+  }
+  applyZoom();
+}
+
+$('cmp-off').addEventListener('click', () => setCompare('off'));
+$('cmp-side').addEventListener('click', () => setCompare('side'));
+$('cmp-ov').addEventListener('click', () => setCompare('overlay'));
+$('cmp-op').addEventListener('input', e => {
+  $('rebuild-img').style.opacity = e.target.value / 100;
+});
+
 // -------------------------------------------------------------------- 縮放
 function applyZoom() {
   if (!sheet || !baseMeta) return;
-  sheet.style.width = Math.round(baseMeta.w * zoom) + 'px';
+  const px = Math.round(baseMeta.w * zoom);
+  sheet.style.width = px + 'px';
+  const rb = $('rebuild-img');
+  if (rb) rb.style.width = px + 'px';
   $('zoom-val').textContent = Math.round(zoom * 100) + '%';
 }
 function fitZoom() {
   if (!baseMeta) return;
-  zoom = Math.min(1, (stage.clientWidth - 24) / baseMeta.w); applyZoom();
+  // 並排時可用寬度剩一半，全圖要按半寬算才真的看得到整張
+  const avail = (stage.clientWidth - 24) / (cmpMode === 'side' ? 2.05 : 1);
+  zoom = Math.min(1, avail / baseMeta.w); applyZoom();
 }
 $('zoom-in').addEventListener('click', () => { zoom = Math.min(zoom * 1.4, 8); applyZoom(); });
 $('zoom-out').addEventListener('click', () => { zoom = Math.max(zoom / 1.4, 0.02); applyZoom(); });
@@ -533,6 +574,8 @@ function renderReviewCard() {
         <button class="mini-btn primary" id="acc-b">是，寫入台帳 <span style="opacity:.75">(Y)</span></button>
         <button class="mini-btn" id="rej-b">不是，判讀有誤 <span style="opacity:.6">(N)</span></button>
       </div>
+      <button class="mini-btn" id="note-b" style="width:100%;margin-top:6px">
+        為這一項加現場評註</button>
       <div class="act-note">寫入台帳＝這筆成為正式資產資料並記上你的簽名；
         判讀有誤＝不入庫，但保留稽核紀錄（不會靜默消失）。</div>
     </div>`;
@@ -540,6 +583,7 @@ function renderReviewCard() {
   $('next-b').onclick = () => focusItem(Math.min(items.length - 1, curIdx + 1));
   $('acc-b').onclick = () => decide('accepted');
   $('rej-b').onclick = () => decide('rejected');
+  $('note-b').onclick = () => openNoteFor(it);
   bindRegPicker(it);
 }
 
@@ -722,7 +766,20 @@ function boxTitle(a) {
 // 使用者反而看不出該優先看哪裡。
 function drawBoxes() {
   if (!overlay) return;
-  overlay.querySelectorAll('.an-box').forEach(b => b.remove());
+  overlay.querySelectorAll('.an-box, .nt-box').forEach(b => b.remove());
+  // 有評註的地方在圖上留一個標記——工程師的話要看得見在哪
+  for (const n of notes) {
+    const b = (n.bbox && n.bbox.length === 4) ? n.bbox
+      : (items.find(i => i.tag === n.tag) || {}).bbox;
+    if (!b) continue;
+    const d = document.createElement('div');
+    d.className = 'nt-box';
+    d.dataset.n = n.id;
+    d.title = `${n.id}｜${(n.by || '').split('@')[0] || ''}\n${n.text}`;
+    d.style.cssText = `left:${b[0] * 100}%;top:${b[1] * 100}%;`
+      + `width:${(b[2] - b[0]) * 100}%;height:${(b[3] - b[1]) * 100}%`;
+    overlay.appendChild(d);
+  }
   for (const a of items) {
     if (a.state === 'rejected' || !Array.isArray(a.bbox)) continue;
     const [x0, y0, x1, y1] = a.bbox;
@@ -924,9 +981,84 @@ async function loadHistory() {
 // ------------------------------------------------------- 製程說明
 let descText = '';          // 目前這一版說明（修訂時要帶回後端比對）
 
-// 模型把改動過的句子包在 ⟪⟫ 裡 → 轉成 <mark> 高亮
+// 模型把改動過的句子包在 ⟪⟫ 裡 → 轉成 <mark> 高亮；
+// ⟦N1⟧ 是評註引用 → 轉成可點的來源籤，點了跳回圖上那塊區域。
+// 報告的每一句都要能回溯出處，不然讀者無從查證。
 function renderDesc(t) {
-  return esc(t).replace(/⟪([\s\S]*?)⟫/g, '<mark>$1</mark>');
+  return esc(t)
+    .replace(/⟪([\s\S]*?)⟫/g, '<mark>$1</mark>')
+    .replace(/⟦(N\d+)⟧/g, (_, id) => {
+      const n = notes.find(x => x.id === id);
+      const who = ((n && n.by) || '').split('@')[0];
+      const where = n ? (n.tag || '框選區') : '';
+      return `<a class="cite" data-note="${id}" title="${esc((n && n.text) || '')}">`
+        + `${id}${where ? '·' + esc(where) : ''}${who ? '·' + esc(who) : ''}</a>`;
+    });
+}
+
+// ------------------------------------------------------------ 現場評註
+// 走過現場的人知道的事——「這台去年改過」「這條線停用了」——模型從圖上
+// 永遠讀不到。這些評註是製程說明的第一手來源（RAG），且說明會逐句標出
+// 引用編號，讀者點得回是誰說的、來自圖上哪裡。
+let notes = [];
+
+async function loadNotes() {
+  if (!curFile) return;
+  try {
+    const d = await getJSON(`/api/pid/notes/${encodeURIComponent(curFile)}`);
+    notes = d.notes || [];
+  } catch { notes = []; }
+  renderNotes();
+  drawBoxes();
+}
+
+function renderNotes() {
+  const el = $('note-list');
+  if (!el) return;
+  $('note-count').textContent = notes.length ? `（${notes.length}）` : '';
+  if (!notes.length) {
+    el.innerHTML = '<span class="hint">尚無評註。在圖上框選一塊區域，'
+      + '或在審核卡按「為這一項加評註」。</span>';
+    return;
+  }
+  el.innerHTML = notes.map(n => `<div class="nt" data-n="${esc(n.id)}">
+    <div class="nt-h"><b>${esc(n.id)}</b>
+      <span>${esc(n.tag || '框選區')}</span>
+      <span class="nt-by">${esc((n.by || '').split('@')[0] || '—')}</span>
+      <span class="x" data-del="${esc(n.id)}" title="刪除">×</span></div>
+    <div class="nt-t">${esc(n.text)}</div>
+    <div class="nt-a">${esc((n.at || '').replace('T', ' ').slice(0, 16))}
+      ${n.edited_at ? '（已編輯）' : ''}</div>
+  </div>`).join('');
+  el.querySelectorAll('.nt').forEach(d => d.addEventListener('click', () => {
+    const n = notes.find(x => x.id === d.dataset.n);
+    if (n && n.bbox && n.bbox.length === 4) showRing(n.bbox, n.id);
+    else if (n && n.tag) {
+      const it = items.find(i => i.tag === n.tag);
+      if (it) showRing(it.bbox, n.tag);
+    }
+  }));
+  el.querySelectorAll('[data-del]').forEach(d => d.addEventListener('click', async e => {
+    e.stopPropagation();
+    if (!confirm('刪除這則評註？製程說明下次重生成時會移除它的引用。')) return;
+    const r = await fetch(
+      `/api/pid/notes/${encodeURIComponent(curFile)}/${encodeURIComponent(d.dataset.del)}`,
+      { method: 'DELETE' });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.detail || '刪除失敗'); return; }
+    loadNotes();
+  }));
+}
+
+async function addNote(text, opt) {
+  const r = await fetch(`/api/pid/notes/${encodeURIComponent(curFile)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, bbox: opt.bbox || [], tag: opt.tag || '' }),
+  });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.detail || '新增失敗'); return; }
+  await loadNotes();
+  // 評註會改變製程說明的內容 → 標記為待重生成
+  descBaseline = '';
+  scheduleDesc();
 }
 
 let descBusy = false, descTimer = null, descBaseline = '';
@@ -948,12 +1080,21 @@ async function genDesc(feedback) {
     const d = await fetch('/api/pid/vlm/describe', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename: curFile, feedback: feedback || '',
-                             previous: descText }),
+                             previous: descText, provider: engine() }),
     }).then(r => r.json());
     if (d.detail) throw new Error(d.detail);
     descText = d.text;
     descBaseline = sig;
+    if (d.notes) notes = d.notes;
     out.innerHTML = `<div class="desc">${renderDesc(d.text)}</div>`;
+    // 來源籤可點：跳回圖上那塊區域，讀者查得到每句話憑什麼這樣寫
+    out.querySelectorAll('.cite').forEach(a => a.addEventListener('click', () => {
+      const n = notes.find(x => x.id === a.dataset.note);
+      if (!n) return;
+      const b = (n.bbox && n.bbox.length === 4) ? n.bbox
+        : (items.find(i => i.tag === n.tag) || {}).bbox;
+      if (b) showRing(b, n.id + '｜' + (n.tag || '框選區'));
+    }));
     const acc = items.filter(i => i.state === 'accepted').length;
     st.className = 'dp-state';
     st.innerHTML = d.revised
@@ -1005,8 +1146,34 @@ function openManual(box) {
   manBox = box;
   $('man-form').style.display = '';
   $('man-hint').innerHTML = `已框選區域，填入位號後即可加入。`;
-  $('man-tag').focus();
+  // 框選同時開評註——同一個框，使用者可能是要補標元件，也可能是要留一句話
+  noteTarget = { bbox: box, tag: '' };
+  $('note-new').style.display = '';
+  $('note-target').innerHTML = '評註對象：<b>此框選區域</b>';
+  $('note-text').focus();
 }
+
+// 評註對象：框選區域或某個元件
+let noteTarget = null;
+
+function openNoteFor(it) {
+  noteTarget = { bbox: it.bbox, tag: it.tag || '' };
+  $('note-new').style.display = '';
+  $('note-target').innerHTML = `評註對象：<b>${esc(it.tag || KIND_TXT[it.kind] || '此元件')}</b>`;
+  $('note-text').focus();
+  $('note-text').scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+$('note-cancel').addEventListener('click', () => {
+  noteTarget = null; $('note-new').style.display = 'none'; $('note-text').value = '';
+});
+$('note-save').addEventListener('click', async () => {
+  const t = $('note-text').value.trim();
+  if (!t) { alert('請先寫下評註內容'); return; }
+  if (!noteTarget) { alert('請先框選區域或選一個元件'); return; }
+  await addNote(t, noteTarget);
+  $('note-text').value = ''; $('note-new').style.display = 'none'; noteTarget = null;
+});
 $('man-cancel').addEventListener('click', () => {
   manBox = null; $('man-form').style.display = 'none';
   $('man-hint').textContent = '在圖面上直接拖曳框選一塊區域，即可補上 AI 沒抓到的元件。';

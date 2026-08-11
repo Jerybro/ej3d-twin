@@ -433,6 +433,20 @@ function render() {
   }
 }
 
+// 提問句：把「現在在問你什麼」講成一句人話。
+// 元件種類不同、有沒有位號，問法就不同——閥件多半無位號，硬套
+// 「真的是閥件這個閥件嗎」會變成廢話。
+function askText(it) {
+  const kind = KIND_TXT[it.kind] || '元件';
+  if (it.kind === 'equipment' && it.symbol && it.tag) {
+    return `圖上這個框，真的是 <b>${esc(it.tag)}　${esc(it.symbol)}</b> 嗎？`;
+  }
+  if (!it.tag) {
+    return `圖上這個位置，真的有一個<b>${esc(kind)}</b>嗎？`;
+  }
+  return `圖上這個位置，真的是 <b>${esc(it.tag)}</b> 這個${esc(kind)}嗎？`;
+}
+
 function renderReviewCard() {
   const host = $('rev-host');
   const it = items[curIdx];
@@ -497,12 +511,15 @@ function renderReviewCard() {
         ? esc(it._ctx)
         : '<span class="spin"></span> ' + (it.warn ? '查核這個判讀是否成立…' : '判讀這顆在圖上的角色與前後連接…')}</div>
       ${regPickerHtml(it)}
-      <input class="rev-note" id="rev-note" placeholder="備註（選填，會寫進台帳 CSV）"
+      <input class="rev-note" id="rev-note" placeholder="備註（選填）：寫下判斷理由或現場補充"
              value="${esc(it.user_note || '')}" />
+      <div class="ask">${askText(it)}</div>
       <div class="rev-act">
-        <button class="mini-btn primary" id="acc-b">確認正確 <span style="opacity:.75">(Y)</span></button>
-        <button class="mini-btn" id="rej-b">不是 <span style="opacity:.6">(N)</span></button>
+        <button class="mini-btn primary" id="acc-b">是，寫入台帳 <span style="opacity:.75">(Y)</span></button>
+        <button class="mini-btn" id="rej-b">不是，判讀有誤 <span style="opacity:.6">(N)</span></button>
       </div>
+      <div class="act-note">寫入台帳＝這筆成為正式資產資料並記上你的簽名；
+        判讀有誤＝不入庫，但保留稽核紀錄（不會靜默消失）。</div>
     </div>`;
   $('prev-b').onclick = () => focusItem(Math.max(0, curIdx - 1));
   $('next-b').onclick = () => focusItem(Math.min(items.length - 1, curIdx + 1));
@@ -685,6 +702,52 @@ async function loadAnnots() {
   if (!curFile) return;
   const ex = $('export-btn');
   ex.href = `/api/pid/vlm/export/${encodeURIComponent(curFile)}`;
+  loadHistory();
+}
+
+// ------------------------------------------------------- 歷史建檔與復原
+// 台帳是多人協作的東西：同事昨天審過一輪、今天你接手，得看得到他改了什麼，
+// 也得能退回去。同網域共用同一份台帳，跨網域互不可見。
+async function loadHistory() {
+  const el = $('hist-box');
+  if (!el || !curFile) return;
+  try {
+    const d = await getJSON(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}/history`);
+    const vs = d.versions || [];
+    if (!vs.length) {
+      el.innerHTML = `<span class="hint">此網域（${esc(d.domain)}）尚無建檔紀錄。
+        目前台帳 ${d.current.items} 筆。</span>`;
+      return;
+    }
+    el.innerHTML = `<div class="hint" style="margin-bottom:6px">網域
+        <b>${esc(d.domain)}</b>｜目前 ${d.current.items} 筆｜共 ${vs.length} 個版本
+        <button class="mini-btn" id="undo-b" style="float:right;padding:3px 9px">回到上一動</button></div>`
+      + vs.slice(0, 12).map(v => `<div class="hv" data-v="${esc(v.version)}">
+          <span class="hv-t">${esc((v.at || v.version).replace('T', ' ').slice(0, 16))}</span>
+          <span class="hv-a">${esc(v.action || '—')}</span>
+          <span class="hv-n">${v.items} 筆</span>
+          ${v.by ? `<span class="hv-b">${esc(v.by.split('@')[0])}</span>` : ''}
+        </div>`).join('');
+    $('undo-b').onclick = async () => {
+      if (!confirm('回到上一動？目前的台帳狀態會被前一版取代（仍可再往回還原）。')) return;
+      const r = await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}/undo`,
+                            { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(j.detail || '無法回復'); return; }
+      alert(`已回到上一動，台帳現有 ${j.items} 筆`);
+      loadHistory();
+    };
+    el.querySelectorAll('.hv').forEach(h => h.addEventListener('click', async () => {
+      if (!confirm(`還原到 ${h.dataset.v} 這一版？`)) return;
+      const r = await fetch(
+        `/api/pid/vlm/annot/${encodeURIComponent(curFile)}/restore/${encodeURIComponent(h.dataset.v)}`,
+        { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(j.detail || '還原失敗'); return; }
+      alert(`已還原，台帳現有 ${j.items} 筆`);
+      loadHistory();
+    }));
+  } catch { el.innerHTML = '<span class="hint">歷史紀錄載入失敗。</span>'; }
 }
 
 // ------------------------------------------------------- 製程說明

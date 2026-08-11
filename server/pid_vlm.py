@@ -18,7 +18,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/pid/vlm", tags=["pid-vlm"])
@@ -892,16 +892,33 @@ def scan(req: ScanReq) -> dict:
 #      （實測 2026-08-11：54 筆稽核被自動入庫連發整份清空）
 ANNOT_LOCK = threading.Lock()
 
+# 分租：台帳按 email 網域分開存。同公司共用（同事接得下去、改得動），
+# 跨公司互不可見——平台上同時有台化、中油、潤泰的圖，這條界線是必要的。
+# 舊資料（分租前的平面檔）留在原處當**共用基線**：任何網域讀得到、
+# 但寫入一律落到自己的網域目錄，不會互相蓋掉。
+def _domain_dir(domain: str) -> Path:
+    d = ANNOT_DIR / re.sub(r"[^a-z0-9.-]+", "-", (domain or "dev.local").lower())
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
-def _annot_path(filename: str) -> Path:
-    ANNOT_DIR.mkdir(parents=True, exist_ok=True)
-    return ANNOT_DIR / f"{_slug(Path(filename).stem)}.json"
+
+def _annot_path(filename: str, domain: str = "") -> Path:
+    slug = _slug(Path(filename).stem)
+    if not domain:                      # 未分租的呼叫端（既有內部函式）
+        ANNOT_DIR.mkdir(parents=True, exist_ok=True)
+        return ANNOT_DIR / f"{slug}.json"
+    return _domain_dir(domain) / f"{slug}.json"
 
 
-def _load_annots(filename: str) -> dict:
-    p = _annot_path(filename)
+def _hist_dir(filename: str, domain: str) -> Path:
+    d = _domain_dir(domain) / "_history" / _slug(Path(filename).stem)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _read_ledger(p: Path) -> dict | None:
     if not p.exists():
-        return {"items": [], "audit": [], "zones": {}}
+        return None
     try:
         d = json.loads(p.read_text(encoding="utf-8"))
         return {"items": d.get("items", []), "audit": d.get("audit", []),
@@ -913,14 +930,51 @@ def _load_annots(filename: str) -> dict:
             p.rename(p.with_name(f"{p.stem}.corrupt-{int(time.time())}.json"))
         except OSError:
             pass
+        return None
+
+
+def _load_annots(filename: str, domain: str = "") -> dict:
+    if domain:
+        d = _read_ledger(_annot_path(filename, domain))
+        if d is not None:
+            return d
+        # 本網域還沒有自己的台帳 → 繼承共用基線（唯讀，寫入時才落地成自己的）
+        base = _read_ledger(_annot_path(filename))
+        if base is not None:
+            return base
         return {"items": [], "audit": [], "zones": {}}
+    d = _read_ledger(_annot_path(filename))
+    return d if d is not None else {"items": [], "audit": [], "zones": {}}
 
 
-def _save_annots(filename: str, d: dict) -> None:
-    p = _annot_path(filename)
+def _save_annots(filename: str, d: dict, domain: str = "",
+                 snapshot: str = "") -> None:
+    """原子寫入＋版本快照。
+
+    快照讓「回到上一動」與「看同一張圖的歷史建檔」成為可能——
+    台帳是多人協作的東西，沒有版本史就等於每次寫入都在賭。
+    """
+    p = _annot_path(filename, domain)
     tmp = p.with_name(p.stem + ".tmp")
-    tmp.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+    body = json.dumps(d, ensure_ascii=False, indent=2)
+    tmp.write_text(body, encoding="utf-8")
     os.replace(tmp, p)
+    if not domain:
+        return
+    try:
+        from datetime import datetime, timezone
+
+        ts = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d-%H%M%S-%f")
+        (_hist_dir(filename, domain) / f"{ts}.json").write_text(
+            json.dumps({"at": ts, "action": snapshot, "items": d.get("items", []),
+                        "audit": d.get("audit", []), "zones": d.get("zones", {})},
+                       ensure_ascii=False), encoding="utf-8")
+        # 只留最近 60 版，舊的滾掉（一張圖審一輪約 50~70 次寫入）
+        vs = sorted(_hist_dir(filename, domain).glob("*.json"))
+        for old in vs[:-60]:
+            old.unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001
+        pass            # 快照失敗不能影響主寫入
 
 
 class ZoneReq(BaseModel):
@@ -929,13 +983,16 @@ class ZoneReq(BaseModel):
 
 
 @router.post("/zone/{filename}")
-def zone_mark(filename: str, req: ZoneReq) -> dict:
+def zone_mark(filename: str, req: ZoneReq, request: Request) -> dict:
     """標記某一分區已巡完——導覽進度的分母來源（整廠完成度靠這個算）。"""
     from datetime import datetime, timezone
 
+    from .auth import current_domain
+
     _safe_pdf(filename)
+    dom = current_domain(request)
     with ANNOT_LOCK:
-        d = _load_annots(filename)
+        d = _load_annots(filename, dom)
         if req.status == "todo":
             d["zones"].pop(req.zone, None)
         else:
@@ -944,18 +1001,85 @@ def zone_mark(filename: str, req: ZoneReq) -> dict:
                 "at": datetime.now(timezone.utc).astimezone()
                       .isoformat(timespec="seconds"),
             }
-        _save_annots(filename, d)
+        _save_annots(filename, d, dom, "zone")
     return {"ok": True, "zones": d["zones"]}
 
 
 @router.get("/annot/{filename}")
-def annot_list(filename: str) -> dict:
+def annot_list(filename: str, request: Request) -> dict:
+    from .auth import current_domain
+
     _safe_pdf(filename)
-    return _load_annots(filename)
+    return _load_annots(filename, current_domain(request))
+
+
+@router.get("/annot/{filename}/history")
+def annot_history(filename: str, request: Request) -> dict:
+    """同一張圖的歷史建檔——誰在什麼時候動了什麼，可回到任一版。
+
+    台帳是多人協作的東西：同事昨天審過一輪、今天你接手，得看得到
+    他改了什麼、也得能退回去。沒有版本史，協作就是互相覆蓋。
+    """
+    from .auth import current_domain
+
+    _safe_pdf(filename)
+    dom = current_domain(request)
+    out = []
+    for p in sorted(_hist_dir(filename, dom).glob("*.json"), reverse=True):
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        au = d.get("audit", [])
+        last = au[-1] if au else {}
+        out.append({"version": p.stem, "at": last.get("at") or d.get("at", ""),
+                    "action": d.get("action", ""), "items": len(d.get("items", [])),
+                    "audit": len(au), "by": last.get("by", ""),
+                    "tag": last.get("tag", "")})
+    cur = _load_annots(filename, dom)
+    return {"domain": dom, "current": {"items": len(cur["items"]),
+                                       "audit": len(cur["audit"])},
+            "versions": out}
+
+
+@router.post("/annot/{filename}/undo")
+def annot_undo(filename: str, request: Request) -> dict:
+    """回到上一動——還原成前一個版本快照。"""
+    from .auth import current_domain
+
+    _safe_pdf(filename)
+    dom = current_domain(request)
+    with ANNOT_LOCK:
+        vs = sorted(_hist_dir(filename, dom).glob("*.json"))
+        if len(vs) < 2:
+            raise HTTPException(409, "沒有可回復的上一動（本網域尚無足夠版本）")
+        prev = json.loads(vs[-2].read_text(encoding="utf-8"))
+        d = {"items": prev.get("items", []), "audit": prev.get("audit", []),
+             "zones": prev.get("zones", {})}
+        _save_annots(filename, d, dom, "undo")
+    return {"ok": True, "restored": vs[-2].stem, "items": len(d["items"])}
+
+
+@router.post("/annot/{filename}/restore/{version}")
+def annot_restore(filename: str, version: str, request: Request) -> dict:
+    """還原到指定的歷史版本（版本本身也會被記成一次快照，可再往回退）。"""
+    from .auth import current_domain
+
+    _safe_pdf(filename)
+    dom = current_domain(request)
+    p = _hist_dir(filename, dom) / f"{Path(version).name}.json"
+    if not p.exists():
+        raise HTTPException(404, "找不到這個版本")
+    with ANNOT_LOCK:
+        v = json.loads(p.read_text(encoding="utf-8"))
+        d = {"items": v.get("items", []), "audit": v.get("audit", []),
+             "zones": v.get("zones", {})}
+        _save_annots(filename, d, dom, f"restore:{version}")
+    return {"ok": True, "restored": version, "items": len(d["items"])}
 
 
 @router.post("/annot/{filename}")
-def annot_add(filename: str, item: Annot) -> dict:
+def annot_add(filename: str, item: Annot, request: Request) -> dict:
     """採納一筆標註。每筆都記稽核（誰、何時、來源）——模型輸出不會自己入庫。
 
     Upsert 語意：同位號且位置相近（或無位號但框幾乎重合）視為同一元件的
@@ -963,10 +1087,15 @@ def annot_add(filename: str, item: Annot) -> dict:
     """
     from datetime import datetime, timezone
 
+    from .auth import current_actor, current_domain
+
     _safe_pdf(filename)
     rec = item.model_dump()
+    dom = current_domain(request)
+    if not rec.get("verified_by"):
+        rec["verified_by"] = current_actor(request)   # 簽名自動落到登入者
     with ANNOT_LOCK:
-        d = _load_annots(filename)
+        d = _load_annots(filename, dom)
         now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
         cx = (rec["bbox"][0] + rec["bbox"][2]) / 2
         cy = (rec["bbox"][1] + rec["bbox"][3]) / 2
@@ -995,7 +1124,7 @@ def annot_add(filename: str, item: Annot) -> dict:
         d["audit"].append({"at": now, "action": action, "id": rid,
                            "tag": rec.get("tag", ""), "source": rec.get("source", ""),
                            "by": rec.get("verified_by", "")})
-        _save_annots(filename, d)
+        _save_annots(filename, d, dom, f"{action}:{rec.get('tag', '')}")
     return {"ok": True, "id": rid, "count": len(d["items"])}
 
 
@@ -1821,7 +1950,7 @@ class RejectReq(BaseModel):
 
 
 @router.post("/reject/{filename}")
-def annot_reject(filename: str, req: RejectReq) -> dict:
+def annot_reject(filename: str, req: RejectReq, request: Request) -> dict:
     """人工否決一筆候選——只寫稽核不入庫。
 
     一一審核的前提是「沒有東西被靜默丟掉」：AI 判錯了什麼、誰在什麼時候否決的，
@@ -1829,31 +1958,37 @@ def annot_reject(filename: str, req: RejectReq) -> dict:
     """
     from datetime import datetime, timezone
 
+    from .auth import current_actor, current_domain
+
     _safe_pdf(filename)
+    dom = current_domain(request)
     with ANNOT_LOCK:
-        d = _load_annots(filename)
+        d = _load_annots(filename, dom)
         d["audit"].append({
             "at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
-            "action": "reject", "tag": req.tag, "kind": req.kind, "reason": req.reason})
-        _save_annots(filename, d)
+            "action": "reject", "tag": req.tag, "kind": req.kind,
+            "reason": req.reason, "by": current_actor(request)})
+        _save_annots(filename, d, dom, f"reject:{req.tag}")
     return {"ok": True, "rejected": sum(1 for a in d["audit"] if a.get("action") == "reject")}
 
 
 @router.get("/export/{filename}")
-def annot_export(filename: str):
+def annot_export(filename: str, request: Request):
     """已確認標註 → CSV（設備台帳交付物）。
     帶 UTF-8 BOM，Excel 直接雙擊開不會變亂碼。"""
     import csv
 
     from fastapi.responses import StreamingResponse
 
+    from .auth import current_domain
+
     _safe_pdf(filename)
-    d = _load_annots(filename)
+    d = _load_annots(filename, current_domain(request))
     buf = io.StringIO()
     buf.write("﻿")                       # BOM：Excel 中文相容
     w = csv.writer(buf)
     w.writerow(["圖面", "位號", "類型", "語意", "安裝位置", "信心度",
-                "來源", "採納時間", "備註", "備註來源", "圖面X", "圖面Y"])
+                "來源", "採納時間", "備註", "備註來源", "審核者", "圖面X", "圖面Y"])
     kind_txt = {"equipment": "設備", "valve": "閥件", "instrument": "儀錶",
                 "pipe": "管線", "other": "其他"}
     for a in d["items"]:
@@ -1866,7 +2001,7 @@ def annot_export(filename: str):
                     a.get("confidence", ""), a.get("source", ""),
                     a.get("created_at", ""), a.get("note", ""),
                     "人工" if a.get("user_note") else ("系統" if a.get("note") else ""),
-                    cx, cy])
+                    a.get("verified_by", ""), cx, cy])
     buf.seek(0)
     fn = f"{_slug(Path(filename).stem)}_tags.csv"
     return StreamingResponse(
@@ -1875,17 +2010,20 @@ def annot_export(filename: str):
 
 
 @router.delete("/annot/{filename}/{item_id}")
-def annot_delete(filename: str, item_id: str) -> dict:
+def annot_delete(filename: str, item_id: str, request: Request) -> dict:
     from datetime import datetime, timezone
 
+    from .auth import current_domain
+
     _safe_pdf(filename)
+    dom = current_domain(request)
     with ANNOT_LOCK:
-        d = _load_annots(filename)
+        d = _load_annots(filename, dom)
         before = len(d["items"])
         d["items"] = [i for i in d["items"] if i.get("id") != item_id]
         if len(d["items"]) == before:
             raise HTTPException(404, "標註不存在")
         now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
         d["audit"].append({"at": now, "action": "delete", "id": item_id})
-        _save_annots(filename, d)
+        _save_annots(filename, d, dom, f"delete:{item_id}")
     return {"ok": True, "count": len(d["items"])}

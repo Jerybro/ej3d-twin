@@ -19,7 +19,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/pid/group", tags=["pid-group"])
@@ -76,16 +76,18 @@ def suggest_groups(filenames: list) -> list:
 
 
 # ------------------------------------------------------------- 跨圖清冊
-def group_of(filename: str) -> dict | None:
-    """這張圖屬於哪一組（一張圖只歸一組，避免跨圖參照互相汙染）。"""
+def group_of(filename: str, domain: str = "") -> dict | None:
+    """這張圖屬於哪一組（一張圖在同一網域內只歸一組，避免跨圖參照互相汙染）。"""
     name = Path(filename).name
     for g in _load().get("groups", []):
+        if domain and g.get("domain") and g["domain"] != domain:
+            continue
         if name in g.get("files", []):
             return g
     return None
 
 
-def sibling_registries(filename: str) -> list:
+def sibling_registries(filename: str, domain: str = "") -> list:
     """同組其他圖的設備清冊 → [{drawing, items}]。
 
     這是「欄位寫在下一張」的解法：本圖清冊查不到的項次號，
@@ -93,7 +95,7 @@ def sibling_registries(filename: str) -> list:
     """
     from .pid_model import _registry_of
 
-    g = group_of(filename)
+    g = group_of(filename, domain)
     if not g:
         return []
     me = Path(filename).name
@@ -107,7 +109,7 @@ def sibling_registries(filename: str) -> list:
     return out
 
 
-def crosssheet_lookup(item_no: str, filename: str) -> dict | None:
+def crosssheet_lookup(item_no: str, filename: str, domain: str = "") -> dict | None:
     """本圖查無的項次號 → 同組其他圖的清冊查找。
 
     回傳 {drawing, row}；查不到回 None。找到代表這是**跨圖參照**，
@@ -115,7 +117,7 @@ def crosssheet_lookup(item_no: str, filename: str) -> dict | None:
     """
     from .pid_model import _registry_match
 
-    for sib in sibling_registries(filename):
+    for sib in sibling_registries(filename, domain):
         row = _registry_match(item_no, sib["items"])
         if row:
             return {"drawing": sib["drawing"], "row": row}
@@ -137,10 +139,15 @@ class GroupPatch(BaseModel):
 
 # ------------------------------------------------------------- endpoints
 @router.get("")
-def list_groups() -> dict:
+def list_groups(request: Request) -> dict:
+    from .auth import current_domain
     from .pid_vlm import PID_DIR
 
+    dom = current_domain(request)
     d = _load()
+    # 只回本網域的圖組。同公司共用一份、跨公司互不可見——
+    # 平台同時放著台化、中油、潤泰的圖，圖組的歸屬也不該外流。
+    d["groups"] = [g for g in d["groups"] if g.get("domain", dom) == dom]
     files = sorted(p.name for p in PID_DIR.glob("*.pdf")) if PID_DIR.exists() else []
     grouped = {f for g in d["groups"] for f in g.get("files", [])}
     return {"groups": d["groups"],
@@ -150,26 +157,34 @@ def list_groups() -> dict:
 
 
 @router.post("")
-def create_group(req: GroupReq) -> dict:
+def create_group(req: GroupReq, request: Request) -> dict:
+    from .auth import current_actor, current_domain
+
+    dom = current_domain(request)
     d = _load()
-    gid = _slugify(req.name)
+    gid = f"{_slugify(req.name)}@{dom}"
     if any(g["id"] == gid for g in d["groups"]):
         raise HTTPException(409, "已有同名圖組")
-    # 一張圖只能屬於一組——先從別組移除，避免跨圖參照互相汙染
+    # 同網域內一張圖只能屬於一組——先從同網域別組移除，避免跨圖參照互相汙染
     for g in d["groups"]:
-        g["files"] = [f for f in g.get("files", []) if f not in req.files]
+        if g.get("domain", dom) == dom:
+            g["files"] = [f for f in g.get("files", []) if f not in req.files]
     g = {"id": gid, "name": req.name.strip(), "plant": req.plant.strip(),
-         "files": list(req.files), "created": _now()}
+         "files": list(req.files), "created": _now(),
+         "domain": dom, "created_by": current_actor(request)}
     d["groups"].append(g)
     _save(d)
     return g
 
 
 @router.patch("/{gid}")
-def patch_group(gid: str, req: GroupPatch) -> dict:
+def patch_group(gid: str, req: GroupPatch, request: Request) -> dict:
+    from .auth import current_domain
+
+    dom = current_domain(request)
     d = _load()
     g = next((x for x in d["groups"] if x["id"] == gid), None)
-    if not g:
+    if not g or g.get("domain", dom) != dom:
         raise HTTPException(404, "圖組不存在")
     if req.name is not None:
         g["name"] = req.name.strip()
@@ -186,10 +201,14 @@ def patch_group(gid: str, req: GroupPatch) -> dict:
 
 
 @router.delete("/{gid}")
-def delete_group(gid: str) -> dict:
+def delete_group(gid: str, request: Request) -> dict:
+    from .auth import current_domain
+
+    dom = current_domain(request)
     d = _load()
     n = len(d["groups"])
-    d["groups"] = [x for x in d["groups"] if x["id"] != gid]
+    d["groups"] = [x for x in d["groups"]
+                   if not (x["id"] == gid and x.get("domain", dom) == dom)]
     if len(d["groups"]) == n:
         raise HTTPException(404, "圖組不存在")
     _save(d)
@@ -197,19 +216,20 @@ def delete_group(gid: str) -> dict:
 
 
 @router.get("/{gid}/overview")
-def group_overview(gid: str) -> dict:
+def group_overview(gid: str, request: Request) -> dict:
     """整組彙總：各圖的資產統計、跨圖接續、共用清冊涵蓋範圍。
 
     這是「整體辨識」的入口——工程師先在這裡看見一套圖的全貌，
     再決定要進哪一張去審。
     """
+    from .auth import current_domain
     from .pid_linkset import build_set, parse_dwg_no
-    from .pid_model import MODEL_DIR, _registry_of
-    from .pid_vlm import _slug
+    from .pid_model import _model_path, _registry_of
 
+    dom = current_domain(request)
     d = _load()
     g = next((x for x in d["groups"] if x["id"] == gid), None)
-    if not g:
+    if not g or g.get("domain", dom) != dom:
         raise HTTPException(404, "圖組不存在")
 
     sheets, per_dwg = [], {}
@@ -219,7 +239,7 @@ def group_overview(gid: str) -> dict:
         stem = Path(f).stem
         reg = _registry_of(f)
         n_reg = len((reg or {}).get("items", []))
-        p = MODEL_DIR / f"{_slug(stem)}.json"
+        p = _model_path(f, dom)
         s = {"file": f, "built": p.exists(), "registry_rows": n_reg}
         if p.exists():
             try:

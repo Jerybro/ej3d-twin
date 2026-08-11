@@ -19,7 +19,7 @@ import math
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter(prefix="/api/pid/model", tags=["pid-model"])
 
@@ -62,6 +62,25 @@ def _num_key(s: str) -> tuple:
     純字串比對做不到，得轉數值元組。"""
     parts = re.findall(r"\d+", s or "")
     return tuple(int(p) for p in parts) if parts else (0,)
+
+
+def _model_path(filename: str, domain: str = "") -> Path:
+    """模型檔位置。分租後每個網域一份；未分租（內部呼叫）走舊的平面路徑，
+    那份同時是新網域的**共用基線**（讀得到、但不會被寫入蓋掉）。"""
+    from .pid_vlm import _slug
+
+    slug = _slug(Path(filename).stem)
+    if not domain:
+        MODEL_DIR.mkdir(parents=True, exist_ok=True)
+        return MODEL_DIR / f"{slug}.json"
+    d = MODEL_DIR / re.sub(r"[^a-z0-9.-]+", "-", domain.lower())
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / f"{slug}.json"
+    if not p.exists():
+        legacy = MODEL_DIR / f"{slug}.json"
+        if legacy.exists():
+            return legacy          # 尚未在本網域建模 → 先讀共用基線
+    return p
 
 
 def _registry_of(filename: str) -> dict | None:
@@ -382,8 +401,12 @@ def _zh_texts(filename: str) -> list:
 
 
 # ------------------------------------------------------------------- 建模
-def build_model(filename: str) -> dict:
-    """把「已確認標註＋清冊＋拓撲」編譯成資產模型並存檔。"""
+def build_model(filename: str, domain: str = "") -> dict:
+    """把「已確認標註＋清冊＋拓撲」編譯成資產模型並存檔。
+
+    domain：分租單位（email 網域）。模型是台帳的編譯產物，台帳分租了，
+    模型也必須跟著分，否則 A 公司會看到 B 公司審出來的資產。
+    """
     from datetime import datetime, timezone
 
     from .pid_topology import build_graph, control_loops, insert_valves, stats
@@ -392,7 +415,7 @@ def build_model(filename: str) -> dict:
     from .pid_vlm import _ensure_base
 
     pdf = _safe_pdf(filename)
-    annots = _load_annots(filename)
+    annots = _load_annots(filename, domain)
     accepted = annots.get("items", [])
     n_reject = sum(1 for a in annots.get("audit", [])
                    if a.get("action") == "reject")
@@ -654,7 +677,7 @@ def build_model(filename: str) -> dict:
             for it in loc["items"]:
                 if it.get("registry_item"):
                     continue
-                hit = crosssheet_lookup(it["tag"], filename)
+                hit = crosssheet_lookup(it["tag"], filename, domain)
                 if not hit:
                     continue
                 n_cross += 1
@@ -717,8 +740,7 @@ def build_model(filename: str) -> dict:
             "lines": len(lines), "loops": len(loops),
         },
     }
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    (MODEL_DIR / f"{_slug(Path(filename).stem)}.json").write_text(
+    _model_path(filename, domain).write_text(
         json.dumps(model, ensure_ascii=False, indent=2), encoding="utf-8")
     return model
 
@@ -931,28 +953,32 @@ def _svg_of(m: dict) -> str:
 
 # ---------------------------------------------------------------- endpoints
 @router.post("/build/{filename}")
-def model_build(filename: str) -> dict:
-    return build_model(filename)
+def model_build(filename: str, request: Request) -> dict:
+    from .auth import current_domain
+
+    return build_model(filename, current_domain(request))
 
 
 @router.get("/locate/{filename}")
-def model_locate(filename: str) -> dict:
+def model_locate(filename: str, request: Request) -> dict:
     """設備定位候選（PFD）——沒建過模就先建一次。
 
     回傳的是**候選**，前端把它併進審核佇列，工程師逐項確認才入庫；
     另附清冊全表供 L2「改配對」下拉使用（AI 配錯時人可以直接改指）。
     """
-    from .pid_vlm import _safe_pdf, _slug
+    from .auth import current_domain
+    from .pid_vlm import _safe_pdf
 
     _safe_pdf(filename)
-    p = MODEL_DIR / f"{_slug(Path(filename).stem)}.json"
+    dom = current_domain(request)
+    p = _model_path(filename, dom)
     if p.exists():
         try:
             m = json.loads(p.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            m = build_model(filename)
+            m = build_model(filename, dom)
     else:
-        m = build_model(filename)
+        m = build_model(filename, dom)
     rows = (_registry_of(filename) or {}).get("items", [])
     loc = m.get("locate") or {}
     return {"items": loc.get("items", []),
@@ -963,19 +989,20 @@ def model_locate(filename: str) -> dict:
 
 
 @router.get("/{filename}/rebuild.svg")
-def model_rebuild_svg(filename: str):
+def model_rebuild_svg(filename: str, request: Request):
     from fastapi.responses import Response
 
-    return Response(content=_svg_of(model_get(filename)),
+    return Response(content=_svg_of(model_get(filename, request)),
                     media_type="image/svg+xml")
 
 
 @router.get("/{filename}")
-def model_get(filename: str) -> dict:
-    from .pid_vlm import _safe_pdf, _slug
+def model_get(filename: str, request: Request) -> dict:
+    from .auth import current_domain
+    from .pid_vlm import _safe_pdf
 
     _safe_pdf(filename)
-    p = MODEL_DIR / f"{_slug(Path(filename).stem)}.json"
+    p = _model_path(filename, current_domain(request))
     if not p.exists():
         raise HTTPException(404, "尚未建立資產模型——先完成審核再按「建立資產模型」")
     try:

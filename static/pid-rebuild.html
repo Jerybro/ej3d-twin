@@ -59,6 +59,7 @@
       <span class="sp"></span>
       <button class="mini-btn on" id="mode-side">並排比對</button>
       <button class="mini-btn" id="mode-ov">疊圖比對</button>
+      <button class="mini-btn" id="diff-btn">標出差異</button>
       <span class="hint" id="op-box" style="display:none">
         重建透明度 <input type="range" id="op" min="10" max="100" value="85" style="vertical-align:middle" />
       </span>
@@ -67,11 +68,25 @@
     <div id="board">
       <!-- 並排：左原圖、右重建 -->
       <div class="pane" id="p-orig">
-        <div class="pane-head">原圖 <span>PDF 渲染</span></div>
-        <div class="pane-body" id="b-orig"><img id="orig-img" alt="原圖" /></div>
+        <div class="pane-head">原圖 <span>PDF 渲染</span>
+          <span id="diff-legend" style="display:none;margin-left:auto;font-weight:400">
+            <i style="display:inline-block;width:11px;height:9px;border:1.5px solid #D93F3F;
+               vertical-align:middle"></i> 完全沒進庫
+            <i style="display:inline-block;width:11px;height:9px;border:1.5px dashed #E0A415;
+               vertical-align:middle;margin-left:7px"></i> 有文字沒資產
+            <i style="display:inline-block;width:11px;height:11px;border:1.5px solid #E0A415;
+               border-radius:50%;vertical-align:middle;margin-left:7px"></i> 低信心要覆核
+          </span></div>
+        <div class="pane-body" id="b-orig">
+          <div id="orig-wrap" style="position:relative;display:inline-block">
+            <img id="orig-img" alt="原圖" />
+            <svg id="diff-svg" style="position:absolute;inset:0;width:100%;height:100%;
+                 pointer-events:none;display:none"></svg>
+          </div>
+        </div>
       </div>
       <div class="pane" id="p-reb">
-        <div class="pane-head">重建圖 <span>只讀資產模型 JSON 畫出——沒碰過原圖</span></div>
+        <div class="pane-head">重建圖 <span>只讀資產模型 JSON 畫出</span></div>
         <div class="pane-body" id="b-reb">
           <object id="reb-svg" type="image/svg+xml"></object>
           <div id="ov-wrap"><img id="ov-img" alt="原圖" /><object id="ov-svg" type="image/svg+xml"></object></div>
@@ -104,6 +119,7 @@
       try {
         const m = await fetch(`/api/pid/model/${encodeURIComponent(f)}`)
           .then(r => { if (!r.ok) throw new Error('尚未建立資產模型'); return r.json(); });
+        model = m;
         const s = m.stats || {};
         const geo = m.geometry || {};
         $('gaps').innerHTML = `<b>這張圖的庫存：</b>線稿 ${(geo.pipes || []).length} 段（含線寬/虛線樣式）｜流向箭頭 ${
@@ -116,6 +132,123 @@
           ——先回工作台完成審核並按「建立資產模型」。`;
       }
     }
+
+    // ---------------------------------------------------------- 差異標記
+    // 「哪裡不一樣」不是像素比對——重建圖用的是我們自己的符號系統，
+    // 像素本來就不會一樣。真正要回答的是「原圖上有內容，但沒有任何
+    // 資產／文字／線稿進到資料庫」的地方，那才是資料庫的洞。
+    //
+    // 作法：把圖切成網格，逐格比對「原圖有沒有墨」與「模型有沒有東西」。
+    // 有墨無資料 → 紅框；已入庫但信心低 → 黃圈提醒覆核。
+    const GX = 48, GY = 34;          // 網格密度（A1 圖切到這個粒度剛好一格一個元件區）
+    let diffOn = false, model = null;
+
+    function markDiff() {
+      const svg = document.getElementById('diff-svg');
+      const img = document.getElementById('orig-img');
+      if (!model || !img.naturalWidth) return;
+      const W = img.naturalWidth, H = img.naturalHeight;
+      svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+      // 1) 取原圖每格的墨量
+      const c = document.createElement('canvas');
+      c.width = GX * 4; c.height = GY * 4;         // 每格降到 4x4 取樣即可
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      const px = ctx.getImageData(0, 0, c.width, c.height).data;
+      const ink = new Float32Array(GX * GY);
+      for (let y = 0; y < c.height; y++) {
+        for (let x = 0; x < c.width; x++) {
+          const i = (y * c.width + x) * 4;
+          const lum = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114);
+          if (lum < 205) ink[Math.floor(y / 4) * GX + Math.floor(x / 4)] += 1;
+        }
+      }
+
+      // 2) 取模型每格的資料量，分兩層：
+      //    asset＝已辨識出的資產（氣泡/閥/設備/接續），text＝讀到的文字。
+      //    **不計線稿**——向量線我們幾乎全抓得到，拿它當覆蓋率會讓
+      //    整張圖看起來都「有資料」（實測只剩 1 格未覆蓋），問錯了問題。
+      //    真正該問的是：這塊畫了東西，我們認出「資產」了嗎？
+      const g = model.geometry || {};
+      const N = GX * GY;
+      const asset = new Uint16Array(N), text = new Uint16Array(N);
+      const cell = (x, y) => {
+        const i = Math.min(GX - 1, Math.max(0, Math.floor(x * GX)));
+        const j = Math.min(GY - 1, Math.max(0, Math.floor(y * GY)));
+        return j * GX + i;
+      };
+      (g.bubbles || []).forEach(b => { asset[cell(b[0], b[1])] += 1; });
+      (g.valve_nodes || []).forEach(v => { asset[cell(v[0], v[1])] += 1; });
+      (model.opcs || []).forEach(o => { asset[cell(o.x, o.y)] += 1; });
+      (model.locate?.items || []).concat(model.equipment || []).forEach(e => {
+        const b = e.bbox || e.candidate_bbox;
+        if (!b) return;
+        for (let j = Math.floor(b[1] * GY); j <= Math.floor(b[3] * GY); j++) {
+          for (let i = Math.floor(b[0] * GX); i <= Math.floor(b[2] * GX); i++) {
+            if (i >= 0 && i < GX && j >= 0 && j < GY) asset[j * GX + i] += 1;
+          }
+        }
+      });
+      (g.texts || []).forEach(t => { text[cell(t[0], t[1])] += 1; });
+
+      // 3) 兩層標記
+      //    紅框＝有圖但連文字都沒讀到（完全沒進庫）
+      //    橘框＝讀到文字但沒認出資產（半套，下一輪要補的辨識）
+      const parts = [];
+      let miss = 0, half = 0;
+      // 圖框、格線編號、比例尺本來就不會有資產，標了只是雜訊 → 跳過外圈；
+      // 墨量門檻也提高一點，把「只有一條細框線經過」的格子濾掉
+      const MX = Math.round(GX * 0.06), MY = Math.round(GY * 0.045);
+      for (let j = MY; j < GY - MY; j++) {
+        for (let i = MX; i < GX - MX; i++) {
+          const k = j * GX + i;
+          if (ink[k] < 5 || asset[k] > 0) continue;
+          const x = i / GX * W, y = j / GY * H, w = W / GX, h = H / GY;
+          if (text[k] === 0) {
+            miss++;
+            parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}"
+              fill="rgba(217,63,63,0.13)" stroke="#D93F3F" stroke-width="${W / 900}"/>`);
+          } else if (ink[k] >= 6) {
+            half++;
+            parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}"
+              fill="rgba(224,164,21,0.10)" stroke="#E0A415" stroke-width="${W / 1100}"
+              stroke-dasharray="${W / 260} ${W / 400}"/>`);
+          }
+        }
+      }
+
+      // 4) 已入庫但信心低 → 黃圈（審核者要回頭覆核的清單）
+      let low = 0;
+      (model.locate?.items || []).forEach(e => {
+        if ((e.confidence ?? 1) >= 0.75 && !e.warn) return;
+        const b = e.bbox; if (!b) return;
+        low++;
+        const cx = (b[0] + b[2]) / 2 * W, cy = (b[1] + b[3]) / 2 * H;
+        // 圈只要圈得住元件即可，太大會互相蓋住看不出指哪一顆
+        const r = Math.min(Math.max((b[2] - b[0]) * W, (b[3] - b[1]) * H) * 0.62
+                           + W / 320, W / 26);
+        parts.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none"
+          stroke="#E0A415" stroke-width="${W / 750}"/>`);
+      });
+
+      svg.innerHTML = parts.join('');
+      document.getElementById('gaps').innerHTML =
+        `<b>差異標記</b>（全圖切 ${GX}×${GY} 格，逐格比對原圖有沒有內容、資料庫有沒有資產）：
+         <b style="color:var(--lo)">${miss}</b> 格有圖形但連文字都沒讀到（紅實框）｜
+         <b style="color:var(--mid)">${half}</b> 格讀到文字卻沒認出資產（橘虛框）｜
+         已入庫但信心偏低 <b style="color:var(--mid)">${low}</b> 項（黃圈）。
+         <b>紅框與橘框＝下一輪要補的辨識；黃圈＝回工作台覆核。</b>
+         線稿本身不計入覆蓋——向量線幾乎全抓得到，拿它算會讓整張圖看起來都沒問題。`;
+    }
+
+    document.getElementById('diff-btn').addEventListener('click', () => {
+      diffOn = !diffOn;
+      document.getElementById('diff-btn').classList.toggle('on', diffOn);
+      document.getElementById('diff-svg').style.display = diffOn ? '' : 'none';
+      document.getElementById('diff-legend').style.display = diffOn ? '' : 'none';
+      if (diffOn) markDiff(); else init();
+    });
 
     function setMode(ov) {
       $('mode-side').classList.toggle('on', !ov);

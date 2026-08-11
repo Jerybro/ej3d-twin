@@ -126,7 +126,12 @@
       border: 1px solid rgba(4,106,251,0.35); background: #fff; color: var(--text);
       font-family: inherit; font-size: 12px; }
     .rev-note:focus { outline: none; border-color: var(--accent); }
-    .rev-act { display: flex; gap: 6px; margin-top: 11px; }
+    /* 提問句：講清楚「現在在問什麼」。原本只有「確認正確／不是」，
+       工程師看不出確認的是什麼、按下去會發生什麼事。 */
+    .ask { margin-top: 12px; font-size: 12.5px; color: #1d3557; line-height: 1.6; }
+    .ask b { font-size: 13.5px; }
+    .act-note { margin-top: 7px; font-size: 11px; color: #4b6a99; line-height: 1.65; }
+    .rev-act { display: flex; gap: 6px; margin-top: 8px; }
     .rev-act .mini-btn { flex: 1; text-align: center; padding: 8px; font-size: 12.5px; }
     .nav-row { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; }
     .nav-row .mini-btn { padding: 4px 9px; }
@@ -204,6 +209,17 @@
     .sug b { color: var(--text); }
     .pick { display: flex; align-items: center; gap: 5px; font-size: 11.5px;
       padding: 3px 0; word-break: break-all; }
+
+    /* -------------------------------------------------------- 歷史建檔 */
+    .hv { display: flex; align-items: center; gap: 6px; font-size: 11px;
+      padding: 4px 7px; border: 1px solid var(--bdr); border-radius: 6px;
+      background: var(--panel2); margin-bottom: 3px; cursor: pointer; }
+    .hv:hover { border-color: var(--accent); }
+    .hv-t { color: var(--dim); font-variant-numeric: tabular-nums; }
+    .hv-a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; }
+    .hv-n { color: var(--accent); font-weight: 600; }
+    .hv-b { color: var(--dim); }
 
     /* ------------------------------------------------- 資產庫（審核的下一步） */
     .as-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;
@@ -349,6 +365,9 @@
             </div>
           </div>
 
+          <div class="section-title">歷史建檔</div>
+          <div id="hist-box"><span class="hint">選擇圖面後顯示。</span></div>
+
           <div class="section-title">全部項目 <span id="li-count" style="color:var(--dim);font-weight:400"></span></div>
           <div id="li-list"><span class="hint">按上方按鈕辨識整張圖面。</span></div>
         </div>
@@ -396,6 +415,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260811c"></script>
+  <script src="/static/js/pid-label.js?v=20260811e"></script>
 </body>
 </html>

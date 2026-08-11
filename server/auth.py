@@ -82,6 +82,22 @@ def current_user(request: Request) -> dict | None:
     return {"email": email, **u}
 
 
+# 分租單位＝email 網域。同公司的人共用同一份圖組與台帳（一個人建的檔
+# 同事接得下去、也改得動），不同公司之間互不可見——平台上同時放著
+# 台化、中油、潤泰的圖，這條界線是必要的。
+def current_domain(request: Request) -> str:
+    u = current_user(request)
+    email = (u or {}).get("email") or ""
+    if "@" in email:
+        return email.split("@", 1)[1].lower()
+    return os.environ.get("PID_DEV_DOMAIN", "dev.local")
+
+
+def current_actor(request: Request) -> str:
+    """稽核用的操作者識別（免登入模式回空字串）。"""
+    return ((current_user(request) or {}).get("email") or "")
+
+
 # ------------------------------------------------------ 守衛 middleware
 # 未登入可及的路徑前綴——只留登入流程本身與靜態資源。
 #

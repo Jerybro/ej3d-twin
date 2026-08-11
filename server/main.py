@@ -518,5 +518,8 @@ PAGES = {
 }
 for route, fname in PAGES.items():
     def _page(fname=fname) -> FileResponse:
-        return FileResponse(STATIC_DIR / fname)
+        # 頁面本身也要 no-cache：JS 靠檔名版本號破快取，但 HTML 若被快取住，
+        # 使用者拿到的還是舊版本號，等於整條破快取機制失效（實測踩到）。
+        return FileResponse(STATIC_DIR / fname,
+                            headers={"Cache-Control": "no-cache, must-revalidate"})
     app.get(route)(_page)

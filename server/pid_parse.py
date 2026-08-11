@@ -829,19 +829,205 @@ def detect_bubbles(pdf_path: Path) -> tuple[list, float, float]:
         r = sum(ds) / n
         if not (BUBBLE_MIN <= r <= BUBBLE_MAX):
             continue
-        # 各點到中心的距離要夠一致才算圓／正多邊形（氣泡、六角、圓角框）
-        if max(ds) > r * 1.30 or min(ds) < r * 0.70:
+        shape = _poly_shape(pts)
+        # 距離一致性門檻依形狀放寬：圓/六角 1.30、方框對角比 √2≈1.414。
+        # 方框（DCS 共用顯示）以前整批被這條擋掉，畫成圓也對不上原圖。
+        lim = 1.5 if shape == "square" else 1.30
+        if max(ds) > r * lim or min(ds) < r * 0.70:
             continue
-        out.append((cx, cy, r))
+        out.append((cx, cy, r, shape))
 
-    # 同心重複（圓被畫兩次、或圓外還有方框）→ 併掉
-    out.sort(key=lambda b: -b[2])
+    # 同心重複（圓被畫兩次、或圓外還有方框）→ 併掉，圓優先於方框
+    out.sort(key=lambda b: (-b[2], b[3] != "circle"))
     merged: list = []
     for b in out:
         if any(math.dist(b[:2], m[:2]) < max(b[2], m[2]) * 0.6 for m in merged):
             continue
         merged.append(b)
     return merged, pw, ph
+
+
+def _poly_shape(pts: list) -> str:
+    """閉合子路徑的形狀：circle／hex／square。
+
+    判準是「大轉角數」：折線近似的圓每個頂點只轉一點點；六角形 6 個 60°；
+    方框 4 個 90°。這決定重建圖上畫圈、畫六角還是畫方框——
+    DCS 方框畫成圓，工程師一眼就知道不是原圖。
+    """
+    n = len(pts)
+    if n < 4:
+        return "circle"
+    corners = 0
+    for i in range(n):
+        a, b, c = pts[i - 2], pts[i - 1], pts[i]
+        v1 = (b[0] - a[0], b[1] - a[1])
+        v2 = (c[0] - b[0], c[1] - b[1])
+        n1, n2 = math.hypot(*v1), math.hypot(*v2)
+        if n1 < 0.3 or n2 < 0.3:
+            continue
+        cosang = max(-1.0, min(1.0, (v1[0] * v2[0] + v1[1] * v2[1]) / (n1 * n2)))
+        if math.degrees(math.acos(cosang)) > 40:
+            corners += 1
+    if corners in (4, 5):
+        return "square"
+    if corners in (6, 7):
+        return "hex"
+    return "circle"
+
+
+def styled_segments(pdf_path: Path) -> tuple[list, float, float]:
+    """整頁線段（含折線拆解）＋線條樣式 → [((x0,y0),(x1,y1), width, dashed)]。
+
+    all_segments 的樣式版：多抓每個路徑物件的 stroke width 與 dash 設定。
+    重建圖要分得出主管線（粗）與儀表信號線（細/虛），全畫同一種線寬
+    等於把圖面的資訊層級抹平。dash API 舊版 pdfium 沒有 → 安全降級為實線。
+    """
+    import ctypes
+
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as praw
+
+    doc = pdfium.PdfDocument(str(pdf_path))
+    try:
+        page = doc[0]
+        pw, ph = page.get_size()
+        out = []
+        for i in range(praw.FPDFPage_CountObjects(page.raw)):
+            obj = praw.FPDFPage_GetObject(page.raw, i)
+            if praw.FPDFPageObj_GetType(obj) != praw.FPDF_PAGEOBJ_PATH:
+                continue
+            wv = ctypes.c_float(1.0)
+            try:
+                praw.FPDFPageObj_GetStrokeWidth(obj, ctypes.byref(wv))
+            except AttributeError:
+                pass
+            dashed = False
+            try:
+                dashed = praw.FPDFPageObj_GetDashCount(obj) > 0
+            except AttributeError:
+                pass
+            width = round(max(float(wv.value), 0.0), 2)
+            m = praw.FS_MATRIX()
+            praw.FPDFPageObj_GetMatrix(obj, ctypes.byref(m))
+            cur: list = []
+            for j in range(praw.FPDFPath_CountSegments(obj)):
+                seg = praw.FPDFPath_GetPathSegment(obj, j)
+                x = ctypes.c_float()
+                y = ctypes.c_float()
+                praw.FPDFPathSegment_GetPoint(seg, ctypes.byref(x), ctypes.byref(y))
+                st = praw.FPDFPathSegment_GetType(seg)
+                X = m.a * x.value + m.c * y.value + m.e
+                Y = m.b * x.value + m.d * y.value + m.f
+                if st == praw.FPDF_SEGMENT_MOVETO:
+                    cur = [(X, Y)]
+                else:
+                    if cur:
+                        out.append((cur[-1], (X, Y), width, dashed))
+                    cur.append((X, Y))
+    finally:
+        doc.close()
+    return out, pw, ph
+
+
+# 箭頭三角形邊長範圍（pt）。太小是雜點、太大是設備符號的三角形。
+ARROW_MIN, ARROW_MAX = 2.5, 13.0
+
+
+def detect_arrows(pdf_path: Path) -> tuple[list, float, float]:
+    """向量幾何抓流向箭頭 → [(cx, cy, 角度deg)]（PDF 點座標）。
+
+    P&ID 的實心箭頭是 3 點閉合小三角形。方向＝底邊中點指向頂點；
+    頂點取「離對邊中點最遠」的那個（等腰箭頭的幾何定義）。
+    有方向的管線才是製程流程，沒方向只是線。
+    """
+    import ctypes
+
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as praw
+
+    doc = pdfium.PdfDocument(str(pdf_path))
+    try:
+        page = doc[0]
+        pw, ph = page.get_size()
+        tris = []
+        for i in range(praw.FPDFPage_CountObjects(page.raw)):
+            obj = praw.FPDFPage_GetObject(page.raw, i)
+            if praw.FPDFPageObj_GetType(obj) != praw.FPDF_PAGEOBJ_PATH:
+                continue
+            m = praw.FS_MATRIX()
+            praw.FPDFPageObj_GetMatrix(obj, ctypes.byref(m))
+            cur: list = []
+            paths = []
+            for j in range(praw.FPDFPath_CountSegments(obj)):
+                seg = praw.FPDFPath_GetPathSegment(obj, j)
+                x = ctypes.c_float()
+                y = ctypes.c_float()
+                praw.FPDFPathSegment_GetPoint(seg, ctypes.byref(x), ctypes.byref(y))
+                st = praw.FPDFPathSegment_GetType(seg)
+                X = m.a * x.value + m.c * y.value + m.e
+                Y = m.b * x.value + m.d * y.value + m.f
+                if st == praw.FPDF_SEGMENT_MOVETO:
+                    if cur:
+                        paths.append(cur)
+                    cur = [(X, Y)]
+                else:
+                    cur.append((X, Y))
+            if cur:
+                paths.append(cur)
+            for pts in paths:
+                # 去掉閉合重複點
+                if len(pts) >= 2 and math.dist(pts[0], pts[-1]) < 0.3:
+                    pts = pts[:-1]
+                if len(pts) != 3:
+                    continue
+                sides = [math.dist(pts[k], pts[(k + 1) % 3]) for k in range(3)]
+                if not all(ARROW_MIN <= s <= ARROW_MAX for s in sides):
+                    continue
+                tris.append(pts)
+    finally:
+        doc.close()
+
+    out = []
+    for pts in tris:
+        best = None
+        for k in range(3):
+            apex = pts[k]
+            b1, b2 = pts[(k + 1) % 3], pts[(k + 2) % 3]
+            mid = ((b1[0] + b2[0]) / 2, (b1[1] + b2[1]) / 2)
+            h = math.dist(apex, mid)
+            if best is None or h > best[0]:
+                best = (h, apex, mid)
+        h, apex, mid = best
+        base = math.dist(pts[0], pts[1]) + math.dist(pts[1], pts[2]) + \
+            math.dist(pts[2], pts[0]) - 2 * max(
+                math.dist(pts[0], pts[1]), math.dist(pts[1], pts[2]),
+                math.dist(pts[2], pts[0]))
+        # 等腰且夠尖才算箭頭（高/底 0.6~3.5），太扁的是符號零件
+        if base < 0.5 or not (0.6 <= h / base <= 3.5):
+            continue
+        ang = math.degrees(math.atan2(apex[1] - mid[1], apex[0] - mid[0]))
+        cx = sum(p[0] for p in pts) / 3
+        cy = sum(p[1] for p in pts) / 3
+        out.append((cx, cy, round(ang, 1)))
+    return out, pw, ph
+
+
+_zh_reader = None
+
+
+def _get_zh_reader():
+    """繁中＋英文 OCR reader（懶載入單例）。
+
+    主 reader 維持純英文——位號辨識的準確率不能為了註記陪葬。
+    中文 reader 只在建模的文字層補讀時使用（note 1-4 這類中文註記，
+    英文 reader 會讀成亂碼字串）。
+    """
+    global _zh_reader
+    if _zh_reader is None:
+        import easyocr
+
+        _zh_reader = easyocr.Reader(["ch_tra", "en"], gpu=True, verbose=False)
+    return _zh_reader
 
 
 def all_segments(pdf_path: Path) -> tuple[list, float, float]:

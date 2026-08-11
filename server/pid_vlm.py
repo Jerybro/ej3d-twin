@@ -597,7 +597,7 @@ def _bubble_ocr(filename: str) -> dict:
     W, H = meta["w"], meta["h"]
     out: dict = {}
     with Image.open(img_p) as im:
-        for nx, ny, rx, ry in _bubbles_norm(filename):
+        for nx, ny, rx, ry, _shape in _bubbles_norm(filename):
             px, py = nx * W, ny * H
             ex, ey = rx * W * 1.45, ry * H * 1.45      # 略放寬，圈邊的字才不被切
             c = im.crop((int(px - ex), int(py - ey), int(px + ex), int(py + ey)))
@@ -623,7 +623,8 @@ _bubble_cache: dict = {}
 
 
 def _bubbles_norm(filename: str) -> list:
-    """全圖儀錶氣泡 → [(cx, cy, rx, ry)] 正規化座標（rx/ry 為正規化半徑）。"""
+    """全圖儀錶氣泡 → [(cx, cy, rx, ry, shape)] 正規化座標
+    （rx/ry 為正規化半徑，shape ∈ circle/hex/square）。"""
     if filename in _bubble_cache:
         return _bubble_cache[filename]
     from .pid_parse import detect_bubbles, pdf_to_norm
@@ -632,11 +633,11 @@ def _bubbles_norm(filename: str) -> list:
     rot = meta.get("rot", 0)
     bl, pw, ph = detect_bubbles(_safe_pdf(filename))
     out = []
-    for bx, by, r in bl:
+    for bx, by, r, shape in bl:
         nx, ny = pdf_to_norm(bx, by, pw, ph, rot)
         rx = r / ph if rot in (90, 270) else r / pw
         ry = r / pw if rot in (90, 270) else r / ph
-        out.append((nx, ny, rx, ry))
+        out.append((nx, ny, rx, ry, shape))
     _bubble_cache[filename] = out
     return out
 
@@ -1248,7 +1249,7 @@ def scan_all(req: ScanAllReq) -> dict:
             bx0, by0, bx1, by1 = it["bbox"]
             cx2, cy2 = (bx0 + bx1) / 2, (by0 + by1) / 2
             inside = any(abs(cx2 - bx) < rx * 1.25 and abs(cy2 - by) < ry * 1.25
-                         for bx, by, rx, ry in bubbles)
+                         for bx, by, rx, ry, _s in bubbles)
             want = it["kind"] == "instrument"
             ok = (inside == want)
             it.setdefault("evidence", []).append({

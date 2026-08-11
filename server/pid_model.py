@@ -168,6 +168,75 @@ def _near_attrs(cx: float, cy: float, hits: list, radius: float) -> dict:
     return out
 
 
+def _zh_texts(filename: str) -> list:
+    """中文註記補讀（結果落地快取）→ [[nx, ny, text, nh], ...]，僅收含 CJK 的命中。
+
+    英文 reader 把中文註記讀成亂碼字串（note 1-4 實測全滅）。這裡用
+    繁中＋英雙語 reader 對整頁補讀一次，只取含中文字的結果——
+    位號辨識照舊走英文主 reader，準確率不受影響。
+    首次呼叫需下載繁中模型＋整頁推論（約 1 分鐘），之後走快取。
+    """
+    from .pid_vlm import VLM_DIR, _ensure_base, _slug
+
+    cache = VLM_DIR / f"{_slug(Path(filename).stem)}.hits-zh.json"
+    if cache.exists():
+        try:
+            return json.loads(cache.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    try:
+        import numpy as np
+        from PIL import Image
+
+        from .pid_parse import OCR_LOCK, _get_zh_reader
+
+        img_p, meta = _ensure_base(filename)
+        W, H = meta["w"], meta["h"]
+        out: list = []
+        TC, TR, OV = 3, 2, 0.04
+        with OCR_LOCK, Image.open(img_p) as im:
+            reader = _get_zh_reader()
+            for r in range(TR):
+                for c in range(TC):
+                    x0 = int(max(0.0, c / TC - OV) * W)
+                    y0 = int(max(0.0, r / TR - OV) * H)
+                    x1 = int(min(1.0, (c + 1) / TC + OV) * W)
+                    y1 = int(min(1.0, (r + 1) / TR + OV) * H)
+                    crop = im.crop((x0, y0, x1, y1)).convert("RGB")
+                    k = max(1.0, 1900 / crop.width)
+                    if k > 1:
+                        crop = crop.resize((int(crop.width * k),
+                                            int(crop.height * k)), Image.LANCZOS)
+                    try:
+                        res = reader.readtext(np.array(crop),
+                                              text_threshold=0.55, low_text=0.3)
+                    except Exception:  # noqa: BLE001
+                        continue
+                    for box, text, conf in res:
+                        if conf < 0.3 or not re.search(r"[一-鿿]", text):
+                            continue
+                        xs = [p[0] / k for p in box]
+                        ys = [p[1] / k for p in box]
+                        cx = (min(xs) + max(xs)) / 2 + x0
+                        cy = (min(ys) + max(ys)) / 2 + y0
+                        hh = (max(ys) - min(ys)) / 2
+                        out.append([round(cx / W, 4), round(cy / H, 4),
+                                    text.strip(), round(hh / H, 4)])
+        # tile 重疊去重
+        seen: set = set()
+        ded: list = []
+        for e in out:
+            key = (e[2], round(e[0], 2), round(e[1], 2))
+            if key in seen:
+                continue
+            seen.add(key)
+            ded.append(e)
+        cache.write_text(json.dumps(ded, ensure_ascii=False), encoding="utf-8")
+        return ded
+    except Exception:  # noqa: BLE001
+        return []
+
+
 # ------------------------------------------------------------------- 建模
 def build_model(filename: str) -> dict:
     """把「已確認標註＋清冊＋拓撲」編譯成資產模型並存檔。"""
@@ -269,22 +338,50 @@ def build_model(filename: str) -> dict:
         topo = {"ok": False, "reason": str(exc)[:200]}
 
     # 繪圖層線稿與拓撲**刻意分家**：拓撲要乾淨（page_segments 兩點段，
-    # 折線會混入字形筆劃干擾閥件偵測）；重建要完整（all_segments 折線拆解，
-    # 否則任何帶轉角的管線整條消失——實測主管線大面積斷裂就是這個原因）。
+    # 折線會混入字形筆劃干擾閥件偵測）；重建要完整（styled_segments 折線拆解
+    # ＋線寬/虛線樣式，否則帶轉角的管線消失、資訊層級被抹平）。
+    styles: list = []            # [{"w": pt, "dash": bool}]
     try:
-        from .pid_parse import all_segments, pdf_to_norm
+        from .pid_parse import pdf_to_norm, styled_segments
 
-        raw_segs, pw2, ph2 = all_segments(pdf)
-        for a, b in raw_segs:
+        raw_segs, pw2, ph2 = styled_segments(pdf)
+        sidx: dict = {}
+        for a, b, sw, dashed in raw_segs:
             if math.dist(a, b) < 4.0:   # 字形筆劃等碎屑；文字由 OCR 層負責
                 continue
+            key = (round(sw * 2) / 2, bool(dashed))
+            if key not in sidx:
+                sidx[key] = len(styles)
+                styles.append({"w": key[0], "dash": key[1]})
             u0, v0 = pdf_to_norm(a[0], a[1], pw2, ph2, rot)
             u1, v1 = pdf_to_norm(b[0], b[1], pw2, ph2, rot)
-            pipes.append([round(u0, 4), round(v0, 4), round(u1, 4), round(v1, 4)])
+            pipes.append([round(u0, 4), round(v0, 4), round(u1, 4),
+                          round(v1, 4), sidx[key]])
     except Exception:  # noqa: BLE001
         pass
 
-    # OCR 文字層：管線編號、註記、設備名——1269 筆命中本來就在快取裡，
+    # 流向箭頭：實心小三角形＋方向角。有方向的管線才是製程流程。
+    arrows: list = []
+    try:
+        from .pid_parse import detect_arrows, pdf_to_norm
+
+        raw_ar, pwa, pha = detect_arrows(pdf)
+        for ax, ay, ang in raw_ar:
+            u, v = pdf_to_norm(ax, ay, pwa, pha, rot)
+            # 旋轉圖面時角度也要跟著轉（pdf_to_norm 只轉座標）
+            aa = ang
+            if rot == 90:
+                aa = ang - 90
+            elif rot == 180:
+                aa = ang + 180
+            elif rot == 270:
+                aa = ang + 90
+            # PDF Y 軸朝上、影像 Y 軸朝下 → 角度取負
+            arrows.append([round(u, 4), round(v, 4), round(-aa % 360, 1)])
+    except Exception:  # noqa: BLE001
+        pass
+
+    # OCR 文字層：管線編號、註記、設備名——命中本來就在快取裡，
     # 不進模型等於白掃。tile 重疊會產生重複命中，以（文字＋粗位置）去重。
     texts: list = []
     if hits and W:
@@ -296,15 +393,45 @@ def build_model(filename: str) -> dict:
             seen_t.add(key)
             texts.append([round(hx / W, 4), round(hy / H, 4), str(t).strip(),
                           round(hh / H, 4)])
+    # 中文註記補讀：英文 reader 會把 note 1-4 讀成亂碼。中文命中蓋掉
+    # 同位置的英文亂碼，其餘位置維持英文結果（位號辨識不受影響）。
+    zh = _zh_texts(filename)
+    if zh:
+        kept = []
+        for e in texts:
+            garbage = any(abs(e[1] - z[1]) < z[3] * 1.5
+                          and abs(e[0] - z[0]) < max(len(z[2]), 2) * z[3] * 1.2
+                          for z in zh)
+            if not garbage:
+                kept.append(e)
+        texts = kept + zh
 
-    # 儀錶氣泡幾何層：130 顆實測圓心＋半徑。已審儀錶對位到最近氣泡後
-    # 用真實幾何畫（文字高度推半徑會偏大又漂移）；沒對上的畫空圈——
+    # OPC 跨圖接續角旗：070-2/01＝去 C12070-2 圖第 01 接點。
+    # 這是跨圖串接（pid_linkset）的圖面端證據，建模時一併實體化。
+    opcs: list = []
+    _opc_re = re.compile(r"(\d{2,4}-\d{1,2})/(\d{1,2}[A-Z]?)")
+    for tx, ty, txt, th in texts:
+        mm = _opc_re.search(str(txt).replace(" ", ""))
+        if mm:
+            opcs.append({"code": mm.group(0), "target_dwg": mm.group(1),
+                         "point": mm.group(2), "x": tx, "y": ty, "h": th,
+                         "source": "OCR（系統推定）"})
+
+    # 儀錶氣泡幾何層：實測圓心＋半徑＋形狀（圓/六角/DCS 方框）。
+    # 已審儀錶對位到最近氣泡後用真實幾何畫；沒對上的畫空圈——
     # 「這裡有儀錶還沒審」直接顯示在重建圖上，盲測圖同時是待辦地圖。
     try:
         from .pid_vlm import _bubbles_norm
 
-        bubbles = [[round(bx, 4), round(by, 4), round(rx, 4), round(ry, 4)]
-                   for bx, by, rx, ry in _bubbles_norm(filename)]
+        bubbles = []
+        for bx, by, rx, ry, shape in _bubbles_norm(filename):
+            # 方框誤判源多（表格欄位、小設備框）——框內要有文字才收
+            if shape == "square" and not any(
+                    abs(tx - bx) < rx and abs(ty - by) < ry
+                    for tx, ty, _t, _h in texts):
+                continue
+            bubbles.append([round(bx, 4), round(by, 4), round(rx, 4),
+                            round(ry, 4), shape])
     except Exception:  # noqa: BLE001
         bubbles = []
 
@@ -362,14 +489,18 @@ def build_model(filename: str) -> dict:
         "lines": sorted(lines.values(), key=lambda x: x["raw"]),
         "loops": [{"loop": k, **v} for k, v in sorted(loops.items())],
         "topology": topo,
+        "opcs": opcs,
         "geometry": {
             "aspect": round(meta["h"] / meta["w"], 4) if meta.get("w") else 0.7,
             "pipes": pipes,
+            "pipe_styles": styles,
+            "arrows": arrows,
             "valve_nodes": [[round(u, 4), round(v, 4), ci] for u, v, ci in vnodes],
             "texts": texts,
             "bubbles": bubbles,
-            "note": "向量幾何層（系統推定）——盲測重建的骨架，含設備輪廓線、"
-                    "OCR 文字層與儀錶氣泡實測幾何",
+            "note": "向量幾何層（系統推定）——盲測重建的骨架：線稿（含線寬/虛線"
+                    "樣式）、流向箭頭、OCR 文字層（中英雙讀）、儀錶氣泡實測幾何"
+                    "（含形狀）",
         },
         "stats": {
             "equipment": len(equipment),
@@ -419,13 +550,29 @@ def _svg_of(m: dict) -> str:
                      f'text-anchor="middle">{_x(txt)}</text>')
         p.append('</g>')
 
-    # 1) 線稿層（管線＋設備輪廓，向量幾何折線拆解版）
-    seg = []
-    for u0, v0, u1, v1 in g.get("pipes", []):
-        seg.append(f"M{u0 * W:.0f},{v0 * H:.0f}L{u1 * W:.0f},{v1 * H:.0f}")
-    if seg:
-        p.append(f'<path d="{"".join(seg)}" stroke="#2A3441" stroke-width="1.0" '
-                 'fill="none" stroke-linecap="round"/>')
+    # 1) 線稿層：按樣式分組畫——粗細/虛實還原原圖的資訊層級
+    #    （主管線粗、儀表信號細或虛；全畫同一種等於抹平圖面語言）
+    style_defs = g.get("pipe_styles") or [{"w": 1.0, "dash": False}]
+    grouped: dict = {}
+    for seg_ in g.get("pipes", []):
+        si = seg_[4] if len(seg_) > 4 else 0
+        grouped.setdefault(si, []).append(seg_)
+    scale_pt = W / 1190.0        # A1 橫幅約 1190pt → SVG px 換算
+    for si, segs_ in grouped.items():
+        st = style_defs[si] if si < len(style_defs) else {"w": 1.0, "dash": False}
+        sw = min(max(float(st.get("w", 1.0)) * scale_pt, 0.7), 3.2)
+        dash = ' stroke-dasharray="5 4"' if st.get("dash") else ""
+        d = "".join(f"M{s[0] * W:.0f},{s[1] * H:.0f}L{s[2] * W:.0f},{s[3] * H:.0f}"
+                    for s in segs_)
+        p.append(f'<path d="{d}" stroke="#2A3441" stroke-width="{sw:.2f}" '
+                 f'fill="none" stroke-linecap="round"{dash}/>')
+
+    # 1b) 流向箭頭：實心三角，方向來自向量幾何
+    for au, av, ang in g.get("arrows", []):
+        x, y = au * W, av * H
+        p.append(f'<g transform="rotate({ang:.1f} {x:.0f} {y:.0f})">'
+                 f'<path d="M{x + 6:.0f},{y:.0f}L{x - 4:.0f},{y - 4:.0f}'
+                 f'L{x - 4:.0f},{y + 4:.0f}Z" fill="#2A3441"/></g>')
 
     # 2) 閥件節點（拓撲層：蝴蝶結符號）
     for u, v, _ci in g.get("valve_nodes", []):
@@ -448,18 +595,34 @@ def _svg_of(m: dict) -> str:
         p.append(f'<text x="{x:.0f}" y="{y + 24:.0f}" font-size="10" '
                  f'fill="#046AFB" text-anchor="middle">{_x(lab)}</text>')
 
-    # 4) 儀錶氣泡：實測幾何優先。已審者對位到最近氣泡（真實圓心半徑），
-    #    沒審到的氣泡畫灰圈——重建圖同時是「哪裡還沒審」的待辦地圖。
+    # 4) 儀錶氣泡：實測幾何＋形狀（圓/六角/DCS 方框）。已審者對位到
+    #    最近氣泡；沒審到的畫灰圈——重建圖同時是「哪裡還沒審」的待辦地圖。
     bubs = g.get("bubbles", [])
     used_bub = set()
 
+    def _bub_shape(cx: float, cy: float, r: float, shape: str,
+                   stroke: str, dash: str = "") -> str:
+        if shape == "square":
+            s = r * 0.72
+            return (f'<rect x="{cx - s:.0f}" y="{cy - s:.0f}" width="{s * 2:.0f}" '
+                    f'height="{s * 2:.0f}" fill="#fff" stroke="{stroke}" '
+                    f'stroke-width="1.4"{dash}/>')
+        if shape == "hex":
+            pts = " ".join(
+                f"{cx + r * math.cos(math.radians(60 * k)):.0f},"
+                f"{cy + r * math.sin(math.radians(60 * k)):.0f}" for k in range(6))
+            return (f'<polygon points="{pts}" fill="#fff" stroke="{stroke}" '
+                    f'stroke-width="1.4"{dash}/>')
+        return (f'<circle cx="{cx:.0f}" cy="{cy:.0f}" r="{r:.0f}" fill="#fff" '
+                f'stroke="{stroke}" stroke-width="1.4"{dash}/>')
+
     def _nearest_bub(x: float, y: float):
         best, bi = None, -1
-        for i, (bx, by, rx, _ry) in enumerate(bubs):
+        for i, bb in enumerate(bubs):
             if i in used_bub:
                 continue
-            d = math.hypot(bx - x, by - y)
-            if d < max(rx * 1.6, 0.01) and (best is None or d < best):
+            d = math.hypot(bb[0] - x, bb[1] - y)
+            if d < max(bb[2] * 1.6, 0.01) and (best is None or d < best):
                 best, bi = d, i
         return bi
 
@@ -471,29 +634,42 @@ def _svg_of(m: dict) -> str:
         bi = _nearest_bub(x, y)
         if bi >= 0:
             used_bub.add(bi)
-            bx, by, rx, _ry = bubs[bi]
-            cx, cy, r = bx * W, by * H, max(rx * W, 11)
+            bb = bubs[bi]
+            cx, cy, r = bb[0] * W, bb[1] * H, max(bb[2] * W, 11)
+            shape = bb[4] if len(bb) > 4 else "circle"
         else:
             cx, cy = x * W, y * H
             r = max((b[3] - b[1]) * H * 0.95, 11)
+            shape = "circle"
         mm = re.match(r"^([A-Z]+)(.*)$", it.get("tag", ""))
         top, bot = (mm.group(1), mm.group(2)) if mm else (it.get("tag", ""), "")
         fs = min(max(r * 0.42, 6.5), r * 0.9 / max(len(top), len(bot), 1) * 1.7)
-        p.append(f'<circle cx="{cx:.0f}" cy="{cy:.0f}" r="{r:.0f}" fill="#fff" '
-                 'stroke="#046AFB" stroke-width="1.4"/>')
+        p.append(_bub_shape(cx, cy, r, shape, "#046AFB"))
         p.append(f'<text x="{cx:.0f}" y="{cy - r * 0.12:.0f}" font-size="{fs:.1f}" '
                  f'fill="#061027" text-anchor="middle" font-weight="600">{_x(top)}</text>')
         if bot:
             p.append(f'<text x="{cx:.0f}" y="{cy + r * 0.52:.0f}" font-size="{fs:.1f}" '
                      f'fill="#061027" text-anchor="middle">{_x(bot)}</text>')
 
-    # 未審核的偵測氣泡：空灰圈（審完會逐顆變藍）
-    for i, (bx, by, rx, _ry) in enumerate(bubs):
+    # 未審核的偵測氣泡：灰虛圈（審完會逐顆變藍）
+    for i, bb in enumerate(bubs):
         if i in used_bub:
             continue
-        p.append(f'<circle cx="{bx * W:.0f}" cy="{by * H:.0f}" r="{max(rx * W, 10):.0f}" '
-                 'fill="none" stroke="#C3CAD2" stroke-width="1.2" '
-                 'stroke-dasharray="4 3"/>')
+        shape = bb[4] if len(bb) > 4 else "circle"
+        p.append(_bub_shape(bb[0] * W, bb[1] * H, max(bb[2] * W, 10), shape,
+                            "#C3CAD2", ' stroke-dasharray="4 3"'))
+
+    # 5) OPC 跨圖接續角旗：琥珀色旗形＋接續碼——這張圖跟誰相連
+    for o in m.get("opcs", []):
+        x, y = o["x"] * W, o["y"] * H
+        hw = max(len(o["code"]) * 3.6, 26)
+        p.append(f'<path d="M{x - hw:.0f},{y - 9:.0f}H{x + hw - 10:.0f}'
+                 f'L{x + hw:.0f},{y:.0f}L{x + hw - 10:.0f},{y + 9:.0f}'
+                 f'H{x - hw:.0f}Z" fill="#FFF6E3" stroke="#8A5B00" '
+                 'stroke-width="1.3"/>')
+        p.append(f'<text x="{x - 3:.0f}" y="{y + 3.5:.0f}" font-size="10" '
+                 f'fill="#8A5B00" font-weight="600" '
+                 f'text-anchor="middle">{_x(o["code"])}</text>')
 
     # 5) 已確認且定位的設備
     for e in m.get("equipment", []):

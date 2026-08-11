@@ -1,0 +1,509 @@
+{
+  "drawing": "R-M0200-00-000-000-00 礦化及造粒系統流程圖_20260408",
+  "plant": "潤泰精密材料 楊梅廠 輕質玻珠新建工程",
+  "source": "圖面右上角設備清單表，Claude 視覺判讀逐列謄錄",
+  "verified_by": null,
+  "verified_at": null,
+  "items": [
+    {
+      "item": "106.1",
+      "range": null,
+      "name": "回料太空包架",
+      "spec": "",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "106.2",
+      "range": null,
+      "name": "天車",
+      "spec": "載重：1.5T",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "106",
+      "range": null,
+      "name": "斗昇機",
+      "spec": "產能：3T/hr",
+      "driver": "3HP*4P",
+      "qty": 1,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "201",
+      "range": null,
+      "name": "玻粉儲存桶",
+      "spec": "儲存量：10m³",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "202",
+      "range": null,
+      "name": "細料儲存桶",
+      "spec": "儲存量：4m³",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "202.1",
+      "range": null,
+      "name": "輔料儲存桶",
+      "spec": "儲存量：2.5m³",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "202.2",
+      "range": null,
+      "name": "斗昇機",
+      "spec": "產能：3T/hr",
+      "driver": "1HP*4P",
+      "qty": 1,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "202.3",
+      "range": null,
+      "name": "天車",
+      "spec": "載重：1.5T",
+      "driver": "3HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "203",
+      "range": null,
+      "name": "無動力收塵機",
+      "spec": "過濾面積：44m²",
+      "driver": "",
+      "qty": 2,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "204.1",
+      "range": "204.1~204.3",
+      "name": "手動閘閥",
+      "spec": "法蘭規格：16\"",
+      "driver": "",
+      "qty": 2,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "204.4",
+      "range": "204.4~204.6",
+      "name": "氣動蝶閥",
+      "spec": "204.4 法蘭規格：10\"；204.5~204.6 法蘭規格：16\"",
+      "driver": "",
+      "qty": 3,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "205",
+      "range": null,
+      "name": "玻粉螺運機",
+      "spec": "產能：22T/hr",
+      "driver": "3HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "206",
+      "range": null,
+      "name": "細料螺運機",
+      "spec": "產能：9T/hr",
+      "driver": "2HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "207",
+      "range": null,
+      "name": "輔料螺運機",
+      "spec": "產能：2T/hr",
+      "driver": "2HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "208.1",
+      "range": "208.1~208.3",
+      "name": "氣動蝶閥",
+      "spec": "法蘭規格：ø10\"",
+      "driver": "",
+      "qty": 2,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "209",
+      "range": null,
+      "name": "捏和擠出機",
+      "spec": "全容量：3000L；操作量：1800L",
+      "driver": "主馬達：75HP*6P；押出馬達：15HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "210",
+      "range": null,
+      "name": "隧道式烘箱帶運機 65M",
+      "spec": "產能：6T/hr",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "210-1",
+      "range": "210-1~210-2",
+      "name": "燃燒機",
+      "spec": "",
+      "driver": "5HP*4P",
+      "qty": 2,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "212",
+      "range": null,
+      "name": "雙軸破碎機",
+      "spec": "產能：6T/hr",
+      "driver": "100HP*6P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "213",
+      "range": null,
+      "name": "斗昇機",
+      "spec": "產能：6T/hr",
+      "driver": "1HP*4P",
+      "qty": 1,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "214",
+      "range": null,
+      "name": "隧道式烘箱帶運 50M",
+      "spec": "產能：6T/hr",
+      "driver": "3HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "214-1",
+      "range": "214-1~214-2",
+      "name": "燃燒機",
+      "spec": "",
+      "driver": "5HP*4P",
+      "qty": 2,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "216",
+      "range": null,
+      "name": "斗昇機",
+      "spec": "產能：6T/hr",
+      "driver": "1HP*4P",
+      "qty": 1,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "217",
+      "range": null,
+      "name": "四軸破碎機",
+      "spec": "產能：6T/hr",
+      "driver": "75HP*4P x 2set",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "217.1",
+      "range": null,
+      "name": "可拆式下料斗",
+      "spec": "",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "218",
+      "range": null,
+      "name": "斗昇機",
+      "spec": "產能：6T/hr",
+      "driver": "3HP*4P",
+      "qty": 1,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "301",
+      "range": null,
+      "name": "氣動雙向閥",
+      "spec": "",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "302",
+      "range": null,
+      "name": "雙向皮帶式輸送機",
+      "spec": "產能：7T/hr",
+      "driver": "2HP*4P",
+      "qty": 1,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "303.1",
+      "range": "303.1~303.3",
+      "name": "半生料儲存桶",
+      "spec": "儲存量：13m³",
+      "driver": "",
+      "qty": 3,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "304.1",
+      "range": "304.1~304.3",
+      "name": "手動閘閥",
+      "spec": "法蘭規格：16\"",
+      "driver": "",
+      "qty": 3,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "305.1",
+      "range": "305.1~305.3",
+      "name": "轉飼機",
+      "spec": "法蘭規格：16\"",
+      "driver": "",
+      "qty": 3,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "306",
+      "range": null,
+      "name": "出料帶運機",
+      "spec": "產能：7T/hr",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "307",
+      "range": null,
+      "name": "斗昇機",
+      "spec": "產能：3T/hr",
+      "driver": "2HP*4P",
+      "qty": 1,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "308",
+      "range": null,
+      "name": "氣動雙向閥",
+      "spec": "法蘭規格：ø8\"",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "309",
+      "range": null,
+      "name": "粉碎機",
+      "spec": "產能：3T/hr",
+      "driver": "50HP*4P",
+      "qty": 1,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "312",
+      "range": null,
+      "name": "雙層震篩機",
+      "spec": "產能：3T/hr",
+      "driver": "5HP*4P x 2set",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "313",
+      "range": null,
+      "name": "圓篩機",
+      "spec": "產能：1.5T/hr",
+      "driver": "3HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "313-1",
+      "range": "313-1~313-2",
+      "name": "超音波震動器",
+      "spec": "",
+      "driver": "",
+      "qty": 2,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "313.1",
+      "range": null,
+      "name": "負壓轉接桶",
+      "spec": "法蘭規格：8\"",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "313.2",
+      "range": null,
+      "name": "粉體料斗",
+      "spec": "法蘭規格：4\"",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "313.3",
+      "range": null,
+      "name": "魯式鼓風機",
+      "spec": "",
+      "driver": "0.75HP*4P",
+      "qty": 1,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "313.4",
+      "range": null,
+      "name": "轉飼機",
+      "spec": "1.11T/hr",
+      "driver": "0.5HP*4P",
+      "qty": 1,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "313.5",
+      "range": null,
+      "name": "氣動雙向閥",
+      "spec": "法蘭規格：8\"",
+      "driver": "",
+      "qty": 2,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "313.6",
+      "range": "313.6~313.7",
+      "name": "太空包架",
+      "spec": "",
+      "driver": "",
+      "qty": 2,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "314",
+      "range": null,
+      "name": "斗昇機",
+      "spec": "產能：3T/hr",
+      "driver": "2HP*4P",
+      "qty": 1,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "315",
+      "range": null,
+      "name": "收塵機",
+      "spec": "過濾面積：560m²",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "315-1",
+      "range": null,
+      "name": "震動馬達",
+      "spec": "",
+      "driver": "1/4HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "315-2",
+      "range": null,
+      "name": "螺運機",
+      "spec": "",
+      "driver": "2HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "315-3",
+      "range": null,
+      "name": "轉飼機",
+      "spec": "",
+      "driver": "1HP*4P",
+      "qty": 2,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "316",
+      "range": null,
+      "name": "收塵機排氣風車",
+      "spec": "",
+      "driver": "100HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    }
+  ]
+}

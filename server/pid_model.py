@@ -168,6 +168,76 @@ def _near_attrs(cx: float, cy: float, hits: list, radius: float) -> dict:
     return out
 
 
+def _hi_texts(filename: str) -> list:
+    """高解析度 OCR 補讀（快取）→ [[nx, ny, text, nh], ...]。
+
+    設備項次號（204.1、313.5）字比儀錶位號小，主掃描的 4×3／1900px
+    讀不到——實測潤泰有 13 個清冊項次號在圖上完全沒被讀出來。
+    這裡用 6×4／2600px 再掃一次，只花 ~28 秒，撈回 9 筆。
+    分兩支而不是直接調高主掃描：主掃描的參數是為位號審核流校過的，
+    不該為了設備定位去動它。
+    """
+    from .pid_vlm import VLM_DIR, _ensure_base, _slug
+
+    cache = VLM_DIR / f"{_slug(Path(filename).stem)}.hits-hi.json"
+    if cache.exists():
+        try:
+            return json.loads(cache.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    try:
+        import numpy as np
+        from PIL import Image
+
+        from .pid_parse import OCR_LOCK, _get_reader
+
+        img_p, meta = _ensure_base(filename)
+        W, H = meta["w"], meta["h"]
+        out: list = []
+        TC, TR, OV = 6, 4, 0.04
+        with OCR_LOCK, Image.open(img_p) as im:
+            reader = _get_reader()
+            for r in range(TR):
+                for c in range(TC):
+                    x0 = int(max(0.0, c / TC - OV) * W)
+                    y0 = int(max(0.0, r / TR - OV) * H)
+                    x1 = int(min(1.0, (c + 1) / TC + OV) * W)
+                    y1 = int(min(1.0, (r + 1) / TR + OV) * H)
+                    crop = im.crop((x0, y0, x1, y1)).convert("RGB")
+                    k = max(1.0, 2600 / crop.width)
+                    if k > 1:
+                        crop = crop.resize((int(crop.width * k),
+                                            int(crop.height * k)), Image.LANCZOS)
+                    try:
+                        res = reader.readtext(np.array(crop), text_threshold=0.5,
+                                              low_text=0.28)
+                    except Exception:  # noqa: BLE001
+                        continue
+                    for box, text, conf in res:
+                        t = str(text).strip()
+                        if conf < 0.3 or not t:
+                            continue
+                        xs = [p[0] / k for p in box]
+                        ys = [p[1] / k for p in box]
+                        cx = (min(xs) + max(xs)) / 2 + x0
+                        cy = (min(ys) + max(ys)) / 2 + y0
+                        hh = (max(ys) - min(ys)) / 2
+                        out.append([round(cx / W, 4), round(cy / H, 4), t,
+                                    round(hh / H, 4)])
+        seen: set = set()
+        ded: list = []
+        for e in out:
+            key = (e[2], round(e[0], 2), round(e[1], 2))
+            if key in seen:
+                continue
+            seen.add(key)
+            ded.append(e)
+        cache.write_text(json.dumps(ded, ensure_ascii=False), encoding="utf-8")
+        return ded
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _vert_texts(filename: str) -> list:
     """直式文字補讀（快取）→ [[nx, ny, text, nh, 90], ...]。
 
@@ -351,6 +421,7 @@ def build_model(filename: str) -> dict:
     # ---- 設備（PFD 走清冊 join；P&ID 走位號型別）----
     registry = _registry_of(filename)
     reg_rows = (registry or {}).get("items", [])
+    # 註：定位器的候選在 texts / pipes 都齊之後才算得出來，見本函式尾段
     equipment = []
     seen_reg = set()
     for a in accepted:
@@ -360,7 +431,12 @@ def build_model(filename: str) -> dict:
              "bbox": a.get("bbox"), "note": a.get("user_note", ""),
              "verified_by": a.get("verified_by", ""),
              "source": "審核確認", "on_drawing": True}
-        row = _registry_match(a.get("tag", ""), reg_rows) if reg_rows else None
+        # 審核者改過配對（L2）就以他選的為準——人工判斷凌駕自動比對
+        picked = a.get("registry_item") or ""
+        row = None
+        if reg_rows:
+            row = (next((r for r in reg_rows if r.get("item") == picked), None)
+                   if picked else _registry_match(a.get("tag", ""), reg_rows))
         if row:
             seen_reg.add(row["item"])
             e.update({"name": row.get("name", ""), "spec": row.get("spec", ""),
@@ -481,6 +557,10 @@ def build_model(filename: str) -> dict:
         texts = kept + zh
     # 直式文字補讀：左右圖緣的豎排管線標示，水平 OCR 看不見
     texts += _vert_texts(filename)
+    # 高解析補讀：設備項次號字太小，主掃描讀不到（PFD 設備定位的關鍵來源）
+    have = {(e[2], round(e[0], 2), round(e[1], 2)) for e in texts}
+    texts += [e for e in _hi_texts(filename)
+              if (e[2], round(e[0], 2), round(e[1], 2)) not in have]
 
     # OPC 跨圖接續角旗：070-2/01＝去 C12070-2 圖第 01 接點。
     # 這是跨圖串接（pid_linkset）的圖面端證據，建模時一併實體化。
@@ -552,6 +632,26 @@ def build_model(filename: str) -> dict:
                                    round((hy + hh) / H, 4)] if W else None,
                           "source": "OCR（系統推定，未逐條審核）"}
 
+    # ---- 設備定位器（PFD）：清冊有、圖上還沒審的，自動長出候選框 ----
+    # 候選不入庫、只進審核佇列——與儀錶同一條人工驗證關卡。
+    aspect = round(meta["h"] / meta["w"], 4) if meta.get("w") else 0.7
+    locate = {"ok": False}
+    try:
+        from .pid_locate import locate_equipment
+
+        loc = locate_equipment(texts, pipes, aspect, reg_rows, _registry_match)
+        done = {a.get("tag") for a in accepted if a.get("kind") == "equipment"}
+        loc["items"] = [i for i in loc["items"] if i["tag"] not in done]
+        # 已定位但尚未審核的清冊列 → 在資產庫顯示為「候選待審」而非「未定位」
+        cand_of = {i["registry_item"]: i for i in loc["items"] if i["registry_item"]}
+        for e in equipment:
+            if e.get("bbox") is None and e["tag"] in cand_of:
+                e["candidate_bbox"] = cand_of[e["tag"]]["bbox"]
+                e["source"] = "設備清冊＋定位器候選（待審）"
+        locate = {"ok": True, **loc["stats"], "items": loc["items"]}
+    except Exception as exc:  # noqa: BLE001
+        locate = {"ok": False, "reason": str(exc)[:200]}
+
     model = {
         "drawing": Path(filename).name,
         "profile": "pfd" if is_pfd else "isa-5.1",
@@ -566,8 +666,9 @@ def build_model(filename: str) -> dict:
         "loops": [{"loop": k, **v} for k, v in sorted(loops.items())],
         "topology": topo,
         "opcs": opcs,
+        "locate": locate,
         "geometry": {
-            "aspect": round(meta["h"] / meta["w"], 4) if meta.get("w") else 0.7,
+            "aspect": aspect,
             "pipes": pipes,
             "pipe_styles": styles,
             "arrows": arrows,
@@ -802,6 +903,33 @@ def _svg_of(m: dict) -> str:
 @router.post("/build/{filename}")
 def model_build(filename: str) -> dict:
     return build_model(filename)
+
+
+@router.get("/locate/{filename}")
+def model_locate(filename: str) -> dict:
+    """設備定位候選（PFD）——沒建過模就先建一次。
+
+    回傳的是**候選**，前端把它併進審核佇列，工程師逐項確認才入庫；
+    另附清冊全表供 L2「改配對」下拉使用（AI 配錯時人可以直接改指）。
+    """
+    from .pid_vlm import _safe_pdf, _slug
+
+    _safe_pdf(filename)
+    p = MODEL_DIR / f"{_slug(Path(filename).stem)}.json"
+    if p.exists():
+        try:
+            m = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            m = build_model(filename)
+    else:
+        m = build_model(filename)
+    rows = (_registry_of(filename) or {}).get("items", [])
+    loc = m.get("locate") or {}
+    return {"items": loc.get("items", []),
+            "stats": {k: v for k, v in loc.items() if k != "items"},
+            "registry": [{"item": r.get("item"), "name": r.get("name", ""),
+                          "spec": r.get("spec", ""), "range": r.get("range")}
+                         for r in rows]}
 
 
 @router.get("/{filename}/rebuild.svg")

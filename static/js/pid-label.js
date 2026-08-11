@@ -202,12 +202,37 @@ $('scan-all-btn').addEventListener('click', async () => {
     $('cc-state').innerHTML = `幾何驗證通過自動放行 <b style="color:var(--hi)">${auto}</b> 項｜`
       + `需人工審核 <b>${items.length - auto}</b> 項`;
     scheduleDesc();
+    loadLocateCandidates();          // PFD：設備定位候選另外補進佇列
   } catch (e) {
     alert('辨識失敗：' + (e.message || ''));
   } finally {
     b.disabled = false; b.textContent = '重新辨識整張圖面';
   }
 });
+
+// ------------------------------------- 設備定位候選（PFD）
+// 清冊早就知道 209 是捏和擠出機，缺的是「它在圖上哪裡」。定位器把框長出來，
+// 工程師逐項確認才入庫——與儀錶同一條人工驗證關卡。
+let registryRows = [];
+
+async function loadLocateCandidates() {
+  if (!curFile) return;
+  try {
+    const d = await getJSON(`/api/pid/model/locate/${encodeURIComponent(curFile)}`);
+    registryRows = d.registry || [];
+    const have = new Set(items.map(i => `${i.kind}:${i.tag}`));
+    const add = (d.items || [])
+      .filter(i => !have.has(`equipment:${i.tag}`))
+      .map(i => ({ ...i, state: 'pending' }));
+    if (!add.length) return;
+    items = items.concat(add);
+    const s = d.stats || {};
+    $('cc-state').innerHTML += `<br>設備定位器：清冊 <b>${s.registry_rows || 0}</b> 列中 `
+      + `<b style="color:var(--accent)">${s.registry_located || 0}</b> 列已長出候選框，`
+      + `新增 <b>${add.length}</b> 項待審`;
+    render();
+  } catch { /* 非 PFD 或尚未建模，靜默略過 */ }
+}
 
 // ------------------------------------- OCR × VLM 雙重檢查（背景逐項跑）
 // 不能只靠 OCR：它的信心只代表「字元讀對了」，不代表「這裡真的有這個位號」
@@ -346,6 +371,7 @@ function renderReviewCard() {
       <div class="ctx${it.warn ? ' verify' : ''}" id="ctx-box">${it._ctx
         ? esc(it._ctx)
         : '<span class="spin"></span> ' + (it.warn ? '查核這個判讀是否成立…' : '判讀這顆在圖上的角色與前後連接…')}</div>
+      ${regPickerHtml(it)}
       <input class="rev-note" id="rev-note" placeholder="備註（選填，會寫進台帳 CSV）"
              value="${esc(it.user_note || '')}" />
       <div class="rev-act">
@@ -357,6 +383,40 @@ function renderReviewCard() {
   $('next-b').onclick = () => focusItem(Math.min(items.length - 1, curIdx + 1));
   $('acc-b').onclick = () => decide('accepted');
   $('rej-b').onclick = () => decide('rejected');
+  bindRegPicker(it);
+}
+
+// L2 改配對：AI 配錯清冊列時，工程師直接改指正確項次。
+// 只有 PFD（有設備清冊）才有意義——P&ID 沒清冊可配，這塊不顯示。
+function regPickerHtml(it) {
+  if (it.kind !== 'equipment' || !registryRows.length) return '';
+  const cur = it.registry_item || '';
+  const opts = registryRows.map(r =>
+    `<option value="${esc(r.item)}"${r.item === cur ? ' selected' : ''}>${esc(r.item)}　${esc(r.name || '')}</option>`).join('');
+  return `<div style="margin-top:10px">
+    <div class="rev-sub" style="margin-bottom:4px">對照設備清冊
+      ${cur ? '' : '<b style="color:#8a5b00">（未配對，請選擇）</b>'}</div>
+    <select class="rev-note" id="reg-pick" style="padding:7px 9px">
+      <option value=""${cur ? '' : ' selected'}>（不對照清冊）</option>${opts}
+    </select></div>`;
+}
+
+function bindRegPicker(it) {
+  const sel = $('reg-pick');
+  if (!sel) return;
+  sel.onchange = () => {
+    const row = registryRows.find(r => r.item === sel.value);
+    it.registry_item = sel.value;
+    it.symbol = row ? (row.name || '設備') : '設備（待確認類型）';
+    it.warn = sel.value ? '' : it.warn;
+    it.evidence = (it.evidence || []).filter(e => e.stage !== '人工改配對');
+    it.evidence.push({
+      stage: '人工改配對', ok: true, score: 1.0,
+      detail: row ? `審核者將此項改指清冊「${row.item}　${row.name || ''}」`
+                  : '審核者將此項標記為不對照清冊',
+    });
+    render();
+  };
 }
 
 function renderList() {
@@ -456,7 +516,7 @@ async function decide(state) {
     if (state === 'accepted') {
       await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...it, source: 'scan' }),
+        body: JSON.stringify({ ...it, source: it.source === '定位器' ? 'locate' : 'scan' }),
       });
     } else {
       await fetch(`/api/pid/vlm/reject/${encodeURIComponent(curFile)}`, {

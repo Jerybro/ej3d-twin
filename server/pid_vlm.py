@@ -342,8 +342,11 @@ class Annot(BaseModel):
     note: str = ""
     user_note: str = ""      # 工程師手寫備註，優先於系統描述
     confidence: float = 0.0
-    source: str = "vlm"          # vlm-cloud | vlm-local | manual
+    source: str = "vlm"          # vlm-cloud | vlm-local | manual | scan | locate
     verified_by: str = ""
+    # 審核者選定的設備清冊列（L2 改配對）。定位器可能配錯，人改過的才算數——
+    # 沒這個欄位，pydantic 會靜默丟掉改配對的結果（mounting 踩過同一個坑）。
+    registry_item: str = ""
 
 
 # ---------------------------------------------------------------- endpoints

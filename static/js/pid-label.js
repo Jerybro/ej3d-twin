@@ -237,6 +237,11 @@ async function openDoc(name) {
   assetModel = null;
   loadModel(true);           // 之前建過模就直接帶出資產庫（404 靜默）
   renderGroups();            // 高亮目前這張圖所屬的圖組
+  // 盲測重建與順序圖放工具列——原本埋在資產庫分頁裡，找不到
+  const rl = $('rebuild-link');
+  rl.href = `/twin/pid/rebuild?f=${encodeURIComponent(name)}`;
+  rl.style.display = '';
+  $('flow-btn').style.display = '';
 }
 
 // 開掃之前先告訴使用者這張圖是什麼體系、將套用哪份規範、信心多少。
@@ -672,6 +677,35 @@ async function decide(state) {
   checkStale();          // 標註一改，既有製程說明就可能過期
 }
 
+// 滑過方塊要看得懂它是什麼——只有「204.4｜信心 95%」等於沒說。
+// 這裡把語意（名稱、規格、驅動、迴路、屬性）、來源與審核狀態一次講完，
+// 人工建立或人工改過配對的框也要標出來，那是誰的判斷要看得見。
+function boxTitle(a) {
+  const L = [];
+  const head = [a.tag || KIND_TXT[a.kind] || '元件'];
+  if (a.symbol && a.symbol !== a.tag) head.push(a.symbol);
+  L.push(head.join('　'));
+  if (a.spec) L.push('規格：' + a.spec);
+  if (a.driver) L.push('驅動：' + a.driver);
+  if (a.size || a.state || a.bore) {
+    L.push('屬性：' + [a.size, a.state, a.bore].filter(Boolean).join('／'));
+  }
+  if (a.mounting) L.push('安裝：' + a.mounting);
+  const loop = (a.tag || '').match(/(\d{3,6})[A-Z]?$/);
+  if (a.kind === 'instrument' && loop) L.push('控制迴路：' + loop[1]);
+  if (a.registry_item) L.push('對照清冊：' + a.registry_item);
+  if (a.cross_sheet) L.push('跨圖參照：清冊在 ' + a.cross_sheet.slice(0, 24));
+  const src = { manual: '人工建立', locate: '定位器候選', scan: '整張辨識',
+                'auto-geom': '幾何驗證自動放行', 定位器: '定位器候選' }[a.source] || a.source || '';
+  L.push(`來源：${src || '未標'}｜信心 ${Math.round((a.confidence || 0) * 100)}%`);
+  if (a.state === 'accepted') L.push('狀態：已確認入庫' + (a.verified_by ? `（${a.verified_by}）` : ''));
+  else if (a.state === 'rejected') L.push('狀態：已否決');
+  else L.push('狀態：待審');
+  if (a.user_note) L.push('備註：' + a.user_note);
+  if (a.warn) L.push('⚠ ' + a.warn);
+  return L.join('\n');
+}
+
 // 只畫「已確認」的框——未確認的不畫，避免整片色塊蓋住圖面
 // 框線顏色＝信心度（綠高／黃中／紅低），線型＝審核狀態（實線已確認／虛線待審）。
 // 一律綠色等於把「這項很可靠」和「這項很可疑」畫成同一個樣子，
@@ -685,8 +719,7 @@ function drawBoxes() {
     const d = document.createElement('div');
     d.className = 'an-box ' + confClass2(a) + (a.state === 'pending' ? ' pending' : '')
       + (a.kind === 'equipment' ? ' eq' : '');
-    d.title = `${a.tag || KIND_TXT[a.kind]}｜信心 ${Math.round(a.confidence * 100)}%`
-      + (a.warn ? '｜⚠ ' + a.warn : '');
+    d.title = boxTitle(a);
     d.style.cssText = `left:${x0 * 100}%;top:${y0 * 100}%;` +
       `width:${(x1 - x0) * 100}%;height:${(y1 - y0) * 100}%`;
     overlay.appendChild(d);
@@ -704,6 +737,75 @@ async function loadAnnots() {
   ex.href = `/api/pid/vlm/export/${encodeURIComponent(curFile)}`;
   loadHistory();
 }
+
+// ------------------------------------------------------- 製程順序圖
+// 資產庫回答「這張圖有什麼」，順序圖回答「物料怎麼走」。後者才是製程，
+// 也是之後掛即時數據時的骨架（要判上下游異常傳遞，得先知道上下游）。
+// 證據強度必須寫在臉上：箭頭定向＝圖面證據，項次號推測＝工程慣例。
+let flowData = null;
+
+async function openFlow() {
+  if (!curFile) return;
+  const b = $('flow-btn');
+  b.disabled = true; b.textContent = '推導中…';
+  try {
+    flowData = await getJSON(`/api/pid/model/flow/${encodeURIComponent(curFile)}`);
+    if (!flowData.ok) { alert(flowData.reason || '無法推導'); return; }
+    switchTab('assets');
+    renderFlow();
+  } catch (e) { alert('推導失敗：' + (e.message || '')); }
+  finally { b.disabled = false; b.textContent = '製程順序圖'; }
+}
+
+function renderFlow() {
+  const d = flowData, s = d.stats;
+  const ROLE = { 起點: 'st', 終點: 'en', 分流點: 'sp', 匯流點: 'mg', 孤立: 'is' };
+  const byLevel = {};
+  d.nodes.forEach(n => { (byLevel[n.level] = byLevel[n.level] || []).push(n); });
+
+  const lvls = Object.keys(byLevel).map(Number).sort((a, b) => a - b).map(L => `
+    <div class="fl-lv">
+      <div class="fl-lvn">第 ${L + 1} 階</div>
+      <div class="fl-row">${byLevel[L].map(n => `
+        <div class="fl-n ${ROLE[n.role] || ''}" data-tag="${esc(n.tag)}"
+             title="${esc(n.name || '')}｜上游 ${n.upstream.join('、') || '無'}｜下游 ${n.downstream.join('、') || '無'}">
+          <b>${esc(n.tag)}</b>
+          <span>${esc((n.name || '').slice(0, 8))}</span>
+          <i>${esc(n.role)}${n.out > 1 ? ' ×' + n.out : ''}</i>
+        </div>`).join('')}</div>
+    </div>`).join('');
+
+  $('as-body').innerHTML = `
+    <div class="as-stats">
+      <div class="as-stat"><b>${s.links}</b><span>物料連線</span></div>
+      <div class="as-stat"><b>${s.splits}</b><span>分流點</span></div>
+      <div class="as-stat"><b>${s.merges}</b><span>匯流點</span></div>
+      <div class="as-stat"><b>${s.starts}</b><span>起點</span></div>
+      <div class="as-stat"><b>${s.ends}</b><span>終點</span></div>
+      <div class="as-stat"><b>${s.isolated}</b><span>未接上</span></div>
+    </div>
+    <div class="hint" style="margin-bottom:9px">方向來源：
+      <b style="color:var(--hi)">${s.by_arrow}</b> 條由圖面流向箭頭判定（強證據）｜
+      <b style="color:var(--mid)">${s.by_item_no}</b> 條無箭頭可判，依項次號順序推測
+      （工程慣例，非圖面證據，請人工確認）。
+      ${s.isolated ? `另有 <b>${s.isolated}</b> 台設備沒有任何線接上，多半是內含元件或
+        線稿沒抽到，需人工補。` : ''}</div>
+    <button class="mini-btn" id="flow-back" style="width:100%;margin-bottom:10px">← 回資產庫</button>
+    <div class="fl">${lvls}</div>
+    <div class="section-title">連線明細</div>
+    ${d.edges.map(e => `<div class="fl-e ${e.dir_by}">
+        <b>${esc(e.from)}</b> → <b>${esc(e.to)}</b>
+        <div>${esc(e.evidence)}</div></div>`).join('')}`;
+
+  $('flow-back').onclick = () => renderModel();
+  $('as-body').querySelectorAll('.fl-n').forEach(el =>
+    el.addEventListener('click', () => {
+      const n = d.nodes.find(x => x.tag === el.dataset.tag);
+      if (n && n.bbox) showRing(n.bbox, n.tag);
+    }));
+}
+
+$('flow-btn').addEventListener('click', openFlow);
 
 // ------------------------------------------------------- 歷史建檔與復原
 // 台帳是多人協作的東西：同事昨天審過一輪、今天你接手，得看得到他改了什麼，
@@ -930,9 +1032,6 @@ function renderModel() {
       <div class="as-stat"><b>${s.valves_on_net || 0}</b><span>閥已掛網</span></div>
     </div>
     ${topoLine ? `<div class="hint" style="margin-bottom:8px">${esc(topoLine)}</div>` : ''}
-    <a class="mini-btn" style="width:100%;text-align:center;padding:8px;margin-bottom:9px"
-       href="/twin/pid/rebuild?f=${encodeURIComponent(curFile)}" target="_blank">盲測重建比對
-      <span style="opacity:.65">（只靠資料庫重畫這張圖）</span></a>
     <input class="as-search" id="as-q" placeholder="搜尋位號／名稱／屬性…" />
     <div id="as-list"></div>`;
   $('as-q').addEventListener('input', renderAssetList);

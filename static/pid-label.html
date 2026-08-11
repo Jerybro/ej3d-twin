@@ -210,6 +210,28 @@
     .pick { display: flex; align-items: center; gap: 5px; font-size: 11.5px;
       padding: 3px 0; word-break: break-all; }
 
+    /* ---------------------------------------------------- 製程順序圖 */
+    .fl-lv { margin-bottom: 9px; }
+    .fl-lvn { font-size: 10.5px; color: var(--dim); margin-bottom: 3px; }
+    .fl-row { display: flex; flex-wrap: wrap; gap: 4px; }
+    .fl-n { border: 1px solid var(--bdr); border-radius: 7px; padding: 5px 8px;
+      background: var(--panel2); cursor: pointer; min-width: 74px; }
+    .fl-n:hover { border-color: var(--accent); }
+    .fl-n b { display: block; font-size: 12px; }
+    .fl-n span { display: block; font-size: 10.5px; color: var(--dim); }
+    .fl-n i { font-size: 9.5px; font-style: normal; color: var(--dim); }
+    .fl-n.st { border-color: var(--hi); background: rgba(18,161,80,0.07); }
+    .fl-n.en { border-color: #7C4DFF; background: rgba(124,77,255,0.06); }
+    .fl-n.sp { border-color: var(--accent); background: var(--accent-deep); }
+    .fl-n.sp i, .fl-n.mg i { color: var(--accent); font-weight: 700; }
+    .fl-n.mg { border-color: var(--mid); background: rgba(224,164,21,0.08); }
+    .fl-n.is { opacity: 0.55; border-style: dashed; }
+    .fl-e { font-size: 11px; padding: 5px 8px; border-radius: 6px;
+      background: var(--panel2); border-left: 3px solid var(--mid);
+      margin-bottom: 4px; line-height: 1.6; }
+    .fl-e.arrow { border-left-color: var(--hi); }
+    .fl-e div { color: var(--dim); font-size: 10.5px; }
+
     /* -------------------------------------------------------- 歷史建檔 */
     .hv { display: flex; align-items: center; gap: 6px; font-size: 11px;
       padding: 4px 7px; border: 1px solid var(--bdr); border-radius: 6px;
@@ -296,6 +318,9 @@
         <span id="zoom-val" style="color:var(--dim);min-width:40px;text-align:center">100%</span>
         <button class="mini-btn" id="zoom-in">＋</button>
         <button class="mini-btn" id="zoom-fit">全圖</button>
+        <a class="mini-btn" id="rebuild-link" href="#" target="_blank"
+           style="display:none">盲測重建比對</a>
+        <button class="mini-btn" id="flow-btn" style="display:none">製程順序圖</button>
         <span class="lg"><i style="border-color:var(--hi)"></i>高信心</span>
         <span class="lg"><i style="border-color:var(--mid);background:rgba(224,164,21,.15)"></i>待查</span>
         <span class="lg"><i style="border-color:var(--lo);background:rgba(217,63,63,.15)"></i>可疑</span>
@@ -415,6 +440,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260811e"></script>
+  <script src="/static/js/pid-label.js?v=20260811f"></script>
 </body>
 </html>

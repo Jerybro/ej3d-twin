@@ -988,6 +988,39 @@ def model_locate(filename: str, request: Request) -> dict:
                          for r in rows]}
 
 
+@router.get("/flow/{filename}")
+def model_flow(filename: str, request: Request) -> dict:
+    """製程順序圖：誰先誰後、哪裡分流匯流。
+
+    來源是**已定位的設備**（含尚未審核的候選）＋線稿＋流向箭頭。
+    方向優先採信箭頭；沒有箭頭的連線退回項次號順序，並在證據裡
+    明講那是工程慣例推測不是圖面證據——順序圖是要拿去掛數據的骨架，
+    推論與事實混在一起是最危險的。
+    """
+    from .pid_flow import build_flow
+
+    m = model_locate(filename, request)      # 需要時會自動建模
+    full = model_get(filename, request)
+    g = full.get("geometry") or {}
+    eq = []
+    seen = set()
+    for src in (m.get("items") or []):
+        if src["tag"] in seen:
+            continue
+        seen.add(src["tag"])
+        eq.append({"tag": src["tag"], "name": src.get("symbol", ""),
+                   "bbox": src["bbox"]})
+    for e in (full.get("equipment") or []):
+        b = e.get("bbox") or e.get("candidate_bbox")
+        if not b or e["tag"] in seen:
+            continue
+        seen.add(e["tag"])
+        eq.append({"tag": e["tag"], "name": e.get("name") or e.get("type", ""),
+                   "bbox": b})
+    return build_flow(eq, g.get("pipes") or [], g.get("arrows") or [],
+                      g.get("aspect") or 0.7)
+
+
 @router.get("/{filename}/rebuild.svg")
 def model_rebuild_svg(filename: str, request: Request):
     from fastapi.responses import Response

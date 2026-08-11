@@ -81,12 +81,22 @@ def build_flow(equipment: list, pipes: list, arrows: list, aspect: float) -> dic
         G.add_edge(a, b, seg=i)
 
     # ── 2. 設備「埠」：落在設備框內（或緊鄰）的線段端點 ──────
+    #      定位器的候選框常互相重疊；一個端點落在兩台設備框內時，配給
+    #      「框中心最近」的那台——原本後到先贏（迭代順序決定歸屬）等於
+    #      擲骰子，重疊區的埠會把兩台設備亂牽在一起。
     port_of: dict = {}          # node → 設備 index
-    for idx, e in enumerate(eq):
-        for n, data in G.nodes(data=True):
-            x, y = data["pos"]
-            if _inside(x, y, e["bbox"]):
-                port_of[n] = idx
+    for n, data in G.nodes(data=True):
+        x, y = data["pos"]
+        best, bi = None, None
+        for idx, e in enumerate(eq):
+            b = e["bbox"]
+            if not _inside(x, y, b):
+                continue
+            d = _d(x, y, (b[0] + b[2]) / 2, (b[1] + b[3]) / 2, aspect)
+            if best is None or d < best:
+                best, bi = d, idx
+        if bi is not None:
+            port_of[n] = bi
 
     # ── 3. 設備連通：兩台設備的埠若能沿線段互通，且路徑不穿過
     #      第三台設備，就算有直接物料往來 ─────────────────
@@ -112,8 +122,21 @@ def build_flow(equipment: list, pipes: list, arrows: list, aspect: float) -> dic
                 stack.append((m, path + [seg]))
 
     # ── 4. 方向：箭頭壓在這條連線的哪一段上 ──────────────
+    def _overlap_frac(a, b) -> float:
+        ix = min(a[2], b[2]) - max(a[0], b[0])
+        iy = min(a[3], b[3]) - max(a[1], b[1])
+        if ix <= 0 or iy <= 0:
+            return 0.0
+        aa = (a[2] - a[0]) * (a[3] - a[1])
+        ab = (b[2] - b[0]) * (b[3] - b[1])
+        return ix * iy / max(min(aa, ab), 1e-9)
+
     edges = []
     for (i, j), info in links.items():
+        # 兩台的框都疊在一起了，「相連」多半是重疊造成的假訊號，
+        # 不是製程關係——這種邊寧可不出，留給人工／VLM 判
+        if _overlap_frac(eq[i]["bbox"], eq[j]["bbox"]) > 0.3:
+            continue
         segs = [pipes[s] for s in info["segs"] if s is not None and s < len(pipes)]
         if not segs:
             continue

@@ -402,6 +402,42 @@ def _zh_texts(filename: str) -> list:
 
 
 # ------------------------------------------------------------------- 建模
+def _demote_list_refs(equipment: list) -> int:
+    """把「框在設備清冊表格上」的已審框降級為清冊參照。
+
+    審核時 VLM 常把右側設備清冊表格的項次欄整排框成「設備」，人一批次
+    接受，台帳裡就多出一疊表格框。那個接受的語意是「清冊有這列」，
+    不是「設備在圖上這裡」——照畫會讓資產模型、流向圖、說明溯源全部
+    指到表格去（潤泰 R-M0200 實測 301~314 一整欄）。
+
+    判準是幾何形態學，不是位號白名單：≥4 個小框（邊長 <0.03）x 中心
+    落在同一條窄直欄、且縱向堆疊超過三倍框高——圖面上真實的圖形塊
+    不會長這樣。降級後 bbox 移到 list_bbox，圖面位置留給定位器候選。
+    """
+    cols: dict = {}
+    for e in equipment:
+        b = e.get("bbox")
+        if not b or (b[2] - b[0]) > 0.03 or (b[3] - b[1]) > 0.03:
+            continue
+        cols.setdefault(round((b[0] + b[2]) / 2 / 0.008), []).append(e)
+    n = 0
+    for grp in cols.values():
+        if len(grp) < 4:
+            continue
+        ys = sorted((e["bbox"][1] + e["bbox"][3]) / 2 for e in grp)
+        hmax = max(e["bbox"][3] - e["bbox"][1] for e in grp)
+        if ys[-1] - ys[0] < hmax * 3:
+            continue
+        for e in grp:
+            e["list_bbox"] = e["bbox"]
+            e["bbox"] = None
+            e["list_ref"] = True
+            e["on_drawing"] = False
+            e["source"] += "（框位於設備清冊表格，圖面位置改由定位器提供）"
+            n += 1
+    return n
+
+
 def build_model(filename: str, domain: str = "") -> dict:
     """把「已確認標註＋清冊＋拓撲」編譯成資產模型並存檔。
 
@@ -468,6 +504,7 @@ def build_model(filename: str, domain: str = "") -> dict:
                       "remark": row.get("remark", ""), "vfd": row.get("vfd", False),
                       "source": "審核確認＋清冊"})
         equipment.append(e)
+    _demote_list_refs(equipment)
     # 清冊有、圖上未確認的也入庫——清冊本來就是圖面自帶的 L0 資料，
     # 缺的是「在圖上被點到」而非「不存在」
     for row in reg_rows:
@@ -664,8 +701,10 @@ def build_model(filename: str, domain: str = "") -> dict:
         from .pid_locate import locate_equipment
 
         loc = locate_equipment(texts, pipes, aspect, reg_rows, _registry_match)
-        done = {a.get("tag") for a in accepted if a.get("kind") == "equipment"}
-        loc["items"] = [i for i in loc["items"] if i["tag"] not in done]
+        # 只排除「已有圖面框」的——被降級成清冊參照的（框在表格上的那批）
+        # 圖面位置還沒有著落，它們的定位候選必須留下來
+        drawn = {e["tag"] for e in equipment if e.get("bbox")}
+        loc["items"] = [i for i in loc["items"] if i["tag"] not in drawn]
 
         # 跨圖參照：本圖清冊查無的項次號，到同組其他圖的清冊找。
         # 「答案寫在下一張」是實際存在的情形（潤泰 500~508 在本張圖上，
@@ -698,9 +737,17 @@ def build_model(filename: str, domain: str = "") -> dict:
             pass
         # 已定位但尚未審核的清冊列 → 在資產庫顯示為「候選待審」而非「未定位」
         cand_of = {i["registry_item"]: i for i in loc["items"] if i["registry_item"]}
+        cand_by_tag: dict = {}
+        for i in loc["items"]:
+            cand_by_tag.setdefault(i["tag"], i)
         for e in equipment:
-            if e.get("bbox") is None and e["tag"] in cand_of:
-                e["candidate_bbox"] = cand_of[e["tag"]]["bbox"]
+            if e.get("bbox") is not None:
+                continue
+            c = cand_of.get(e["tag"]) or cand_by_tag.get(e["tag"])
+            if not c:
+                continue
+            e["candidate_bbox"] = c["bbox"]
+            if not e.get("list_ref"):
                 e["source"] = "設備清冊＋定位器候選（待審）"
         locate = {"ok": True, **loc["stats"], "items": loc["items"]}
     except Exception as exc:  # noqa: BLE001
@@ -940,6 +987,29 @@ def _svg_of(m: dict, flow: dict | None = None, notes: list | None = None) -> str
         p.append(f'<text x="{x0:.0f}" y="{y0 - 5:.0f}" font-size="11" fill="#0B8A46" '
                  f'font-weight="600">{_x(e.get("tag", ""))}　{_x(name)}</text>')
 
+    # 5b) 定位器候選（待審）：虛線綠框。「哪個 block 是哪台設備、它負責
+    #     什麼功能」先框出來給人看——虛線＝位置尚未經人工確認，跟實線的
+    #     已審框視覺上分兩級。定位器把鄰居長進同一框時只畫一次，避免同一
+    #     個 block 疊好幾層框、標籤蓋成一團。
+    seen_cand: set = set()
+    for e in m.get("equipment", []):
+        b = e.get("candidate_bbox")
+        if not b or e.get("bbox"):
+            continue
+        k = (round(b[0], 3), round(b[1], 3), round(b[2], 3), round(b[3], 3))
+        if k in seen_cand:
+            continue
+        seen_cand.add(k)
+        x0, y0 = b[0] * W, b[1] * H
+        w, h = (b[2] - b[0]) * W, (b[3] - b[1]) * H
+        p.append(f'<rect x="{x0:.0f}" y="{y0:.0f}" width="{w:.0f}" height="{h:.0f}" '
+                 'fill="none" stroke="#0B8A46" stroke-width="1.2" '
+                 'stroke-dasharray="6 4" rx="2" opacity="0.8"/>')
+        name = e.get("name") or e.get("type") or ""
+        p.append(f'<text x="{x0 + 3:.0f}" y="{y0 + 12:.0f}" font-size="10" '
+                 f'fill="#0B8A46" opacity="0.85">{_x(e.get("tag", ""))}　'
+                 f'{_x(name)}</text>')
+
     # 6) 管線編號
     for ln in m.get("lines", []):
         b = ln.get("bbox")
@@ -950,18 +1020,21 @@ def _svg_of(m: dict, flow: dict | None = None, notes: list | None = None) -> str
 
     # 7) 製程流向層：設備→設備的物料方向。原圖只隱含這件事（要人看箭頭
     #    自己串），我們是**明確知道**的——重建圖要把它畫出來，那是資料庫
-    #    比原圖多出來的價值。線型分證據強度：實線＝圖面箭頭或人工/AI 判定、
-    #    虛線＝項次號推測、紅色＝AI 判定為可疑連線。
+    #    比原圖多出來的價值。
+    #
+    #    只畫有實據的邊（圖面箭頭／人工／AI 判定＋紅色可疑邊）：項次號推測
+    #    在順序圖頁有標示脈絡可看，但畫在重建圖上就是一堆沒根據的線斜穿
+    #    整張圖——推論與事實混著畫，比不畫更糟。走線用直角折線，
+    #    讀起來才像製程圖，不是散彈孔。
     if flow and flow.get("ok"):
         pos = {n["tag"]: n["bbox"] for n in flow["nodes"] if n.get("bbox")}
         p.append('<g id="flow">')
         p.append('<defs><marker id="fa" viewBox="0 0 10 10" refX="9" refY="5" '
                  'markerWidth="5" markerHeight="5" orient="auto-start-reverse">'
-                 '<path d="M0,0 L10,5 L0,10 z" fill="#7C4DFF"/></marker>'
-                 '<marker id="fa2" viewBox="0 0 10 10" refX="9" refY="5" '
-                 'markerWidth="5" markerHeight="5" orient="auto-start-reverse">'
-                 '<path d="M0,0 L10,5 L0,10 z" fill="#B9A8E8"/></marker></defs>')
+                 '<path d="M0,0 L10,5 L0,10 z" fill="#7C4DFF"/></marker></defs>')
         for e in flow.get("edges", []):
+            if e["dir_by"] == "item_no" and not e.get("suspect"):
+                continue
             a, b = pos.get(e["from"]), pos.get(e["to"])
             if not a or not b:
                 continue
@@ -969,13 +1042,13 @@ def _svg_of(m: dict, flow: dict | None = None, notes: list | None = None) -> str
             x2, y2 = (b[0] + b[2]) / 2 * W, (b[1] + b[3]) / 2 * H
             if e.get("suspect"):
                 col, dash, mk = "#D93F3F", ' stroke-dasharray="3 5"', ""
-            elif e["dir_by"] in ("arrow", "vlm", "manual"):
-                col, dash, mk = "#7C4DFF", "", ' marker-end="url(#fa)"'
             else:
-                col, dash, mk = "#B9A8E8", ' stroke-dasharray="7 5"', ' marker-end="url(#fa2)"'
-            p.append(f'<line x1="{x1:.0f}" y1="{y1:.0f}" x2="{x2:.0f}" y2="{y2:.0f}" '
-                     f'stroke="{col}" stroke-width="{W / 800:.2f}" opacity="0.75"'
-                     f'{dash}{mk}/>')
+                col, dash, mk = "#7C4DFF", "", ' marker-end="url(#fa)"'
+            elbow = (f'M{x1:.0f},{y1:.0f}H{x2:.0f}V{y2:.0f}'
+                     if abs(x2 - x1) >= abs(y2 - y1) else
+                     f'M{x1:.0f},{y1:.0f}V{y2:.0f}H{x2:.0f}')
+            p.append(f'<path d="{elbow}" fill="none" stroke="{col}" '
+                     f'stroke-width="{W / 800:.2f}" opacity="0.7"{dash}{mk}/>')
         p.append("</g>")
 
     # 8) 現場評註層：走過現場的人留下的知識，原圖上一個字都沒有。
@@ -1057,21 +1130,31 @@ def model_flow(filename: str, request: Request) -> dict:
     m = model_locate(filename, request)      # 需要時會自動建模
     full = model_get(filename, request)
     g = full.get("geometry") or {}
-    eq = []
-    seen = set()
-    for src in (m.get("items") or []):
-        if src["tag"] in seen:
-            continue
-        seen.add(src["tag"])
-        eq.append({"tag": src["tag"], "name": src.get("symbol", ""),
-                   "bbox": src["bbox"]})
+    # 節點品質決定整張順序圖的品質，三條規則：
+    #   ① 已確認的圖面框最優先，再來清冊列的定位候選，最後才是未配對候選
+    #   ② 同一個框只留一台——定位器把鄰居長進同一框時，同框互連會生出
+    #      整團假邊（潤泰實測 206/204.5/208.3 三個位號共用一框）
+    #   ③ 清冊參照（框在表格上的）沒有圖面框就不進節點，表格不是製程
+    eq, used_box, seen = [], set(), set()
+
+    def _add(tag, name, b):
+        if not b or tag in seen:
+            return
+        k = (round(b[0], 3), round(b[1], 3), round(b[2], 3), round(b[3], 3))
+        if k in used_box:
+            return
+        seen.add(tag)
+        used_box.add(k)
+        eq.append({"tag": tag, "name": name, "bbox": b})
+
     for e in (full.get("equipment") or []):
-        b = e.get("bbox") or e.get("candidate_bbox")
-        if not b or e["tag"] in seen:
-            continue
-        seen.add(e["tag"])
-        eq.append({"tag": e["tag"], "name": e.get("name") or e.get("type", ""),
-                   "bbox": b})
+        if e.get("bbox"):
+            _add(e["tag"], e.get("name") or e.get("type", ""), e["bbox"])
+    for e in (full.get("equipment") or []):
+        _add(e["tag"], e.get("name") or e.get("type", ""),
+             e.get("candidate_bbox"))
+    for src in (m.get("items") or []):
+        _add(src["tag"], src.get("symbol", ""), src.get("bbox"))
     flow = build_flow(eq, g.get("pipes") or [], g.get("arrows") or [],
                       g.get("aspect") or 0.7)
     return _apply_flow_overrides(flow, filename, current_domain_of(request))

@@ -1042,6 +1042,18 @@ function descTagIndex() {
       idx[e.tag] = { tag: e.tag, kind: 'equipment', bbox: b, symbol: e.name || '' };
     }
   });
+  // 模型判定「審核框其實框在清冊表格上」的位號（list_ref）：hover 要指
+  // 到定位器候選的圖面位置，不是右上角的表格。台帳裡那個框是「清冊有
+  // 這列」的確認，不是圖面座標——沒有圖面候選就寧可不高亮，也不指錯。
+  (am.equipment || []).forEach(e => {
+    if (!e.list_ref || !e.tag) return;
+    if (e.candidate_bbox) {
+      idx[e.tag] = { tag: e.tag, kind: 'equipment', bbox: e.candidate_bbox,
+                     symbol: e.name || '' };
+    } else {
+      delete idx[e.tag];
+    }
+  });
   return idx;
 }
 

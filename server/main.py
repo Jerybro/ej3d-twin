@@ -396,6 +396,11 @@ from .pid_model import router as pid_model_router  # noqa: E402
 
 app.include_router(pid_model_router)
 
+# ------------------------------------ P&ID 圖組（跨圖群集與整體辨識）
+from .pid_group import router as pid_group_router  # noqa: E402
+
+app.include_router(pid_group_router)
+
 # --------------------------------------------------------- 登入與權限（Google OAuth）
 from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
 

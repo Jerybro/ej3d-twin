@@ -642,6 +642,36 @@ def build_model(filename: str) -> dict:
         loc = locate_equipment(texts, pipes, aspect, reg_rows, _registry_match)
         done = {a.get("tag") for a in accepted if a.get("kind") == "equipment"}
         loc["items"] = [i for i in loc["items"] if i["tag"] not in done]
+
+        # 跨圖參照：本圖清冊查無的項次號，到同組其他圖的清冊找。
+        # 「答案寫在下一張」是實際存在的情形（潤泰 500~508 在本張圖上，
+        # 但清冊查無），找到就標成跨圖參照——那跟 OCR 誤讀是完全不同的事，
+        # 前者要保留、後者要否決，審核者需要看得出差別。
+        try:
+            from .pid_group import crosssheet_lookup
+
+            n_cross = 0
+            for it in loc["items"]:
+                if it.get("registry_item"):
+                    continue
+                hit = crosssheet_lookup(it["tag"], filename)
+                if not hit:
+                    continue
+                n_cross += 1
+                row = hit["row"]
+                it["symbol"] = row.get("name") or it["symbol"]
+                it["cross_sheet"] = hit["drawing"]
+                it["warn"] = ""
+                it["evidence"].append({
+                    "stage": "跨圖清冊查找", "ok": True, "score": 0.85,
+                    "detail": f"本圖清冊查無「{it['tag']}」，但同圖組的"
+                              f"「{Path(hit['drawing']).stem}」清冊有此項"
+                              f"（{row.get('name', '')}）→ 判定為跨圖參照，"
+                              "不是誤讀"})
+            if n_cross:
+                loc["stats"]["cross_sheet"] = n_cross
+        except Exception:  # noqa: BLE001
+            pass
         # 已定位但尚未審核的清冊列 → 在資產庫顯示為「候選待審」而非「未定位」
         cand_of = {i["registry_item"]: i for i in loc["items"] if i["registry_item"]}
         for e in equipment:

@@ -186,6 +186,25 @@
     .zc.done { background: rgba(18,161,80,0.22); border-color: var(--hi); color: var(--hi); }
     #zonemap { display: grid; gap: 3px; margin-top: 8px; }
 
+    /* ------------------------------------------------------------ 圖組 */
+    .grp { border: 1px solid var(--bdr); border-radius: 8px; background: var(--panel2);
+      padding: 7px 9px; margin-bottom: 5px; font-size: 12px; }
+    .grp.on { border-color: var(--accent); background: var(--accent-deep); }
+    .grp-h { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+    .grp-h b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; }
+    .grp-h .x { color: var(--dim); font-size: 13px; padding: 0 2px; }
+    .grp-h .x:hover { color: var(--lo); }
+    .grp-f { font-size: 11px; color: var(--dim); padding: 3px 0 0 2px;
+      cursor: pointer; word-break: break-all; line-height: 1.5; }
+    .grp-f:hover { color: var(--accent); }
+    .grp-f.cur { color: var(--accent); font-weight: 600; }
+    .sug { border: 1px dashed var(--bdr); border-radius: 8px; padding: 7px 9px;
+      margin-bottom: 5px; font-size: 11.5px; color: var(--dim); }
+    .sug b { color: var(--text); }
+    .pick { display: flex; align-items: center; gap: 5px; font-size: 11.5px;
+      padding: 3px 0; word-break: break-all; }
+
     /* ------------------------------------------------- 資產庫（審核的下一步） */
     .as-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;
       margin-bottom: 10px; }
@@ -230,6 +249,24 @@
       </label>
       <div class="hint" id="up-state" style="margin:6px 0 4px"></div>
       <div id="file-list"><span class="hint">載入中…</span></div>
+
+      <div class="section-title">圖組
+        <span style="float:right;font-weight:400;cursor:pointer;color:var(--dim)"
+              id="grp-toggle" title="新增圖組">＋</span></div>
+      <div class="hint" style="margin-bottom:6px">同一套廠的圖分成一組，
+        本圖查不到的項次號會自動到同組其他圖的清冊找。</div>
+      <div id="grp-new" style="display:none;margin-bottom:8px">
+        <input id="grp-name" placeholder="圖組名稱，如 潤泰楊梅廠"
+               style="width:100%;padding:6px 9px;border-radius:6px;border:1px solid var(--bdr);
+                      background:var(--panel2);font-family:inherit;font-size:12px;margin-bottom:5px" />
+        <div id="grp-pick" style="max-height:150px;overflow-y:auto;margin-bottom:5px"></div>
+        <div style="display:flex;gap:5px">
+          <button class="mini-btn primary" id="grp-save" style="flex:1">建立</button>
+          <button class="mini-btn" id="grp-cancel">取消</button>
+        </div>
+      </div>
+      <div id="grp-list"><span class="hint">載入中…</span></div>
+
       <div class="section-title">說明</div>
       <div class="hint">辨識結果需逐項確認後才會入庫；
         全部審核完成才會產生製程說明。</div>
@@ -359,6 +396,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260811b"></script>
+  <script src="/static/js/pid-label.js?v=20260811c"></script>
 </body>
 </html>

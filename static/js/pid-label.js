@@ -72,6 +72,7 @@ async function uploadFiles(files) {
   }
   st.innerHTML = `<span style="color:var(--hi)">已上傳 ${ok} 個檔案</span>`;
   await loadFiles();
+  loadGroups();            // 新圖進來 → 重算建議分組
 }
 
 $('file-input').addEventListener('change', e => {
@@ -84,6 +85,129 @@ $('file-input').addEventListener('change', e => {
   e.preventDefault(); $('drop').classList.remove('over');
 }));
 $('drop').addEventListener('drop', e => uploadFiles(e.dataTransfer.files));
+
+// ------------------------------------------------------------------ 圖組
+// 一套廠的圖從來不是一張。分組之後，本圖清冊查不到的項次號會自動到同組
+// 其他圖的清冊找——「答案寫在下一張」是真實存在的情形（潤泰 500~508
+// 畫在礦化圖上，但清冊在燒結那張）。歸屬由人定義，猜錯比沒有更糟。
+let groups = [], ungrouped = [], suggestions = [];
+
+async function loadGroups() {
+  try {
+    const d = await getJSON('/api/pid/group');
+    groups = d.groups || []; ungrouped = d.ungrouped || [];
+    suggestions = d.suggestions || [];
+  } catch { groups = []; }
+  renderGroups();
+}
+
+function renderGroups() {
+  const el = $('grp-list');
+  const rows = groups.map(g => {
+    const on = g.files.includes(curFile);
+    return `<div class="grp ${on ? 'on' : ''}">
+      <div class="grp-h" data-g="${esc(g.id)}">
+        <b>${esc(g.name)}</b>
+        <span style="color:var(--dim)">${g.files.length}</span>
+        <span class="x" data-del="${esc(g.id)}" title="刪除圖組">×</span>
+      </div>
+      ${g.files.map(f => `<div class="grp-f ${f === curFile ? 'cur' : ''}"
+          data-open="${esc(f)}">· ${esc(f.replace(/\.pdf$/i, '').slice(0, 34))}</div>`).join('')}
+    </div>`;
+  });
+  const sug = suggestions.map(s => `<div class="sug">建議分組：<b>${esc(s.key)}</b>
+    共 ${s.files.length} 張<br>${esc(s.reason)}
+    <button class="mini-btn" style="margin-top:5px;width:100%"
+            data-sug="${esc(s.key)}">用這個建議建立</button></div>`);
+  el.innerHTML = (rows.join('') + sug.join('')) ||
+    '<span class="hint">尚無圖組。上傳同一套廠的多張圖後，這裡會出現建議分組。</span>';
+
+  el.querySelectorAll('[data-open]').forEach(d =>
+    d.addEventListener('click', () => openDoc(d.dataset.open)));
+  el.querySelectorAll('[data-del]').forEach(d =>
+    d.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('刪除這個圖組？圖面本身不會被刪除。')) return;
+      await fetch(`/api/pid/group/${encodeURIComponent(d.dataset.del)}`, { method: 'DELETE' });
+      loadGroups();
+    }));
+  el.querySelectorAll('[data-g]').forEach(d =>
+    d.addEventListener('click', () => showGroupOverview(d.dataset.g)));
+  el.querySelectorAll('[data-sug]').forEach(d =>
+    d.addEventListener('click', async () => {
+      const s = suggestions.find(x => x.key === d.dataset.sug);
+      if (!s) return;
+      await fetch('/api/pid/group', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: s.key + ' 圖組', files: s.files }),
+      });
+      loadGroups();
+    }));
+}
+
+$('grp-toggle').addEventListener('click', () => {
+  const b = $('grp-new');
+  const open = b.style.display === 'none';
+  b.style.display = open ? '' : 'none';
+  if (open) {
+    const all = groups.flatMap(g => g.files).concat(ungrouped);
+    $('grp-pick').innerHTML = [...new Set(all)].sort().map(f =>
+      `<label class="pick"><input type="checkbox" value="${esc(f)}" />
+        ${esc(f.replace(/\.pdf$/i, '').slice(0, 30))}</label>`).join('');
+    $('grp-name').focus();
+  }
+});
+$('grp-cancel').addEventListener('click', () => { $('grp-new').style.display = 'none'; });
+$('grp-save').addEventListener('click', async () => {
+  const name = $('grp-name').value.trim();
+  const files = [...$('grp-pick').querySelectorAll('input:checked')].map(i => i.value);
+  if (!name) { alert('請填圖組名稱'); return; }
+  if (files.length < 2) { alert('請至少選兩張圖'); return; }
+  const r = await fetch('/api/pid/group', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, files }),
+  });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); alert(e.detail || '建立失敗'); return; }
+  $('grp-name').value = ''; $('grp-new').style.display = 'none';
+  loadGroups();
+});
+
+// 整組彙總：一套圖的全貌先看過，再決定進哪一張審
+async function showGroupOverview(gid) {
+  try {
+    const d = await getJSON(`/api/pid/group/${encodeURIComponent(gid)}/overview`);
+    const t = d.totals || {};
+    const sheets = (d.sheets || []).map(s =>
+      `<tr><td style="padding:3px 8px 3px 0">${esc(s.file.replace(/\.pdf$/i, '').slice(0, 30))}</td>
+       <td style="text-align:right">${s.built ? (s.equipment || 0) : '—'}</td>
+       <td style="text-align:right">${s.built ? (s.instruments || 0) : '—'}</td>
+       <td style="text-align:right">${s.built ? (s.valves || 0) : '—'}</td>
+       <td style="text-align:right">${s.registry_rows || 0}</td>
+       <td style="text-align:right">${s.built ? '已建模' : '<span style="color:var(--mid)">未建模</span>'}</td></tr>`).join('');
+    const edges = (d.links?.edges || []).slice(0, 8).map(e =>
+      `<div style="font-size:11.5px;color:var(--dim);padding:2px 0">
+        ${esc(e.from.slice(0, 18))} → ${esc(e.to.slice(0, 18))}
+        <span style="color:var(--accent)">${esc(e.kind)}</span> ${esc(e.via)}</div>`).join('');
+    const gaps = (d.links?.unmatched || []).map(u =>
+      `<div style="font-size:11.5px;color:#8a5b00;padding:2px 0">
+        ⚠ ${esc(u.raw)} 指向的圖不在本組內（${esc(u.reason)}）</div>`).join('');
+    $('rev-host').innerHTML = `<div class="rev">
+      <div class="rev-top"><span class="rev-tag">${esc(d.group.name)}</span>
+        <span class="rev-sub">${d.sheets.length} 張圖</span></div>
+      <div class="rev-sub">合計：設備 <b>${t.equipment || 0}</b>｜儀錶 <b>${t.instruments || 0}</b>｜
+        閥件 <b>${t.valves || 0}</b>｜迴路 <b>${t.loops || 0}</b>｜
+        清冊 <b>${t.registry_located || 0}/${t.registry_rows || 0}</b> 列已定位</div>
+      <table style="width:100%;font-size:11.5px;margin-top:9px;color:#24406e">
+        <tr style="color:var(--dim)"><th style="text-align:left">圖面</th><th>設備</th><th>儀錶</th><th>閥</th><th>清冊</th><th></th></tr>
+        ${sheets}</table>
+      ${edges ? `<div class="rev-sub" style="margin-top:9px"><b>跨圖接續</b></div>${edges}` : ''}
+      ${gaps ? `<div class="rev-sub" style="margin-top:7px"><b>缺口</b>（指向的圖尚未上傳）</div>${gaps}` : ''}
+      <div class="rev-sub" style="margin-top:9px;font-size:11.5px">
+        點上方圖組裡的圖名進入審核。本圖清冊查不到的項次號，
+        系統會自動到同組其他圖的清冊查找並標為跨圖參照。</div>
+    </div>`;
+  } catch (e) { alert(e.message || '載入失敗'); }
+}
 
 async function openDoc(name) {
   curFile = name; items = []; curIdx = -1; sel = null;
@@ -112,6 +236,7 @@ async function openDoc(name) {
   loadConvention(name);
   assetModel = null;
   loadModel(true);           // 之前建過模就直接帶出資產庫（404 靜默）
+  renderGroups();            // 高亮目前這張圖所屬的圖組
 }
 
 // 開掃之前先告訴使用者這張圖是什麼體系、將套用哪份規範、信心多少。
@@ -944,3 +1069,4 @@ document.addEventListener('keydown', e => {
 });
 
 loadFiles();
+loadGroups();

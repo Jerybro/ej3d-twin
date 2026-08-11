@@ -1,0 +1,319 @@
+{
+  "drawing": "R-M0400-00-000-000-00 燒結系統流程圖_20260107",
+  "plant": "潤泰精密材料 楊梅廠 輕質玻珠新建工程",
+  "source": "圖面右上角設備清單表，Claude 視覺判讀逐列謄錄",
+  "verified_by": null,
+  "verified_at": null,
+  "items": [
+    {
+      "item": "420",
+      "range": null,
+      "name": "氣動雙向閥",
+      "spec": "規格：8\"",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "421.1",
+      "range": null,
+      "name": "電熱旋窯",
+      "spec": "產能：0.75T/hr",
+      "driver": "主馬達：10HP*4P；傳動滾輪：5HP*4P；進氣風車：5HP*4P；排氣風車：3HP*4P；爐管敲擊器：1/4HP*4P；進料輸送機：1/2HP*4P；冷卻水泵浦：1/2HP*4P",
+      "qty": 1,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "421.2",
+      "range": null,
+      "name": "電熱旋窯",
+      "spec": "產能：0.75T/hr",
+      "driver": "",
+      "qty": 1,
+      "remark": "未來擴充",
+      "vfd": false
+    },
+    {
+      "item": "422",
+      "range": null,
+      "name": "氣動雙向閥",
+      "spec": "規格：10\"",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "428",
+      "range": null,
+      "name": "下料緩衝器",
+      "spec": "",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "429.1",
+      "range": null,
+      "name": "雙層震動篩",
+      "spec": "產能：3T/hr",
+      "driver": "(3HP*4P) x 2set",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "429.2",
+      "range": null,
+      "name": "雙層震動篩",
+      "spec": "產能：3T/hr",
+      "driver": "(3HP*4P) x 2set",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "430",
+      "range": null,
+      "name": "圓篩機",
+      "spec": "產能：1.5T/hr",
+      "driver": "3HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "430-1",
+      "range": "430-1~430-2",
+      "name": "超音波震動器",
+      "spec": "",
+      "driver": "",
+      "qty": 2,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "430.1",
+      "range": null,
+      "name": "負壓轉接桶",
+      "spec": "",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "430.2",
+      "range": null,
+      "name": "粉體料斗",
+      "spec": "",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "430.3",
+      "range": null,
+      "name": "魯式鼓風機",
+      "spec": "",
+      "driver": "5HP*4P",
+      "qty": 1,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "430.4",
+      "range": null,
+      "name": "轉飼機",
+      "spec": "產能：0.63T/hr",
+      "driver": "1HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "430.5",
+      "range": null,
+      "name": "氣動雙向閥",
+      "spec": "",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "432.01",
+      "range": "432.01~432.31",
+      "name": "負壓轉接桶",
+      "spec": "",
+      "driver": "",
+      "qty": 4,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "432.02",
+      "range": "432.02~432.32",
+      "name": "粉體料斗",
+      "spec": "",
+      "driver": "",
+      "qty": 4,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "432.03",
+      "range": "432.03~432.33",
+      "name": "魯式鼓風機",
+      "spec": "",
+      "driver": "432.04：7.5HP*4P；432.14：5HP*4P；432.24：3HP*4P；432.34：3HP*4P",
+      "qty": 4,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "432.04",
+      "range": "432.04~432.34",
+      "name": "轉飼機",
+      "spec": "432.03：1.65T/hr；432.13：0.9T/hr；432.23：0.5T/hr；432.33：0.34T/hr",
+      "driver": "432.03：1HP*4P；432.13：1/2HP*4P；432.23：1/2HP*4P；432.33：1/2HP*4P",
+      "qty": 4,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "433.1",
+      "range": null,
+      "name": "成品儲存桶(>4mm)",
+      "spec": "儲存量：40M³",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "433.2",
+      "range": null,
+      "name": "成品儲存桶(2~4mm)",
+      "spec": "儲存量：40M³",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "433.3",
+      "range": null,
+      "name": "成品儲存桶(1~2mm)",
+      "spec": "儲存量：40M³",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "433.4",
+      "range": null,
+      "name": "成品儲存桶(0.5~1mm)",
+      "spec": "儲存量：40M³",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "434.1",
+      "range": "434.1~434.4",
+      "name": "手動閘閥",
+      "spec": "規格：16\"",
+      "driver": "",
+      "qty": 4,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "435.1",
+      "range": "435.1~435.4",
+      "name": "轉飼機",
+      "spec": "產能：12.5T/hr",
+      "driver": "5HP*4P",
+      "qty": 4,
+      "remark": "變頻控制",
+      "vfd": true
+    },
+    {
+      "item": "436.1",
+      "range": "436.1~436.4",
+      "name": "太空包夾頭",
+      "spec": "規格：16\"",
+      "driver": "",
+      "qty": 4,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "437.1",
+      "range": "437.1~437.4",
+      "name": "太空包架",
+      "spec": "",
+      "driver": "",
+      "qty": 4,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "315",
+      "range": null,
+      "name": "收塵機",
+      "spec": "過濾面積：560m²",
+      "driver": "",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "315-1",
+      "range": null,
+      "name": "震動馬達",
+      "spec": "",
+      "driver": "1/4HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "315-2",
+      "range": null,
+      "name": "螺運機",
+      "spec": "",
+      "driver": "2HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "315-3",
+      "range": null,
+      "name": "轉飼機",
+      "spec": "",
+      "driver": "1HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    },
+    {
+      "item": "316",
+      "range": null,
+      "name": "收塵機排氣風車",
+      "spec": "",
+      "driver": "100HP*4P",
+      "qty": 1,
+      "remark": "",
+      "vfd": false
+    }
+  ]
+}

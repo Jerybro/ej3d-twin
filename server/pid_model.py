@@ -752,7 +752,7 @@ def _x(s: str) -> str:
             .replace(">", "&gt;"))
 
 
-def _svg_of(m: dict) -> str:
+def _svg_of(m: dict, flow: dict | None = None, notes: list | None = None) -> str:
     """只讀模型 JSON 把圖重畫回來——不碰 PDF、不碰底圖。
 
     這是資料庫完整度的驗收方式：重建圖與原圖並排，畫得出來的部分代表
@@ -947,6 +947,60 @@ def _svg_of(m: dict) -> str:
             continue
         p.append(f'<text x="{b[0] * W:.0f}" y="{(b[1] + b[3]) / 2 * H:.0f}" '
                  f'font-size="9" fill="#8A5B00">{_x(ln.get("raw", ""))}</text>')
+
+    # 7) 製程流向層：設備→設備的物料方向。原圖只隱含這件事（要人看箭頭
+    #    自己串），我們是**明確知道**的——重建圖要把它畫出來，那是資料庫
+    #    比原圖多出來的價值。線型分證據強度：實線＝圖面箭頭或人工/AI 判定、
+    #    虛線＝項次號推測、紅色＝AI 判定為可疑連線。
+    if flow and flow.get("ok"):
+        pos = {n["tag"]: n["bbox"] for n in flow["nodes"] if n.get("bbox")}
+        p.append('<g id="flow">')
+        p.append('<defs><marker id="fa" viewBox="0 0 10 10" refX="9" refY="5" '
+                 'markerWidth="5" markerHeight="5" orient="auto-start-reverse">'
+                 '<path d="M0,0 L10,5 L0,10 z" fill="#7C4DFF"/></marker>'
+                 '<marker id="fa2" viewBox="0 0 10 10" refX="9" refY="5" '
+                 'markerWidth="5" markerHeight="5" orient="auto-start-reverse">'
+                 '<path d="M0,0 L10,5 L0,10 z" fill="#B9A8E8"/></marker></defs>')
+        for e in flow.get("edges", []):
+            a, b = pos.get(e["from"]), pos.get(e["to"])
+            if not a or not b:
+                continue
+            x1, y1 = (a[0] + a[2]) / 2 * W, (a[1] + a[3]) / 2 * H
+            x2, y2 = (b[0] + b[2]) / 2 * W, (b[1] + b[3]) / 2 * H
+            if e.get("suspect"):
+                col, dash, mk = "#D93F3F", ' stroke-dasharray="3 5"', ""
+            elif e["dir_by"] in ("arrow", "vlm", "manual"):
+                col, dash, mk = "#7C4DFF", "", ' marker-end="url(#fa)"'
+            else:
+                col, dash, mk = "#B9A8E8", ' stroke-dasharray="7 5"', ' marker-end="url(#fa2)"'
+            p.append(f'<line x1="{x1:.0f}" y1="{y1:.0f}" x2="{x2:.0f}" y2="{y2:.0f}" '
+                     f'stroke="{col}" stroke-width="{W / 800:.2f}" opacity="0.75"'
+                     f'{dash}{mk}/>')
+        p.append("</g>")
+
+    # 8) 現場評註層：走過現場的人留下的知識，原圖上一個字都沒有。
+    #    製程說明引用了哪一則，在重建圖上就看得到它標在哪——
+    #    說明與重建圖是同一份資料的兩種呈現，不是兩件事。
+    if notes:
+        p.append('<g id="notes">')
+        for n in notes:
+            b = n.get("bbox") or []
+            if len(b) != 4 and n.get("tag"):
+                hit = next((e for e in m.get("equipment", [])
+                            if e.get("tag") == n["tag"] and e.get("bbox")), None)
+                b = (hit or {}).get("bbox") or []
+            if len(b) != 4:
+                continue
+            x0, y0 = b[0] * W, b[1] * H
+            w, h = max((b[2] - b[0]) * W, 22), max((b[3] - b[1]) * H, 16)
+            p.append(f'<rect x="{x0:.0f}" y="{y0:.0f}" width="{w:.0f}" height="{h:.0f}" '
+                     'fill="rgba(4,106,251,0.06)" stroke="#046AFB" stroke-width="1.4" '
+                     'stroke-dasharray="4 3" rx="3"/>')
+            p.append(f'<rect x="{x0 - 1:.0f}" y="{y0 - 13:.0f}" width="{max(len(n["id"]) * 8, 22):.0f}" '
+                     'height="13" fill="#046AFB" rx="3"/>')
+            p.append(f'<text x="{x0 + 3:.0f}" y="{y0 - 3:.0f}" font-size="10" '
+                     f'fill="#fff" font-weight="700">{_x(n["id"])}</text>')
+        p.append("</g>")
 
     p.append("</svg>")
     return "".join(p)
@@ -1227,11 +1281,27 @@ def _flow_override_path(filename: str, domain: str) -> Path:
 
 
 @router.get("/{filename}/rebuild.svg")
-def model_rebuild_svg(filename: str, request: Request):
+def model_rebuild_svg(filename: str, request: Request,
+                      flow: int = 1, notes: int = 1):
+    """盲測重建圖——**這才是交付物**。
+
+    驗收標準是「只靠資料庫能不能把這座廠重現」，所以重建圖不能只有幾何，
+    要把資料庫知道的**語意**一起畫出來：
+      · 製程流向（設備→設備，含分流匯流）——原圖只隱含，我們是明確知道
+      · 現場評註——走過現場的人留下的知識，圖上本來沒有
+    製程說明引用了哪些評註，重建圖上就看得到那些評註標在哪裡；
+    說明與重建圖是同一份資料的兩種呈現，不是兩件事。
+    """
     from fastapi.responses import Response
 
-    return Response(content=_svg_of(model_get(filename, request)),
-                    media_type="image/svg+xml")
+    m = model_get(filename, request)
+    fl = model_flow(filename, request) if flow else None
+    nt = None
+    if notes:
+        from .pid_notes import list_notes
+
+        nt = list_notes(filename, current_domain_of(request))
+    return Response(content=_svg_of(m, fl, nt), media_type="image/svg+xml")
 
 
 @router.get("/{filename}")

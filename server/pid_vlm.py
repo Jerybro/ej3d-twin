@@ -1490,6 +1490,35 @@ class DescribeReq(BaseModel):
     provider: str = "local"  # cloud＝雲端（引用標記才跟得住）｜local＝地端（NDA）
 
 
+# 製程說明落地：一份四千字報告要跑好幾十秒、燒不少 token，
+# 產出來就該存著。重開圖面、重整頁面都直接拿既有的，
+# 只有工程師明確按「重新產生」或提意見時才重跑。
+def _desc_path(filename: str, domain: str) -> Path:
+    d = ANNOT_DIR / re.sub(r"[^a-z0-9.-]+", "-", (domain or "dev.local").lower())
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{_slug(Path(filename).stem)}.desc.json"
+
+
+def _load_desc(filename: str, domain: str) -> dict | None:
+    p = _desc_path(filename, domain)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+@router.get("/describe/{filename}")
+def describe_get(filename: str, request: Request) -> dict:
+    """取既有的製程說明——沒有就回 204 語意（empty），不觸發生成。"""
+    from .auth import current_domain
+
+    _safe_pdf(filename)
+    d = _load_desc(filename, current_domain(request))
+    return d or {"text": "", "notes": [], "empty": True}
+
+
 DESCRIBE_SYS = (
     "你是資深製程工程師，要為同事寫一份這張 P&ID 的完整判讀報告。\n"
     "你會同時拿到**整張圖面影像**與圖上**經工程師逐項人工確認過**的位號清單。\n"
@@ -1542,6 +1571,8 @@ def describe(req: DescribeReq, request: Request) -> dict:
     刻意要求審核完成才可呼叫——說明是給人看的結論，
     建立在未經確認的模型輸出上就是把幻覺包裝成報告。
     """
+    from datetime import datetime, timezone
+
     from .auth import current_domain
 
     _safe_pdf(req.filename)
@@ -1607,12 +1638,21 @@ def describe(req: DescribeReq, request: Request) -> dict:
         user = (f"【目前已確認清單】\n{ctx}\n"
                 f"【前一版說明】\n{req.previous.strip() or '（無）'}\n"
                 f"【工程師意見】\n{req.feedback.strip() or '（無特別意見，請依最新清單自行校正牴觸之處）'}")
-        return {"text": _clean_md(_describe_llm(REVISE_SYS, user, sheet_b64, req.provider)),
-                "based_on": len(items), "revised": True, "provider": req.provider,
-                "with_image": bool(sheet_b64), "notes": notes}
-    return {"text": _clean_md(_describe_llm(DESCRIBE_SYS, ctx, sheet_b64, req.provider)),
-            "based_on": len(items), "revised": False, "provider": req.provider,
-            "with_image": bool(sheet_b64), "notes": notes}
+        out = {"text": _clean_md(_describe_llm(REVISE_SYS, user, sheet_b64, req.provider)),
+               "based_on": len(items), "revised": True, "provider": req.provider,
+               "with_image": bool(sheet_b64), "notes": notes}
+    else:
+        out = {"text": _clean_md(_describe_llm(DESCRIBE_SYS, ctx, sheet_b64, req.provider)),
+               "based_on": len(items), "revised": False, "provider": req.provider,
+               "with_image": bool(sheet_b64), "notes": notes}
+    out["at"] = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    if out["text"]:
+        try:
+            _desc_path(req.filename, dom).write_text(
+                json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+        except OSError:
+            pass            # 存檔失敗不該讓已經產好的報告消失
+    return out
 
 
 def _describe_llm(system: str, user: str, sheet_b64: str | None,

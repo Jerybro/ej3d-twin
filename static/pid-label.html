@@ -380,13 +380,14 @@
           <span class="dp-state" id="desc-state">審核開始後自動產生</span>
           <span class="sp"></span>
           <button class="mini-btn" id="fb-toggle">提出修正意見</button>
-          <button class="mini-btn" id="desc-btn" disabled>立即更新</button>
+          <button class="mini-btn primary" id="desc-btn" disabled>產生說明</button>
           <button class="mini-btn" id="dp-collapse" title="收合">▾</button>
         </div>
         <div class="dp-body" id="dp-body">
-          <div id="desc-out"><span class="hint">確認幾項位號之後，這裡會依<b>已確認</b>的清單
-            自動寫出這張圖在做什麼製程；之後每次審核都會即時校正，
-            改動過的句子會標成黃底。</span></div>
+          <div id="desc-out"><span class="hint">確認幾項位號後，按上方「產生說明」會依<b>已確認</b>的清單
+            與<b>現場評註</b>寫出這張圖在做什麼製程。<b>產生後會存檔，不會自動重跑</b>——
+            重開圖面直接看到既有版本，要更新再按一次。引用現場評註的句子會標出來源，
+            點得回圖上位置。</span></div>
           <div id="fb-box" style="display:none;margin-top:10px">
             <textarea id="fb-text" placeholder="指出哪裡寫錯或補充現場知識，例如：V613 不是儲槽，是氣液分離器。"></textarea>
             <button class="mini-btn primary" id="fb-btn" style="margin-top:6px">依意見修訂</button>
@@ -503,6 +504,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260812b"></script>
+  <script src="/static/js/pid-label.js?v=20260812c"></script>
 </body>
 </html>

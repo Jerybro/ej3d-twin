@@ -454,9 +454,31 @@ async def pid_upload(file: "UploadFile" = FastAPIFile(...)) -> dict:
         data = buf.getvalue()
     elif not low.endswith(".pdf"):
         raise HTTPException(422, "僅接受 PDF／JPG／PNG")
+    # 同檔名重傳＝同一張圖的新版本，既有台帳／評註／說明一律保留
+    # （那些都以檔名 slug 為鍵，本來就接得上）。只有在**內容真的變了**時
+    # 才清掉渲染與 OCR 快取，否則使用者會看到舊底圖卻不知道。
     dest = PID_DIR / name
+    import hashlib
+
+    existed = dest.exists()
+    same = existed and hashlib.md5(dest.read_bytes()).digest() == hashlib.md5(data).digest()
     dest.write_bytes(data)
-    return {"ok": True, "name": name, "size": dest.stat().st_size}
+    cleared = 0
+    if existed and not same:
+        from .pid_vlm import VLM_DIR, _slug
+
+        slug = _slug(Path(name).stem)
+        for p in VLM_DIR.glob(f"{slug}.*"):
+            try:
+                p.unlink()
+                cleared += 1
+            except OSError:
+                pass
+    return {"ok": True, "name": name, "size": dest.stat().st_size,
+            "replaced": existed, "content_changed": existed and not same,
+            "caches_cleared": cleared,
+            "note": ("同名檔已存在——既有的審核台帳、評註與製程說明都會沿用"
+                     if existed else "")}
 
 
 @app.get("/api/pid/list")

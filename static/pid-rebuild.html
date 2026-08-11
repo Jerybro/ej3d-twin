@@ -122,10 +122,15 @@
         model = m;
         const s = m.stats || {};
         const geo = m.geometry || {};
-        $('gaps').innerHTML = `<b>這張圖的庫存：</b>線稿 ${(geo.pipes || []).length} 段（含線寬/虛線樣式）｜流向箭頭 ${
-          (geo.arrows || []).length} 個｜OCR 文字 ${(geo.texts || []).length} 筆（中英雙讀）｜儀錶氣泡 ${
-          (geo.bubbles || []).length} 顆（藍＝已審、灰虛＝待審；圓/六角/方框照實畫）｜閥節點 ${
-          (geo.valve_nodes || []).length} 顆｜OPC 接續 ${(m.opcs || []).length} 面角旗｜已確認儀錶 ${s.instruments} 顆
+        const L = m.locate || {};
+        $('gaps').innerHTML = `<b>這張重建圖＝資料庫目前知道的全部</b>（驗收標準是
+          「只靠資料庫能不能重現這座廠」）：<br>
+          <b>幾何層</b> 線稿 ${(geo.pipes || []).length} 段（含線寬/虛線）｜文字 ${
+          (geo.texts || []).length} 筆（中英雙讀）｜儀錶氣泡 ${(geo.bubbles || []).length} 顆｜閥節點 ${
+          (geo.valve_nodes || []).length} 顆｜流向箭頭 ${(geo.arrows || []).length} 個<br>
+          <b>語意層</b>（原圖沒有、資料庫多出來的）：設備定位 ${L.registry_located || 0}/${
+          L.registry_rows || 0} 列｜製程流向紫線（實線＝有圖面或判定證據、虛線＝項次號推測、
+          紅虛線＝AI 判定可疑）｜現場評註藍框＋編號｜OPC 接續 ${(m.opcs || []).length} 面
           <b>→ 原圖上有、重建圖上沒有的，就是還沒進庫的部分。</b>`;
       } catch (e) {
         $('gaps').innerHTML = `<b style="color:var(--lo)">${e.message || '模型載入失敗'}</b>

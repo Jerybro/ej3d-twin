@@ -57,20 +57,28 @@ async function uploadFiles(files) {
   const list = [...files].filter(f => /\.(pdf|jpe?g|png)$/i.test(f.name));
   if (!list.length) { st.textContent = '只接受 PDF／JPG／PNG'; return; }
   let ok = 0;
+  const reused = [];      // 同檔名重傳：既有台帳／評註／說明都會沿用
   for (const [i, f] of list.entries()) {
     st.innerHTML = `<span class="spin"></span> 上傳中 ${i + 1}/${list.length}：${esc(f.name)}`;
     const fd = new FormData();
     fd.append('file', f);
     try {
       const r = await fetch('/api/pid/upload', { method: 'POST', body: fd });
-      if (r.ok) ok++;
-      else { const e = await r.json().catch(() => ({})); throw new Error(e.detail || r.status); }
+      if (r.ok) {
+        ok++;
+        const j = await r.json().catch(() => ({}));
+        if (j.replaced) {
+          reused.push(j.name + (j.content_changed ? '（內容有更新，底圖已重算）' : ''));
+        }
+      } else { const e = await r.json().catch(() => ({})); throw new Error(e.detail || r.status); }
     } catch (e) {
       st.innerHTML = `<span style="color:var(--lo)">${esc(f.name)} 上傳失敗：${esc(e.message || '')}</span>`;
       return;
     }
   }
-  st.innerHTML = `<span style="color:var(--hi)">已上傳 ${ok} 個檔案</span>`;
+  st.innerHTML = `<span style="color:var(--hi)">已上傳 ${ok} 個檔案</span>`
+    + (reused.length ? `<div style="margin-top:4px;line-height:1.6">同名檔已存在，
+        <b>既有的審核台帳、現場評註與製程說明都會沿用</b>：<br>${reused.map(esc).join('<br>')}</div>` : '');
   await loadFiles();
   loadGroups();            // 新圖進來 → 重算建議分組
 }
@@ -823,8 +831,27 @@ async function loadAnnots() {
       + (rej ? `｜曾否決 ${rej} 筆（留稽核）` : '')
       + `。要補掃遺漏的元件再按上方按鈕；<b>重掃不會覆蓋已確認的資料</b>（同位號同位置會更新，不會重複）。`;
     render();
-    scheduleDesc();
   } catch { /* 沒有台帳就照常顯示辨識按鈕 */ }
+  loadSavedDesc();
+}
+
+// 既有製程說明直接載入，不重跑。一份四千字報告要好幾十秒也燒不少 token，
+// 產出來就該留著——重開圖面、重整頁面都拿既有的，要更新由人決定。
+async function loadSavedDesc() {
+  if (!curFile) return;
+  try {
+    const d = await getJSON(`/api/pid/vlm/describe/${encodeURIComponent(curFile)}`);
+    if (!d.text) { $('desc-state').textContent = '尚未產生；審核幾項後按「產生說明」'; return; }
+    descText = d.text;
+    if (d.notes) notes = d.notes;
+    descBaseline = annotSignature();          // 視為與目前清單同步
+    const out = $('desc-out');
+    out.innerHTML = `<div class="desc">${renderDesc(d.text)}</div>`;
+    bindCites(out);
+    $('desc-state').innerHTML =
+      `已存檔的說明（${esc((d.at || '').replace('T', ' ').slice(0, 16))}｜依 ${d.based_on || 0} 項）`
+      + `｜<b>不會自動重跑</b>，要更新請按右方按鈕`;
+  } catch { /* 沒有就算了 */ }
 }
 const KIND_ORDER = { equipment: 0, instrument: 1, valve: 2, pipe: 3, other: 4 };
 
@@ -1063,6 +1090,17 @@ async function addNote(text, opt) {
 
 let descBusy = false, descTimer = null, descBaseline = '';
 
+// 來源籤可點：跳回圖上那塊區域，讀者查得到每句話憑什麼這樣寫
+function bindCites(root) {
+  root.querySelectorAll('.cite').forEach(a => a.addEventListener('click', () => {
+    const n = notes.find(x => x.id === a.dataset.note);
+    if (!n) return;
+    const b = (n.bbox && n.bbox.length === 4) ? n.bbox
+      : (items.find(i => i.tag === n.tag) || {}).bbox;
+    if (b) showRing(b, n.id + '｜' + (n.tag || '框選區'));
+  }));
+}
+
 function annotSignature() {
   return items.filter(i => i.state === 'accepted')
     .map(i => `${i.tag}|${i.kind}|${i.mounting || ''}`).sort().join(';');
@@ -1087,14 +1125,7 @@ async function genDesc(feedback) {
     descBaseline = sig;
     if (d.notes) notes = d.notes;
     out.innerHTML = `<div class="desc">${renderDesc(d.text)}</div>`;
-    // 來源籤可點：跳回圖上那塊區域，讀者查得到每句話憑什麼這樣寫
-    out.querySelectorAll('.cite').forEach(a => a.addEventListener('click', () => {
-      const n = notes.find(x => x.id === a.dataset.note);
-      if (!n) return;
-      const b = (n.bbox && n.bbox.length === 4) ? n.bbox
-        : (items.find(i => i.tag === n.tag) || {}).bbox;
-      if (b) showRing(b, n.id + '｜' + (n.tag || '框選區'));
-    }));
+    bindCites(out);
     const acc = items.filter(i => i.state === 'accepted').length;
     st.className = 'dp-state';
     st.innerHTML = d.revised
@@ -1108,20 +1139,22 @@ async function genDesc(feedback) {
   } finally {
     descBusy = false;
     $('desc-btn').disabled = items.filter(i => i.state === 'accepted').length < 3;
-    if (annotSignature() !== descBaseline) scheduleDesc();   // 期間又審了新的
   }
 }
 
-// 每次審核都可能改變結論——去抖動後自動校正，讓使用者真的看到
-// 「我審了這一項，說明就跟著變」，但不會每點一下就打一次模型
+// 說明**不會自動重跑**——原本每審幾項就自動重生成一次，一份四千字報告
+// 跑一次數十秒又燒 token，審一輪等於白燒十幾次。改成只提示「已變更」，
+// 什麼時候要更新由工程師決定。
 function scheduleDesc() {
   const acc = items.filter(i => i.state === 'accepted').length;
   if (acc < 3 || descBusy) return;
+  const st = $('desc-state');
   if (annotSignature() === descBaseline) return;
   clearTimeout(descTimer);
-  $('desc-state').className = 'dp-state live';
-  $('desc-state').textContent = descText ? '標註已變更，即將校正說明…' : '即將產生說明…';
-  descTimer = setTimeout(() => genDesc(''), 2500);
+  st.className = 'dp-state live';
+  st.innerHTML = descText
+    ? '標註已變更，目前說明可能過時——要更新請按「重新產生」'
+    : '已可產生說明——按「產生說明」開始（約 30 秒）';
 }
 
 $('desc-btn').addEventListener('click', () => { clearTimeout(descTimer); genDesc(''); });

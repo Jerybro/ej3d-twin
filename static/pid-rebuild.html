@@ -105,10 +105,10 @@
         const m = await fetch(`/api/pid/model/${encodeURIComponent(f)}`)
           .then(r => { if (!r.ok) throw new Error('尚未建立資產模型'); return r.json(); });
         const s = m.stats || {};
-        const gp = (m.geometry && m.geometry.pipes || []).length;
-        $('gaps').innerHTML = `<b>這張圖的庫存：</b>線稿 ${gp} 段｜閥節點 ${
-          (m.geometry && m.geometry.valve_nodes || []).length} 顆｜已確認儀錶 ${
-          s.instruments} 顆（氣泡＋位號畫得出來）｜已確認設備 ${
+        const geo = m.geometry || {};
+        $('gaps').innerHTML = `<b>這張圖的庫存：</b>線稿 ${(geo.pipes || []).length} 段｜OCR 文字 ${
+          (geo.texts || []).length} 筆｜儀錶氣泡 ${(geo.bubbles || []).length} 顆（藍實圈＝已審、灰虛圈＝待審）｜閥節點 ${
+          (geo.valve_nodes || []).length} 顆｜已確認儀錶 ${s.instruments} 顆｜已確認設備 ${
           s.equipment_on_drawing}/${s.equipment} 台有座標｜管線編號 ${s.lines} 條
           <b>→ 原圖上有、重建圖上沒有的，就是還沒進庫的部分。</b>`;
       } catch (e) {

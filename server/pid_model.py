@@ -244,12 +244,13 @@ def build_model(filename: str) -> dict:
     topo: dict = {"ok": False}
     vnodes: list = []           # [(norm_x, norm_y, component_id)]
     pipes: list = []            # [[u0, v0, u1, v1], ...] 正規化座標
+    rot = meta.get("rot", 0)
     try:
         import networkx as nx
 
         from .pid_parse import detect_valves, pdf_to_norm
 
-        rot, pw0, ph0 = meta.get("rot", 0), meta.get("pw", 0), meta.get("ph", 0)
+        pw0, ph0 = meta.get("pw", 0), meta.get("ph", 0)
         G = build_graph(pdf)
         raw_valves, pw, ph = detect_valves(pdf)
         bridge = insert_valves(G, raw_valves)
@@ -263,17 +264,49 @@ def build_model(filename: str) -> dict:
             x, y = d["pos"]
             u, v = pdf_to_norm(x, y, pw0 or pw, ph0 or ph, rot)
             vnodes.append((u, v, comp_of.get(n, -1)))
-        for _a, _b, ed in G.edges(data=True):
-            pts = ed.get("pts")
-            if not pts:
-                continue        # through_valve 橋接邊沒有實體線，由閥符號表達
-            (x0, y0), (x1, y1) = pts
-            u0, v0 = pdf_to_norm(x0, y0, pw0 or pw, ph0 or ph, rot)
-            u1, v1 = pdf_to_norm(x1, y1, pw0 or pw, ph0 or ph, rot)
-            pipes.append([round(u0, 4), round(v0, 4), round(u1, 4), round(v1, 4)])
         topo = {"ok": True, "bridge": bridge, "stats": stats(G)}
     except Exception as exc:  # noqa: BLE001
         topo = {"ok": False, "reason": str(exc)[:200]}
+
+    # 繪圖層線稿與拓撲**刻意分家**：拓撲要乾淨（page_segments 兩點段，
+    # 折線會混入字形筆劃干擾閥件偵測）；重建要完整（all_segments 折線拆解，
+    # 否則任何帶轉角的管線整條消失——實測主管線大面積斷裂就是這個原因）。
+    try:
+        from .pid_parse import all_segments, pdf_to_norm
+
+        raw_segs, pw2, ph2 = all_segments(pdf)
+        for a, b in raw_segs:
+            if math.dist(a, b) < 4.0:   # 字形筆劃等碎屑；文字由 OCR 層負責
+                continue
+            u0, v0 = pdf_to_norm(a[0], a[1], pw2, ph2, rot)
+            u1, v1 = pdf_to_norm(b[0], b[1], pw2, ph2, rot)
+            pipes.append([round(u0, 4), round(v0, 4), round(u1, 4), round(v1, 4)])
+    except Exception:  # noqa: BLE001
+        pass
+
+    # OCR 文字層：管線編號、註記、設備名——1269 筆命中本來就在快取裡，
+    # 不進模型等於白掃。tile 重疊會產生重複命中，以（文字＋粗位置）去重。
+    texts: list = []
+    if hits and W:
+        seen_t = set()
+        for hx, hy, t, _cf, hh in hits:
+            key = (t, round(hx / W, 2), round(hy / H, 2))
+            if key in seen_t or not str(t).strip():
+                continue
+            seen_t.add(key)
+            texts.append([round(hx / W, 4), round(hy / H, 4), str(t).strip(),
+                          round(hh / H, 4)])
+
+    # 儀錶氣泡幾何層：130 顆實測圓心＋半徑。已審儀錶對位到最近氣泡後
+    # 用真實幾何畫（文字高度推半徑會偏大又漂移）；沒對上的畫空圈——
+    # 「這裡有儀錶還沒審」直接顯示在重建圖上，盲測圖同時是待辦地圖。
+    try:
+        from .pid_vlm import _bubbles_norm
+
+        bubbles = [[round(bx, 4), round(by, 4), round(rx, 4), round(ry, 4)]
+                   for bx, by, rx, ry in _bubbles_norm(filename)]
+    except Exception:  # noqa: BLE001
+        bubbles = []
 
     # ---- 閥件（已確認者），屬性充實＋掛線 ----
     valves = []
@@ -333,7 +366,10 @@ def build_model(filename: str) -> dict:
             "aspect": round(meta["h"] / meta["w"], 4) if meta.get("w") else 0.7,
             "pipes": pipes,
             "valve_nodes": [[round(u, 4), round(v, 4), ci] for u, v, ci in vnodes],
-            "note": "向量幾何層（系統推定）——盲測重建的骨架，含設備輪廓線",
+            "texts": texts,
+            "bubbles": bubbles,
+            "note": "向量幾何層（系統推定）——盲測重建的骨架，含設備輪廓線、"
+                    "OCR 文字層與儀錶氣泡實測幾何",
         },
         "stats": {
             "equipment": len(equipment),
@@ -371,12 +407,24 @@ def _svg_of(m: dict) -> str:
          f'width="{W}" height="{H}" font-family="Inter,Arial,sans-serif">',
          f'<rect width="{W}" height="{H}" fill="#FFFFFF"/>']
 
-    # 1) 線稿層（管線＋設備輪廓，向量幾何，系統推定）
+    # 0) OCR 文字層（墊底）：管線編號、註記、設備名。灰色，蓋不過語意層。
+    # 字級刻意壓小（×0.6、上限 13px）：OCR 的字高估計偏大，照畫會互疊成一片；
+    # 這層的任務是「查得到、對得上位置」，不是複刻原圖排版。
+    if g.get("texts"):
+        p.append('<g opacity="0.78">')
+        for tx, ty, txt, th in g["texts"]:
+            fs = min(max(th * 2 * H * 0.6, 5.5), 13.0)
+            p.append(f'<text x="{tx * W:.0f}" y="{ty * H + fs * 0.35:.0f}" '
+                     f'font-size="{fs:.1f}" fill="#9AA3AE" '
+                     f'text-anchor="middle">{_x(txt)}</text>')
+        p.append('</g>')
+
+    # 1) 線稿層（管線＋設備輪廓，向量幾何折線拆解版）
     seg = []
     for u0, v0, u1, v1 in g.get("pipes", []):
         seg.append(f"M{u0 * W:.0f},{v0 * H:.0f}L{u1 * W:.0f},{v1 * H:.0f}")
     if seg:
-        p.append(f'<path d="{"".join(seg)}" stroke="#2A3441" stroke-width="1.1" '
+        p.append(f'<path d="{"".join(seg)}" stroke="#2A3441" stroke-width="1.0" '
                  'fill="none" stroke-linecap="round"/>')
 
     # 2) 閥件節點（拓撲層：蝴蝶結符號）
@@ -400,23 +448,52 @@ def _svg_of(m: dict) -> str:
         p.append(f'<text x="{x:.0f}" y="{y + 24:.0f}" font-size="10" '
                  f'fill="#046AFB" text-anchor="middle">{_x(lab)}</text>')
 
-    # 4) 已確認儀錶：ISA 氣泡（字母上排、迴路號下排）
+    # 4) 儀錶氣泡：實測幾何優先。已審者對位到最近氣泡（真實圓心半徑），
+    #    沒審到的氣泡畫灰圈——重建圖同時是「哪裡還沒審」的待辦地圖。
+    bubs = g.get("bubbles", [])
+    used_bub = set()
+
+    def _nearest_bub(x: float, y: float):
+        best, bi = None, -1
+        for i, (bx, by, rx, _ry) in enumerate(bubs):
+            if i in used_bub:
+                continue
+            d = math.hypot(bx - x, by - y)
+            if d < max(rx * 1.6, 0.01) and (best is None or d < best):
+                best, bi = d, i
+        return bi
+
     for it in m.get("instruments", []):
         b = it.get("bbox")
         if not b:
             continue
-        x, y = (b[0] + b[2]) / 2 * W, (b[1] + b[3]) / 2 * H
-        r = max((b[3] - b[1]) * H * 1.15, 13)
+        x, y = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
+        bi = _nearest_bub(x, y)
+        if bi >= 0:
+            used_bub.add(bi)
+            bx, by, rx, _ry = bubs[bi]
+            cx, cy, r = bx * W, by * H, max(rx * W, 11)
+        else:
+            cx, cy = x * W, y * H
+            r = max((b[3] - b[1]) * H * 0.95, 11)
         mm = re.match(r"^([A-Z]+)(.*)$", it.get("tag", ""))
         top, bot = (mm.group(1), mm.group(2)) if mm else (it.get("tag", ""), "")
-        fs = max(r * 0.42, 6.5)
-        p.append(f'<circle cx="{x:.0f}" cy="{y:.0f}" r="{r:.0f}" fill="#fff" '
+        fs = min(max(r * 0.42, 6.5), r * 0.9 / max(len(top), len(bot), 1) * 1.7)
+        p.append(f'<circle cx="{cx:.0f}" cy="{cy:.0f}" r="{r:.0f}" fill="#fff" '
                  'stroke="#046AFB" stroke-width="1.4"/>')
-        p.append(f'<text x="{x:.0f}" y="{y - r * 0.12:.0f}" font-size="{fs:.1f}" '
+        p.append(f'<text x="{cx:.0f}" y="{cy - r * 0.12:.0f}" font-size="{fs:.1f}" '
                  f'fill="#061027" text-anchor="middle" font-weight="600">{_x(top)}</text>')
         if bot:
-            p.append(f'<text x="{x:.0f}" y="{y + r * 0.52:.0f}" font-size="{fs:.1f}" '
+            p.append(f'<text x="{cx:.0f}" y="{cy + r * 0.52:.0f}" font-size="{fs:.1f}" '
                      f'fill="#061027" text-anchor="middle">{_x(bot)}</text>')
+
+    # 未審核的偵測氣泡：空灰圈（審完會逐顆變藍）
+    for i, (bx, by, rx, _ry) in enumerate(bubs):
+        if i in used_bub:
+            continue
+        p.append(f'<circle cx="{bx * W:.0f}" cy="{by * H:.0f}" r="{max(rx * W, 10):.0f}" '
+                 'fill="none" stroke="#C3CAD2" stroke-width="1.2" '
+                 'stroke-dasharray="4 3"/>')
 
     # 5) 已確認且定位的設備
     for e in m.get("equipment", []):

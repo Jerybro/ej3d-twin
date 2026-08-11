@@ -288,19 +288,21 @@ async function loadConvention(name) {
 // ------------------------------------------------------------ 盲測重建比對
 // 不開新視窗——把目前這一頁切成並排或疊圖。審核現場與重建圖擺在一起，
 // 才看得出「這一項到底有沒有進庫」，跳出去看等於中斷審核。
-let cmpMode = 'off';        // off | side | overlay
+let cmpMode = 'off';        // off | side | overlay | only
 
 function setCompare(mode) {
   cmpMode = mode;
-  const w = $('canvas-wrap'), pb = $('pane-b'), img = $('rebuild-img');
+  const w = $('canvas-wrap'), pb = $('pane-b'), pa = $('pane-a'), img = $('rebuild-img');
   if (!w || !pb) return;
   w.classList.toggle('side', mode === 'side');
   w.classList.toggle('ov', mode === 'overlay');
-  pb.style.display = mode === 'off' ? 'none' : '';
-  $('cmp-ctl').style.display = mode === 'off' ? 'none' : '';
-  ['cmp-off', 'cmp-side', 'cmp-ov'].forEach((id, i) =>
-    $(id).classList.toggle('on', ['off', 'side', 'overlay'][i] === mode));
-  if (mode !== 'off' && curFile && !img.dataset.for) {
+  // 必須給 'block'——設空字串會退回 CSS 的 display:none（實測並排整個不出現）
+  pb.style.display = mode === 'off' ? 'none' : 'block';
+  pa.style.display = mode === 'only' ? 'none' : 'block';
+  $('cmp-ctl').style.display = mode === 'overlay' ? '' : 'none';
+  ['cmp-off', 'cmp-side', 'cmp-ov', 'cmp-only'].forEach((id, i) =>
+    $(id).classList.toggle('on', ['off', 'side', 'overlay', 'only'][i] === mode));
+  if (mode !== 'off' && curFile && img.dataset.for !== curFile) {
     img.dataset.for = curFile;
     img.src = `/api/pid/model/${encodeURIComponent(curFile)}/rebuild.svg?t=${Date.now()}`;
   }
@@ -310,6 +312,7 @@ function setCompare(mode) {
 $('cmp-off').addEventListener('click', () => setCompare('off'));
 $('cmp-side').addEventListener('click', () => setCompare('side'));
 $('cmp-ov').addEventListener('click', () => setCompare('overlay'));
+$('cmp-only').addEventListener('click', () => setCompare('only'));
 $('cmp-op').addEventListener('input', e => {
   $('rebuild-img').style.opacity = e.target.value / 100;
 });
@@ -847,7 +850,7 @@ async function loadSavedDesc() {
     descBaseline = annotSignature();          // 視為與目前清單同步
     const out = $('desc-out');
     out.innerHTML = `<div class="desc">${renderDesc(d.text)}</div>`;
-    bindCites(out);
+    bindCites(out); bindDescSources(out);
     $('desc-state').innerHTML =
       `已存檔的說明（${esc((d.at || '').replace('T', ' ').slice(0, 16))}｜依 ${d.based_on || 0} 項）`
       + `｜<b>不會自動重跑</b>，要更新請按右方按鈕`;
@@ -1012,7 +1015,7 @@ let descText = '';          // 目前這一版說明（修訂時要帶回後端�
 // ⟦N1⟧ 是評註引用 → 轉成可點的來源籤，點了跳回圖上那塊區域。
 // 報告的每一句都要能回溯出處，不然讀者無從查證。
 function renderDesc(t) {
-  return esc(t)
+  return annotateDescTags(esc(t))
     .replace(/⟪([\s\S]*?)⟫/g, '<mark>$1</mark>')
     .replace(/⟦(N\d+)⟧/g, (_, id) => {
       const n = notes.find(x => x.id === id);
@@ -1021,6 +1024,53 @@ function renderDesc(t) {
       return `<a class="cite" data-note="${id}" title="${esc((n && n.text) || '')}">`
         + `${id}${where ? '·' + esc(where) : ''}${who ? '·' + esc(who) : ''}</a>`;
     });
+}
+
+// 說明溯源：把文中出現的位號包成有色籤——顏色對應元件種類，滑上去
+// 圖上該區塊立刻高亮注目。每一句話講的是哪顆泡泡、哪個 block，
+// 要能直接指回去；查證零成本，也不用重跑模型（純前端比對台帳）。
+function descTagIndex() {
+  const idx = {};
+  items.forEach(i => { if (i.tag && i.bbox) idx[i.tag] = i; });
+  const am = assetModel || {};
+  (am.locate?.items || []).forEach(i => {
+    if (i.tag && i.bbox && !idx[i.tag]) idx[i.tag] = i;
+  });
+  (am.equipment || []).forEach(e => {
+    const b = e.bbox || e.candidate_bbox;
+    if (e.tag && b && !idx[e.tag]) {
+      idx[e.tag] = { tag: e.tag, kind: 'equipment', bbox: b, symbol: e.name || '' };
+    }
+  });
+  return idx;
+}
+
+function annotateDescTags(html) {
+  const idx = descTagIndex();
+  const tags = Object.keys(idx).sort((a, b) => b.length - a.length);
+  if (!tags.length) return html;
+  const re = new RegExp(
+    '(?<![0-9A-Za-z.\\-])(' +
+    tags.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') +
+    ')(?![0-9A-Za-z.\\-])', 'g');
+  return html.replace(re, t => {
+    const it = idx[t];
+    const what = it.symbol || KIND_TXT[it.kind] || '';
+    return `<span class="src src-${it.kind || 'other'}" data-tag="${esc(t)}"`
+      + ` title="來自圖上：${esc(t)}${what ? '　' + esc(what) : ''}（滑入即在圖面高亮）">${esc(t)}</span>`;
+  });
+}
+
+let _lastSrcTag = '';
+function bindDescSources(root) {
+  root.addEventListener('mouseover', e => {
+    const s = e.target.closest('.src');
+    if (!s || s.dataset.tag === _lastSrcTag) return;
+    _lastSrcTag = s.dataset.tag;
+    const it = descTagIndex()[s.dataset.tag];
+    if (it && it.bbox) showRing(it.bbox, s.dataset.tag);
+  });
+  root.addEventListener('mouseleave', () => { _lastSrcTag = ''; }, true);
 }
 
 // ------------------------------------------------------------ 現場評註
@@ -1125,7 +1175,7 @@ async function genDesc(feedback) {
     descBaseline = sig;
     if (d.notes) notes = d.notes;
     out.innerHTML = `<div class="desc">${renderDesc(d.text)}</div>`;
-    bindCites(out);
+    bindCites(out); bindDescSources(out);
     const acc = items.filter(i => i.state === 'accepted').length;
     st.className = 'dp-state';
     st.innerHTML = d.revised

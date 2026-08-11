@@ -188,6 +188,18 @@
     /* 修訂後有更動的句子：高亮，讓工程師一眼看出這輪改了什麼 */
     .desc mark { background: rgba(224,164,21,0.30); border-bottom: 2px solid var(--mid);
       color: inherit; padding: 1px 2px; border-radius: 2px; }
+    /* 說明溯源籤：位號有色可滑入，顏色對應元件種類（同圖面框色） */
+    .desc .src { padding: 0 2px; border-radius: 3px; cursor: pointer;
+      border-bottom: 1.5px solid; font-weight: 600; }
+    .desc .src:hover { color: #fff; }
+    .desc .src-equipment { background: rgba(11,138,70,0.10); border-color: #0B8A46; color: #0B6B36; }
+    .desc .src-equipment:hover { background: #0B8A46; }
+    .desc .src-instrument { background: rgba(4,106,251,0.10); border-color: var(--accent); color: #0450B4; }
+    .desc .src-instrument:hover { background: var(--accent); }
+    .desc .src-valve, .desc .src-other { background: rgba(107,118,131,0.13);
+      border-color: #6B7683; color: #4A5560; }
+    .desc .src-valve:hover, .desc .src-other:hover { background: #6B7683; }
+
     /* 引用來源籤：報告的每一句都要能回溯出處 */
     .desc .cite { display: inline-block; font-size: 10px; font-weight: 600;
       padding: 0 5px; margin: 0 2px; border-radius: 7px; cursor: pointer;
@@ -356,10 +368,11 @@
         <button class="mini-btn" id="zoom-in">＋</button>
         <button class="mini-btn" id="zoom-fit">全圖</button>
         <span id="cmp-grp" style="display:none">
-          <span class="hint" style="margin-right:2px">盲測重建</span>
+          <span class="hint" style="margin-right:2px">資產模型</span>
           <button class="mini-btn on" id="cmp-off">關</button>
           <button class="mini-btn" id="cmp-side">並排</button>
           <button class="mini-btn" id="cmp-ov">疊圖</button>
+          <button class="mini-btn" id="cmp-only">僅資產模型</button>
           <span class="hint" id="cmp-ctl" style="display:none;margin-left:4px">
             透明度 <input type="range" id="cmp-op" min="15" max="100" value="80"
                         style="vertical-align:middle;width:80px;accent-color:var(--accent)" />
@@ -504,6 +517,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260812c"></script>
+  <script src="/static/js/pid-label.js?v=20260812d"></script>
 </body>
 </html>

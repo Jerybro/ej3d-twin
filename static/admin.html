@@ -49,8 +49,23 @@
       <span class="lang"><button data-lang="zh">繁體中文</button><button data-lang="en">English</button></span>
     </div>
     <h1 data-i18n="title">權限管理</h1>
-    <p class="sub" data-i18n="sub">管理平台成員的角色與啟用狀態。成員以 Google 帳號登入後自動出現在此。</p>
+    <p class="sub" data-i18n="sub">白名單制：只有下方名單內的 Google 帳號能登入平台。要讓新成員進來，先在此加入他的 email。</p>
     <div class="banner" id="banner" style="display:none"></div>
+    <div class="card" style="padding:14px 16px;margin-bottom:14px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="inv-email" placeholder="someone@gmail.com" style="flex:1;min-width:220px;padding:8px 11px;
+          border:1px solid var(--line,#DBDDE0);border-radius:7px;font-family:inherit;font-size:13px" />
+        <input id="inv-name" placeholder="顯示名稱（選填）" style="width:170px;padding:8px 11px;
+          border:1px solid var(--line,#DBDDE0);border-radius:7px;font-family:inherit;font-size:13px" />
+        <select id="inv-role" style="padding:8px 10px;border:1px solid var(--line,#DBDDE0);
+          border-radius:7px;font-family:inherit;font-size:13px">
+          <option value="user">成員</option><option value="admin">管理員</option>
+        </select>
+        <button id="inv-btn" style="padding:8px 16px;border-radius:7px;border:none;background:#046AFB;
+          color:#fff;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer">加入名單</button>
+      </div>
+      <div id="inv-state" style="font-size:12.5px;color:var(--text2,#5C6773);margin-top:8px"></div>
+    </div>
     <div class="card"><div id="tablewrap"><div class="empty" data-i18n="loading">載入中…</div></div></div>
   </div>
   <script src="/static/js/i18n.js"></script>
@@ -116,6 +131,24 @@
           <button class="act danger" data-del="${em}">${T('act.delete','刪除')}</button>`}
         </td></tr>`;
     }
+
+    document.getElementById('inv-btn').addEventListener('click', async () => {
+      const st = document.getElementById('inv-state');
+      const email = document.getElementById('inv-email').value.trim();
+      if (!email) { st.textContent = '請填入 email'; return; }
+      st.textContent = '加入中…';
+      const r = await fetch('/api/admin/invite', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, name: document.getElementById('inv-name').value.trim(),
+                               role: document.getElementById('inv-role').value }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { st.innerHTML = `<span style="color:#D93F3F">${esc(d.detail || '加入失敗')}</span>`; return; }
+      st.innerHTML = `<span style="color:#12A150">已加入 ${esc(email)}——他現在可以用這個 Google 帳號登入了</span>`;
+      document.getElementById('inv-email').value = '';
+      document.getElementById('inv-name').value = '';
+      load();
+    });
 
     async function updateUser(email, body) {
       const r = await fetch(`/api/admin/users/${encodeURIComponent(email)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });

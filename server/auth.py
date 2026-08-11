@@ -150,8 +150,15 @@ def google_callback(request: Request):
         return JSONResponse({"detail": "Google 帳號未通過 email 驗證"}, status_code=403)
     users = _load_users()
     if email not in users:
-        # 第一個登入者＝admin，其餘 user（admin 之後可在 users.json 調角色）
-        users[email] = {"name": info.get("name") or email, "role": "admin" if not users else "user",
+        # 白名單制：只有事先登錄的帳號能進。
+        # 站台掛在 Tailscale Funnel（公網可達）且存放客戶 P&ID（台化、中油），
+        # 原本「登入即自動建帳號」等於對全網任何 Google 帳號開放——那不是白名單。
+        # 例外：使用者表為空時，第一個登入者成為 admin（初始化用）。
+        if users:
+            return JSONResponse(
+                {"detail": f"{email} 不在授權名單中。請聯絡管理員開通後再登入。"},
+                status_code=403)
+        users[email] = {"name": info.get("name") or email, "role": "admin",
                         "is_active": True, "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         _save_users(users)
     if not users[email].get("is_active", True):
@@ -196,6 +203,33 @@ def admin_list_users(request: Request):
             "users": [{"email": e, "name": v.get("name"), "role": v.get("role", "user"),
                        "is_active": v.get("is_active", True), "created": v.get("created")}
                       for e, v in sorted(users.items(), key=lambda kv: kv[1].get("created") or "")]}
+
+
+@router.post("/api/admin/invite")
+def admin_invite_user(request: Request, body: dict):
+    """預先登錄一個帳號（白名單制下，沒登錄過的人登入會被擋）。
+
+    改成白名單後就需要這支：管理員先把 email 加進來，對方才登得進去。
+    協作者（例如外部工程師）一律給 user 角色。
+    """
+    _require_admin(request)
+    if AUTH_DISABLED:
+        raise HTTPException(403, "免登入模式下無法新增帳號——請先啟用登入")
+    email = (body.get("email") or "").strip().lower()
+    if "@" not in email or " " in email:
+        raise HTTPException(422, "請填寫有效的 Google 帳號 email")
+    role = body.get("role") or "user"
+    if role not in ("admin", "user"):
+        raise HTTPException(422, "角色只能是 admin 或 user")
+    users = _load_users()
+    if email in users:
+        raise HTTPException(409, "此帳號已在名單中")
+    users[email] = {"name": body.get("name") or email, "role": role,
+                    "is_active": True,
+                    "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "invited_by": request.session.get("email", "")}
+    _save_users(users)
+    return {"ok": True, "email": email, **users[email]}
 
 
 @router.post("/api/admin/users/{email}")

@@ -310,16 +310,18 @@ function setCompare(mode) {
   const want = `${curFile}|${rbMode}`;    // 換圖或換模式都要重抓
   if (mode !== 'off' && curFile && img.dataset.for !== want) {
     img.dataset.for = want;
-    img.src = `/api/pid/model/${encodeURIComponent(curFile)}/rebuild.svg` +
-              `?mode=${rbMode}&t=${Date.now()}`;
+    img.src = rbMode === 'annot'
+      ? `/api/pid/model/${encodeURIComponent(curFile)}/annotated.jpg?t=${Date.now()}`
+      : `/api/pid/model/${encodeURIComponent(curFile)}/rebuild.svg` +
+        `?mode=${rbMode}&t=${Date.now()}`;
   }
   applyZoom();
 }
 
 function setRbMode(m2) {
   rbMode = m2;
-  $('cmp-m-blind').classList.toggle('on', m2 === 'blind');
-  $('cmp-m-trace').classList.toggle('on', m2 === 'trace');
+  ['blind', 'annot', 'trace'].forEach(k =>
+    $('cmp-m-' + k).classList.toggle('on', m2 === k));
   if (cmpMode !== 'off') setCompare(cmpMode);
 }
 
@@ -328,6 +330,7 @@ $('cmp-side').addEventListener('click', () => setCompare('side'));
 $('cmp-ov').addEventListener('click', () => setCompare('overlay'));
 $('cmp-only').addEventListener('click', () => setCompare('only'));
 $('cmp-m-blind').addEventListener('click', () => setRbMode('blind'));
+$('cmp-m-annot').addEventListener('click', () => setRbMode('annot'));
 $('cmp-m-trace').addEventListener('click', () => setRbMode('trace'));
 $('cmp-op').addEventListener('input', e => {
   $('rebuild-img').style.opacity = e.target.value / 100;

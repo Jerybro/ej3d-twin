@@ -1626,6 +1626,107 @@ def model_rebuild_svg(filename: str, request: Request,
     return Response(content=render(m, fl, nt), media_type="image/svg+xml")
 
 
+@router.get("/{filename}/annotated.jpg")
+def model_annotated(filename: str, request: Request):
+    """全量標示圖：原圖一筆不動，資產模型逐層疊上——對著原圖驗收的交付物。
+
+    與盲重建互補：盲重建驗「資料庫懂多少」（不看原圖），標示圖給人
+    「對著原圖驗收」——每個入庫資產框在原圖哪裡、位號是什麼，一張圖交付。
+    分層配色：設備綠（含候選淡綠）、儀錶藍、閥件紫（審核閥全框、
+    幾何偵測閥小方塊）、管線號琥珀、OPC 紅橘；左上角統計欄。
+    """
+    import io as _io
+
+    from fastapi.responses import Response
+    from PIL import Image, ImageDraw, ImageFont
+
+    from .pid_vlm import _ensure_base
+
+    m = model_get(filename, request)
+    img_p, _meta = _ensure_base(filename)
+    im = Image.open(img_p).convert("RGB")
+    W, H = im.size
+    ov = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    dr = ImageDraw.Draw(ov)
+    S = W / 3600.0                      # 字級與線寬隨底圖解析度縮放
+
+    def _font(px: float):
+        for name in ("msjhbd.ttc", "msjh.ttc", "arialbd.ttf", "arial.ttf"):
+            try:
+                return ImageFont.truetype(rf"C:\Windows\Fonts\{name}", int(px))
+            except OSError:
+                continue
+        return ImageFont.load_default()
+
+    F, F2 = _font(30 * S), _font(42 * S)
+    EQ, IN, VA, LN, OP = ((11, 138, 70), (4, 106, 251), (124, 77, 255),
+                          (138, 91, 0), (194, 65, 12))
+
+    def _box(bb, col, w=5, alpha=34):
+        x0, y0 = bb[0] * W, bb[1] * H
+        dr.rectangle([x0, y0, bb[2] * W, bb[3] * H],
+                     fill=col + (alpha,), outline=col + (255,),
+                     width=max(2, int(w * S)))
+        return x0, y0
+
+    def _label(x, y, txt, col, font=None):
+        font = font or F
+        tb = dr.textbbox((x, y - 36 * S), txt, font=font)
+        dr.rectangle([tb[0] - 4, tb[1] - 2, tb[2] + 4, tb[3] + 2],
+                     fill=(255, 255, 255, 210))
+        dr.text((x, y - 36 * S), txt, fill=col + (255,), font=font)
+
+    n_eq = n_cand = 0
+    for e in m.get("equipment", []):
+        if e.get("bbox"):
+            n_eq += 1
+            x0, y0 = _box(e["bbox"], EQ, w=7, alpha=22)
+            _label(x0, y0, f'{e.get("tag", "")} {e.get("name") or ""}', EQ, F2)
+        elif e.get("candidate_bbox"):
+            n_cand += 1
+            x0, y0 = _box(e["candidate_bbox"], EQ, w=3, alpha=12)
+            _label(x0, y0, f'{e.get("tag", "")}（候選）', EQ)
+    for i in m.get("instruments", []):
+        if not i.get("bbox"):
+            continue
+        x0, y0 = _box(i["bbox"], IN)
+        _label(x0, y0, i.get("tag", ""), IN)
+    n_geom_v = 0
+    g = m.get("geometry") or {}
+    for u, v, _ci in g.get("valve_nodes", []):     # 幾何偵測閥：小方塊、不標字
+        n_geom_v += 1
+        r = 0.004
+        _box([u - r, v - r * (W / H), u + r, v + r * (W / H)], VA, w=3, alpha=46)
+    for vv in m.get("valves", []):                 # 審核入庫閥：全框＋位號
+        if not vv.get("bbox"):
+            continue
+        x0, y0 = _box(vv["bbox"], VA, w=5, alpha=30)
+        if vv.get("id"):
+            _label(x0, y0, vv["id"], VA)
+    for ln in m.get("lines", []):
+        if ln.get("bbox"):
+            _box(ln["bbox"], LN, w=3, alpha=26)
+    for o in m.get("opcs", []):
+        bb = [o["x"] - 0.017, o["y"] - 0.014, o["x"] + 0.017, o["y"] + 0.014]
+        x0, y0 = _box(bb, OP, w=4, alpha=26)
+        _label(x0, y0, o.get("code", ""), OP)
+
+    out = Image.alpha_composite(im.convert("RGBA"), ov).convert("RGB")
+    dr2 = ImageDraw.Draw(out)
+    txt = (f"{m.get('drawing', filename)}　全量標示｜設備 {n_eq}（候選 {n_cand}）｜"
+           f"儀錶 {sum(1 for i in m.get('instruments', []) if i.get('bbox'))}｜"
+           f"閥件 {len(m.get('valves', []))}＋幾何 {n_geom_v}｜"
+           f"管線號 {len(m.get('lines', []))}｜OPC {len(m.get('opcs', []))}")
+    tb = dr2.textbbox((int(50 * S), int(44 * S)), txt, font=F2)
+    dr2.rectangle([tb[0] - 20, tb[1] - 14, tb[2] + 20, tb[3] + 14],
+                  fill=(255, 255, 255), outline=(60, 60, 60), width=max(2, int(3 * S)))
+    dr2.text((int(50 * S), int(44 * S)), txt, fill=(6, 16, 39), font=F2)
+
+    buf = _io.BytesIO()
+    out.save(buf, format="JPEG", quality=86)
+    return Response(content=buf.getvalue(), media_type="image/jpeg")
+
+
 @router.get("/{filename}")
 def model_get(filename: str, request: Request) -> dict:
     from .auth import current_domain

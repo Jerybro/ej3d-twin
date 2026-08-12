@@ -30,6 +30,61 @@ function Log($msg) {
   Add-Content -Path $LogFile -Value $line -Encoding UTF8
 }
 
+function Get-PythonPath {
+  $venv = Join-Path $RepoDir ".venv\Scripts\python.exe"
+  if (Test-Path $venv) { return $venv }
+  $c = Get-Command python -ErrorAction SilentlyContinue
+  if ($c) { return $c.Source }
+  # 排程是非互動工作階段，PATH 可能跟登入殼層不同——留一條絕對路徑後路
+  return "C:\Users\Admin\AppData\Local\Microsoft\WindowsApps\python.exe"
+}
+
+function Get-ListeningPid {
+  try {
+    $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop
+    return ($c | Select-Object -First 1).OwningProcess
+  } catch { return $null }
+}
+
+# 重啟服務——服務化與裸程序兩種跑法都要能處理。
+# 桌機目前是使用者工作階段裡的 `python -m uvicorn`（不是 Windows 服務），
+# 只呼叫 Restart-Service 會失敗退出，結果是「檔案更新了、跑的還是舊程式」——
+# 對外網址看起來活著卻服務舊版，比整個掛掉更難察覺。
+function Restart-App {
+  $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+  if ($svc) {
+    try { Restart-Service -Name $ServiceName -ErrorAction Stop; Log "[重啟] 服務 $ServiceName"; return $true }
+    catch { Log "[錯誤] 服務重啟失敗：$_"; return $false }
+  }
+  $old = Get-ListeningPid
+  if ($old) {
+    try { Stop-Process -Id $old -Force -Confirm:$false } catch {}
+    foreach ($i in 1..15) {                     # 沒等舊的死透就起新的，新程序會因連接埠被佔而靜默夭折
+      Start-Sleep -Milliseconds 400
+      if (-not (Get-ListeningPid)) { break }
+    }
+  }
+  $py = Get-PythonPath
+  try {
+    Start-Process -FilePath $py -WindowStyle Hidden -WorkingDirectory $RepoDir `
+      -ArgumentList '-m','uvicorn','server.main:app','--host','127.0.0.1','--port',"$Port"
+    Log "[重啟] 程序模式 $py -m uvicorn :$Port"
+    return $true
+  } catch { Log "[錯誤] 程序啟動失敗：$_"; return $false }
+}
+
+function Test-Healthy {
+  param([int]$Tries = 20)
+  foreach ($i in 1..$Tries) {
+    Start-Sleep -Seconds 2
+    try {
+      $r = Invoke-WebRequest "http://127.0.0.1:$Port/healthz" -UseBasicParsing -TimeoutSec 3
+      if ($r.StatusCode -eq 200) { return $true }
+    } catch {}
+  }
+  return $false
+}
+
 if ($Uninstall) {
   try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
         Write-Host "已移除排程 $TaskName" }
@@ -38,12 +93,19 @@ if ($Uninstall) {
 }
 
 if ($Install) {
-  # 轉移期防呆：pid_groups.json 曾被版控、新版改為執行期狀態檔（gitignore）。
-  # 第一次 pull 會把它從索引移除並刪檔——先備份、pull 完還原，桌機圖組不丟。
-  $pg = Join-Path $RepoDir "data\pid_groups.json"
-  if (Test-Path $pg) { Copy-Item $pg "$pg.keep" -Force }
-  git -C $RepoDir ls-files --error-unmatch data/pid_groups.json 2>$null | Out-Null
-  if ($LASTEXITCODE -eq 0) { git -C $RepoDir checkout -- data/pid_groups.json 2>$null }
+  # 轉移期防呆：這些路徑曾被版控、後來改列 gitignore（執行期狀態＋含客戶
+  # 圖面資料）。從索引移除的那一版被 pull 下來時，git 會連working tree 的
+  # 檔案一起刪——先整包備份、pull 完還原，機器上既有的圖組／模型不丟。
+  $Runtime = @("data\pid_groups.json", "data\pid_model", "data\pid_notes")
+  $Keep = Join-Path $env:TEMP ("ej3d-runtime-keep-" + (Get-Date -Format 'yyyyMMddHHmmss'))
+  foreach ($rel in $Runtime) {
+    $src = Join-Path $RepoDir $rel
+    if (Test-Path $src) {
+      $dst = Join-Path $Keep $rel
+      New-Item -ItemType Directory -Force (Split-Path $dst -Parent) | Out-Null
+      Copy-Item $src $dst -Recurse -Force
+    }
+  }
 
   $action = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -ServiceName $ServiceName -Branch $Branch -Port $Port" `
@@ -61,9 +123,16 @@ if ($Install) {
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath `
       -ServiceName $ServiceName -Branch $Branch -Port $Port
 
-  if (Test-Path "$pg.keep") {           # 還原桌機既有圖組（檔已改列 gitignore，不再擋 pull）
-    Copy-Item "$pg.keep" $pg -Force; Remove-Item "$pg.keep" -Force
-    Write-Host "已還原 data\pid_groups.json（執行期狀態，現已不進版控）"
+  if (Test-Path $Keep) {                # 還原既有執行期資料（已改列 gitignore，不再擋 pull）
+    foreach ($rel in $Runtime) {
+      $src = Join-Path $Keep $rel
+      if (-not (Test-Path $src)) { continue }
+      $dst = Join-Path $RepoDir $rel
+      New-Item -ItemType Directory -Force (Split-Path $dst -Parent) | Out-Null
+      Copy-Item $src $dst -Recurse -Force
+      Write-Host "已還原 $rel（執行期資料，現已不進版控）"
+    }
+    Remove-Item $Keep -Recurse -Force
   }
   Write-Host "完成。紀錄檔：$LogFile"
   exit 0
@@ -80,7 +149,20 @@ git fetch origin $Branch --quiet
 if ($LASTEXITCODE -ne 0) { Log "[錯誤] git fetch 失敗（網路？）"; exit 1 }
 $local  = (git rev-parse HEAD).Trim()
 $remote = (git rev-parse "origin/$Branch").Trim()
-if ($local -eq $remote) { exit 0 }    # 已是最新：靜默
+if ($local -eq $remote) {
+  # 已是最新：靜默結束——但先確認服務真的活著。
+  # 桌機重開機、或 uvicorn 當掉時，版本當然「沒落後」，光比對 commit
+  # 會讓網站一路躺著沒人知道。追版與看門狗合在同一支排程，開機後
+  # 第一次觸發就會把服務拉起來。
+  if (-not (Get-ListeningPid)) {
+    Log "[看門狗] 版本已最新，但 $Port 沒有服務在聽 → 啟動"
+    if (Restart-App) {
+      if (Test-Healthy) { Log "[看門狗] 服務已恢復，healthz OK" }
+      else { Log "[看門狗] 啟動後健康檢查失敗，需人工介入" }
+    }
+  }
+  exit 0
+}
 
 $pull = git pull --ff-only origin $Branch 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0) { Log "[錯誤] pull 失敗（分支發散？）：$pull"; exit 1 }
@@ -88,28 +170,20 @@ Log ("[更新] {0} -> {1}" -f $local.Substring(0, 7), $remote.Substring(0, 7))
 
 $changed = git diff --name-only $local $remote
 if ($changed -match "requirements\.txt") {
-  $py = Join-Path $RepoDir ".venv\Scripts\python.exe"
-  if (-not (Test-Path $py)) { $py = "python" }
+  $py = Get-PythonPath
   Log "[依賴] requirements.txt 有變更，pip install"
   & $py -m pip install -r (Join-Path $RepoDir "requirements.txt") --quiet 2>&1 |
     Select-Object -Last 3 | ForEach-Object { Log "    $_" }
 }
 
-try { Restart-Service -Name $ServiceName -ErrorAction Stop; Log "[重啟] $ServiceName" }
-catch { Log "[錯誤] 服務重啟失敗：$_"; exit 1 }
+if (-not (Restart-App)) { exit 1 }
 
-$ok = $false
-foreach ($i in 1..20) {
-  Start-Sleep -Seconds 2
-  try {
-    $r = Invoke-WebRequest "http://127.0.0.1:$Port/healthz" -UseBasicParsing -TimeoutSec 3
-    if ($r.StatusCode -eq 200) { $ok = $true; break }
-  } catch {}
-}
-if ($ok) { Log "[完成] 新版上線，healthz OK" }
+if (Test-Healthy) { Log "[完成] 新版上線，healthz OK" }
 else {
   Log ("[回退] 健康檢查失敗，退回 {0}" -f $local.Substring(0, 7))
   git reset --hard $local 2>&1 | Out-Null
-  try { Restart-Service -Name $ServiceName -ErrorAction Stop } catch { Log "[回退] 服務重啟又失敗：$_" }
-  Log "[回退] 完成——請查伺服器日誌找新版壞因，修好再 push"
+  if (Restart-App) {
+    if (Test-Healthy -Tries 10) { Log "[回退] 完成，舊版已恢復服務——請查伺服器日誌找新版壞因，修好再 push" }
+    else { Log "[回退] 舊版也起不來，網站目前是掛的，需人工介入" }
+  }
 }

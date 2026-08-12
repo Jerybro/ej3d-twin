@@ -52,3 +52,9 @@ batch_rerun.log
 # P&ID �ХܤơG�H�u�е��P�]�֭y��t�Ȥ�츹�A���i����
 data/pid_annot/
 logs/
+
+# 資產模型與現場評註：伺服器執行期寫入（每次建模／存評註都改寫）。
+# 留在版控＝①自動部署每次都撞髒工作樹而跳過 ②模型 JSON 內含整張圖的
+# 線段與 OCR 文字，可還原客戶圖面，與 data/pid_annot/ 同一級別的客戶資料。
+data/pid_model/
+data/pid_notes/

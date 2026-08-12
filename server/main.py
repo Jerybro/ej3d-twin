@@ -17,6 +17,10 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+# 必須最先 import：缺件時給人話（缺什麼、會壞什麼、怎麼修），
+# 而不是深層 traceback 或更糟的「啟動正常、點下去才壞」。
+from . import depcheck  # noqa: F401
+
 from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi import File as FastAPIFile
 from fastapi.responses import FileResponse, PlainTextResponse

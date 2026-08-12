@@ -99,10 +99,22 @@ topbar「精細模型」chip 切換兩套建模（同一份 plant.json）：
 ## 啟動
 
 ```bash
-pip install fastapi uvicorn
-python -m uvicorn server.main:app --app-dir <本資料夾路徑> --port 8600
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt        # macOS/Linux 用 .venv/bin/pip
+.venv\Scripts\python -m uvicorn server.main:app --app-dir <本資料夾路徑> --port 8600
 # 瀏覽器開 http://localhost:8600
 ```
+
+- **一定要裝完整的 `requirements.txt`**（只裝 fastapi+uvicorn 會啟動成功但功能半殘）。
+  啟動時會自動體檢相依套件：缺核心件直接拒絕啟動並列出缺什麼；
+  缺功能件（P&ID 判讀等）印警告照常啟動。
+- **Windows ARM64（Snapdragon）筆電**：裝 x64 版 Python 走模擬
+  （`winget install Python.Python.3.13 --architecture x64`），
+  numpy/scipy/pyarrow 等鎖定版缺 arm64 wheel，原生版會在 pip 階段失敗。
+- **P&ID 判讀首次開圖**：會下載 EasyOCR 模型（~100MB）並跑 OCR 轉正，
+  第一張圖較慢屬正常（CPU 機器約 30 秒＋），之後有底圖快取秒開。
+- **登入**：本機開發在 repo 根建 `.env` 寫 `AUTH_DISABLED=1` 免登入；
+  對外部署必須走 Google OAuth（見 `deploy/README-tailscale.md`，切勿免登入上公網）。
 
 ## 架構
 

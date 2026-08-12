@@ -8,6 +8,8 @@ uvicorn==0.40.0
 starlette==0.52.1
 pydantic==2.12.5
 python-multipart==0.0.32       # UploadFile / 表單上傳（缺→上傳端點報錯）
+itsdangerous==2.2.0            # SessionMiddleware 簽章（缺→server.main 匯入即失敗）
+websockets==17.0.1             # uvicorn WS 協定實作（缺→/ws 握手退化成 GET 回 404，孿生即時數據斷線）
 
 # --- 資料工作台 + AutoML 建模 ---
 numpy==2.2.6

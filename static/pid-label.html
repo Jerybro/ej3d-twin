@@ -440,7 +440,10 @@
         <div id="tab-review">
           <div id="conv-box" class="conv" style="display:none"></div>
           <button class="mini-btn primary" id="scan-all-btn" disabled
-                  style="width:100%;padding:10px;margin-bottom:12px">辨識整張圖面</button>
+                  style="width:100%;padding:10px;margin-bottom:6px">辨識整張圖面</button>
+          <button class="mini-btn" id="gap-scan-btn" disabled
+                  title="把已標註項疊回原圖給 AI 對照（盲重建×原圖雙圖比對），只獵還沒被標到的元件——補第一輪 OCR/幾何管線的天生盲區"
+                  style="width:100%;padding:9px;margin-bottom:12px">第二輪：缺口掃描（AI 對照已標註）</button>
           <div class="prog"><i id="prog-bar"></i></div>
           <div class="prog-txt" id="prog-txt">尚未辨識</div>
           <div class="prog-txt" id="cc-state" style="margin-top:-8px"></div>
@@ -537,6 +540,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260812g"></script>
+  <script src="/static/js/pid-label.js?v=20260812h"></script>
 </body>
 </html>

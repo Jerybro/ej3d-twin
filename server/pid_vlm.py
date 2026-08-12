@@ -1449,6 +1449,181 @@ def scan_all(req: ScanAllReq) -> dict:
                       "total": len(items)}}
 
 
+# ------------------------------------------------------ 缺口掃描（第二輪）
+SYSTEM_GAP = (
+    "你是 P&ID 判讀引擎，正在做「缺口掃描」（第二輪辨識）。"
+    "這張圖是一張 P&ID／PFD 的一塊區域，上面疊了**藍色半透明方框**："
+    "藍框＝第一輪辨識＋人工審核已經入庫的元件。\n"
+    "你的任務：只找出**還沒被藍框蓋到**的工程元件，已有藍框的一律不要再列。\n"
+    "要找的類別：\n"
+    "1) instrument＝儀錶氣泡：圓圈（或圓加方框／六角）內的位號，圈內上半是"
+    "功能字母、下半是編號，合併成一個 tag。\n"
+    "2) valve＝閥件：閘閥／球閥／蝶閥／逆止閥／控制閥（帶執行器）／安全閥等，"
+    "沒有位號 tag 留空字串。無位號的手動閥常被第一輪漏掉，請特別留意。\n"
+    "3) equipment＝設備：槽、塔、換熱器、泵、壓縮機、風機等（PFD 為 3 碼項次號，"
+    "可帶小數分項如 303.1）。\n"
+    "4) pipe＝管線編號字串。\n"
+    "每一項回報位置 box=[x0,y0,x1,y1]，數值 0-1000、相對**這張圖片**的寬高，"
+    "框住元件本體即可，不必很精準。\n"
+    "只列你真的看得到的；看不清楚就不要列，寧缺勿濫；confidence 誠實給低分。"
+)
+GAP_SCHEMA_HINT = (
+    '輸出格式（僅輸出 JSON，不要其他文字）：\n'
+    '{"items":[{"tag":"位號或空字串","kind":"instrument|valve|equipment|pipe|other",'
+    '"symbol":"中文說明","confidence":0.0,"note":"","box":[0,0,0,0]}]}'
+)
+_GAP_KIND_TXT = {"instrument": "儀錶", "valve": "閥件", "equipment": "設備",
+                 "pipe": "管線", "other": "元件"}
+
+
+class GapScanReq(BaseModel):
+    filename: str
+    bbox: list = Field(..., min_length=4, max_length=4)   # 分塊（0-1 全圖座標）
+    known: list = []      # [{bbox,tag,kind}] 已入庫＋佇列中全部（含已否決）
+    provider: str = "cloud"
+
+
+@router.post("/gap_scan")
+def gap_scan(req: GapScanReq) -> dict:
+    """缺口掃描：把已入庫標註疊回原圖，視覺模型只獵「沒被標到的」。
+
+    第一輪（scan_all）是確定性管線——OCR 讀得到位號、幾何抓得到氣泡閥件
+    才找得到，沒有清楚文字的元件（無位號手動閥、設備圖形、模糊小字）天生漏。
+    第二輪反向操作：把「資料庫已知」畫成藍框疊在原圖上（＝盲重建與原圖的
+    雙圖對比，合成同一張所以空間對位天生正確），模型對照著已知的標註格式
+    找漏網之魚。已否決項也畫框——否決是結論，不該被重新翻案排進佇列。
+    找到的全部進待審，與第一輪同一條人工驗證關卡。
+    """
+    from PIL import Image, ImageDraw
+
+    img_p, meta = _ensure_base(req.filename)
+    W, H = meta["w"], meta["h"]
+    x0, y0, x1, y1 = (float(v) for v in req.bbox)
+    x0, x1 = sorted((max(0.0, x0), min(1.0, x1)))
+    y0, y1 = sorted((max(0.0, y0), min(1.0, y1)))
+    px0, py0, px1, py1 = int(x0 * W), int(y0 * H), int(x1 * W), int(y1 * H)
+    if px1 - px0 < 8 or py1 - py0 < 8:
+        raise HTTPException(422, "分塊範圍太小")
+
+    with Image.open(img_p) as im:
+        crop = im.crop((px0, py0, px1, py1)).convert("RGB")
+    cw, ch = crop.size
+    ov = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+    dr = ImageDraw.Draw(ov)
+    n_marks = 0
+    for k in req.known:
+        kb = k.get("bbox") or []
+        if len(kb) != 4:
+            continue
+        mx0, my0 = kb[0] * W - px0, kb[1] * H - py0
+        mx1, my1 = kb[2] * W - px0, kb[3] * H - py0
+        if mx1 < 0 or my1 < 0 or mx0 > cw or my0 > ch:
+            continue
+        pad = max(3.0, (my1 - my0) * 0.15)
+        dr.rectangle([mx0 - pad, my0 - pad, mx1 + pad, my1 + pad],
+                     fill=(4, 106, 251, 64), outline=(4, 106, 251, 230), width=3)
+        n_marks += 1
+    crop = Image.alpha_composite(crop.convert("RGBA"), ov).convert("RGB")
+
+    if crop.width < CROP_MIN:
+        k2 = min(CROP_MIN / crop.width, 4.0)
+        crop = crop.resize((int(crop.width * k2), int(crop.height * k2)),
+                           Image.LANCZOS)
+    if crop.width > CROP_MAX:
+        k2 = CROP_MAX / crop.width
+        crop = crop.resize((CROP_MAX, int(crop.height * k2)), Image.LANCZOS)
+    buf = io.BytesIO()
+    crop.save(buf, format="JPEG", quality=90)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+
+    prompt = (f"這塊區域已入庫 {n_marks} 項（藍色半透明框）。"
+              "請找出所有還沒被藍框蓋到的元件。\n" + GAP_SCHEMA_HINT)
+    raw = _vlm(req.provider, SYSTEM_GAP, prompt, b64, want_json=True)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        m2 = re.search(r"\{.*\}", raw, re.S)
+        try:
+            data = json.loads(m2.group(0)) if m2 else None
+        except json.JSONDecodeError:
+            data = None
+    if not isinstance(data, dict):
+        raise HTTPException(502, f"模型輸出無法解析：{raw[:160]}")
+
+    # 防呆去重：畫了藍框模型仍可能重報——位號撞已知、或中心落在已知框
+    # （外擴 30%）內就丟。分塊重疊區的跨塊重複也靠這層吸收（前端每掃完
+    # 一塊就把新項加進 known）。
+    known_tags = {re.sub(r"[\s\-]", "", str(k.get("tag") or "").upper())
+                  for k in req.known if k.get("tag")}
+
+    def _hit_known(cx: float, cy: float) -> bool:
+        for k in req.known:
+            kb = k.get("bbox") or []
+            if len(kb) != 4:
+                continue
+            padx = (kb[2] - kb[0]) * 0.3 + 0.002
+            pady = (kb[3] - kb[1]) * 0.3 + 0.002
+            if kb[0] - padx <= cx <= kb[2] + padx and \
+               kb[1] - pady <= cy <= kb[3] + pady:
+                return True
+        return False
+
+    items, dups = [], 0
+    for r_ in (data.get("items") or [])[:40]:
+        kind = str(r_.get("kind") or "other").strip()
+        if kind not in _GAP_KIND_TXT:
+            kind = "other"
+        box = r_.get("box") or []
+        if len(box) != 4:
+            continue
+        try:
+            bx0, by0, bx1, by1 = (min(max(float(v) / 1000.0, 0.0), 1.0)
+                                  for v in box)
+        except (TypeError, ValueError):
+            continue
+        bx0, bx1 = sorted((bx0, bx1))
+        by0, by1 = sorted((by0, by1))
+        # 換回全圖 0-1 座標；點狀回報給最小可審框（審核卡要裁得出局部圖）
+        gx0 = x0 + bx0 * (x1 - x0)
+        gx1 = x0 + bx1 * (x1 - x0)
+        gy0 = y0 + by0 * (y1 - y0)
+        gy1 = y0 + by1 * (y1 - y0)
+        if gx1 - gx0 < 0.004:
+            c = (gx0 + gx1) / 2
+            gx0, gx1 = c - 0.005, c + 0.005
+        if gy1 - gy0 < 0.004:
+            c = (gy0 + gy1) / 2
+            gy0, gy1 = c - 0.005, c + 0.005
+        cx, cy = (gx0 + gx1) / 2, (gy0 + gy1) / 2
+        tagn = re.sub(r"[\s\-]", "", str(r_.get("tag") or "").upper())
+        if (tagn and tagn in known_tags) or _hit_known(cx, cy):
+            dups += 1
+            continue
+        conf = min(max(float(r_.get("confidence") or 0.5), 0.05), 0.85)
+        dec = (_decode_isa(tagn) if kind == "instrument" else
+               _decode_equip(tagn) if kind == "equipment" else "")
+        eng = "雲端" if req.provider == "cloud" else "地端"
+        items.append({
+            "tag": tagn, "kind": kind,
+            "symbol": str(r_.get("symbol") or "") or dec or _GAP_KIND_TXT[kind],
+            "note": str(r_.get("note") or ""), "mounting": "", "mount_conf": 0.0,
+            "confidence": round(conf, 2),
+            "evidence": [
+                {"stage": f"缺口掃描（{eng}）", "ok": True, "score": round(conf, 2),
+                 "detail": f"以已入庫 {len(req.known)} 項的標記圖為對照，"
+                           f"AI 判定此處尚有未入庫的{_GAP_KIND_TXT[kind]}"
+                           + (f"「{tagn}」" if tagn else "")},
+                {"stage": "AI 位置估計", "ok": True, "score": 0.5,
+                 "detail": "座標由模型目測換算，可能偏移——審核時請以圖上"
+                           "高亮環的位置為準"},
+            ],
+            "auto_ok": False,
+            "bbox": [round(gx0, 4), round(gy0, 4), round(gx1, 4), round(gy1, 4)],
+            "source": f"gap-{req.provider}",
+        })
+    return {"items": items, "skipped_dup": dups, "marks": n_marks}
+
+
 class ClassifyOneReq(BaseModel):
     filename: str
     bbox: list = Field(..., min_length=4, max_length=4)

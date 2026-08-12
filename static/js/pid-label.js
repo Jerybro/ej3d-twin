@@ -245,6 +245,7 @@ async function openDoc(name) {
   else sheet.addEventListener('load', fitZoom, { once: true });
   bindSelection();
   $('scan-all-btn').disabled = false;
+  $('gap-scan-btn').disabled = false;
   renderZoneMap();
   await loadAnnots();
   render();
@@ -414,6 +415,50 @@ $('scan-all-btn').addEventListener('click', async () => {
     alert('辨識失敗：' + (e.message || ''));
   } finally {
     b.disabled = false; b.textContent = '重新辨識整張圖面';
+  }
+});
+
+// ------------------------------------- 缺口掃描（第二輪）
+// 第一輪是確定性管線（OCR＋幾何），讀得到字才找得到。第二輪把已標註項
+// 疊回原圖（＝盲重建與原圖的雙圖對比，合成同一張所以對位天生正確），
+// 讓視覺模型對照著已知格式只獵「沒被標到的」——補第一輪的天生盲區。
+// 分塊逐一送審：每塊掃完就把新項加進佇列與 known，重疊區靠這個去重。
+$('gap-scan-btn').addEventListener('click', async () => {
+  if (!curFile) return;
+  const b = $('gap-scan-btn');
+  b.disabled = true;
+  const TC = 4, TR = 3, OV = 0.06;   // 與整張辨識同一套分塊
+  let found = 0, dup = 0, fail = 0;
+  try {
+    for (let r = 0; r < TR; r++) {
+      for (let c = 0; c < TC; c++) {
+        const i = r * TC + c + 1;
+        b.innerHTML = `<span class="spin"></span> 缺口掃描 分塊 ${i}/${TC * TR}｜已新增 ${found} 項`;
+        const box = [Math.max(0, c / TC - OV), Math.max(0, r / TR - OV),
+                     Math.min(1, (c + 1) / TC + OV), Math.min(1, (r + 1) / TR + OV)];
+        // 已否決也算 known——否決是結論，不該被第二輪翻案重新排隊
+        const known = items.filter(x => x.bbox)
+          .map(x => ({ bbox: x.bbox, tag: x.tag || '', kind: x.kind }));
+        try {
+          const d = await getJSON('/api/pid/vlm/gap_scan', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: curFile, bbox: box, known, provider: engine() }),
+          });
+          dup += d.skipped_dup || 0;
+          const fresh = (d.items || []).map(x => ({ ...x, state: 'pending' }));
+          if (fresh.length) { items = items.concat(fresh); found += fresh.length; render(); }
+        } catch { fail++; }
+      }
+    }
+    $('cc-state').innerHTML = `缺口掃描完成：新增 <b style="color:var(--accent)">${found}</b> 項待審`
+      + `（與已知重複略過 ${dup}${fail ? `，${fail} 塊失敗` : ''}）`;
+    if (found) {
+      curIdx = items.findIndex(x => x.state === 'pending');
+      render(); focusItem(Math.max(curIdx, 0));
+    }
+  } finally {
+    b.disabled = false;
+    b.textContent = '第二輪：缺口掃描（AI 對照已標註）';
   }
 });
 

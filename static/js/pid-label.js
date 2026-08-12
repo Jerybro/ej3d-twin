@@ -289,6 +289,9 @@ async function loadConvention(name) {
 // 不開新視窗——把目前這一頁切成並排或疊圖。審核現場與重建圖擺在一起，
 // 才看得出「這一項到底有沒有進庫」，跳出去看等於中斷審核。
 let cmpMode = 'off';        // off | side | overlay | only
+// 盲重建＝預設：只畫資料庫語意（審核後資產＋流向），描圖模式留給
+// 幾何/OCR 完整度檢查——「畫得出來」在兩種模式代表的意義不同。
+let rbMode = 'blind';       // blind | trace
 
 function setCompare(mode) {
   cmpMode = mode;
@@ -300,19 +303,31 @@ function setCompare(mode) {
   pb.style.display = mode === 'off' ? 'none' : 'block';
   pa.style.display = mode === 'only' ? 'none' : 'block';
   $('cmp-ctl').style.display = mode === 'overlay' ? '' : 'none';
+  $('cmp-mode').style.display = mode === 'off' ? 'none' : '';
   ['cmp-off', 'cmp-side', 'cmp-ov', 'cmp-only'].forEach((id, i) =>
     $(id).classList.toggle('on', ['off', 'side', 'overlay', 'only'][i] === mode));
-  if (mode !== 'off' && curFile && img.dataset.for !== curFile) {
-    img.dataset.for = curFile;
-    img.src = `/api/pid/model/${encodeURIComponent(curFile)}/rebuild.svg?t=${Date.now()}`;
+  const want = `${curFile}|${rbMode}`;    // 換圖或換模式都要重抓
+  if (mode !== 'off' && curFile && img.dataset.for !== want) {
+    img.dataset.for = want;
+    img.src = `/api/pid/model/${encodeURIComponent(curFile)}/rebuild.svg` +
+              `?mode=${rbMode}&t=${Date.now()}`;
   }
   applyZoom();
+}
+
+function setRbMode(m2) {
+  rbMode = m2;
+  $('cmp-m-blind').classList.toggle('on', m2 === 'blind');
+  $('cmp-m-trace').classList.toggle('on', m2 === 'trace');
+  if (cmpMode !== 'off') setCompare(cmpMode);
 }
 
 $('cmp-off').addEventListener('click', () => setCompare('off'));
 $('cmp-side').addEventListener('click', () => setCompare('side'));
 $('cmp-ov').addEventListener('click', () => setCompare('overlay'));
 $('cmp-only').addEventListener('click', () => setCompare('only'));
+$('cmp-m-blind').addEventListener('click', () => setRbMode('blind'));
+$('cmp-m-trace').addEventListener('click', () => setRbMode('trace'));
 $('cmp-op').addEventListener('input', e => {
   $('rebuild-img').style.opacity = e.target.value / 100;
 });

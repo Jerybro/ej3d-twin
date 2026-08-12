@@ -387,6 +387,12 @@
           <button class="mini-btn" id="cmp-side">並排</button>
           <button class="mini-btn" id="cmp-ov">疊圖</button>
           <button class="mini-btn" id="cmp-only">僅資產模型</button>
+          <span id="cmp-mode" style="display:none;margin-left:6px">
+            <button class="mini-btn on" id="cmp-m-blind"
+                    title="只畫資料庫語意層（審核後資產＋流向拓撲），不描原圖線稿——畫得出來的＝系統懂的">盲重建</button>
+            <button class="mini-btn" id="cmp-m-trace"
+                    title="原圖幾何轉錄＋語意疊加——檢查線稿/OCR/氣泡進庫完整度">描圖</button>
+          </span>
           <span class="hint" id="cmp-ctl" style="display:none;margin-left:4px">
             透明度 <input type="range" id="cmp-op" min="15" max="100" value="80"
                         style="vertical-align:middle;width:80px;accent-color:var(--accent)" />
@@ -531,6 +537,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260812f"></script>
+  <script src="/static/js/pid-label.js?v=20260812g"></script>
 </body>
 </html>

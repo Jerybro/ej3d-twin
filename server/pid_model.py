@@ -1079,6 +1079,241 @@ def _svg_of(m: dict, flow: dict | None = None, notes: list | None = None) -> str
     return "".join(p)
 
 
+def _svg_blind(m: dict, flow: dict | None = None, notes: list | None = None) -> str:
+    """真盲重建——只畫資料庫的**語意層**，一條原圖線稿都不描。
+
+    _svg_of（描圖模式）的線稿／文字／氣泡幾何是建模時從原 PDF 轉錄的：
+    「不看原圖畫得出來」只證明轉錄存好了，不證明系統懂了。這裡反過來，
+    素材只准用審核後的資產與拓撲結論：
+      · 設備／儀錶／閥件——位置是資產的屬性（審核時定的框），符號由
+        屬性生成（儀錶依 mounting 畫 ISA 圓／方框、閥件畫蝴蝶結）
+      · 管線＝流向圖的設備→設備連線，**走線由拓撲正交生成**，不抄原圖
+        路徑——路徑跟原圖不同是特徵不是缺陷：這是資料庫自己的佈線
+    畫得出來的＝系統真正理解的；與原圖並排的差距＝誠實的辨識缺口。
+    """
+    g = m.get("geometry") or {}
+    W = 1600
+    H = round(W * (g.get("aspect") or 0.7))   # 只借畫布比例，讓疊圖能對位
+    p = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" '
+         f'width="{W}" height="{H}" font-family="Inter,Arial,sans-serif">',
+         f'<rect width="{W}" height="{H}" fill="#FFFFFF"/>',
+         '<defs>'
+         '<marker id="ba" viewBox="0 0 10 10" refX="8.5" refY="5" '
+         'markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
+         '<path d="M0,0 L10,5 L0,10 z" fill="#2A3441"/></marker>'
+         '<marker id="bv" viewBox="0 0 10 10" refX="8.5" refY="5" '
+         'markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
+         '<path d="M0,0 L10,5 L0,10 z" fill="#046AFB"/></marker>'
+         '</defs>']
+
+    # 1) 流向層＝盲重建的管線。端點裁到設備框緣，箭頭才不會被白底蓋掉。
+    #    樣式帶證據等級：圖面箭頭／人工＝深實線、VLM 判定＝藍實線、
+    #    可疑＝紅虛線（項次號推測一律不畫——推論與事實不混）。
+    n_edges = 0
+    if flow and flow.get("ok"):
+        pos = {n["tag"]: n["bbox"] for n in flow["nodes"] if n.get("bbox")}
+        EPS = 3.0
+        p.append('<g id="flow">')
+        for e in flow.get("edges", []):
+            if e["dir_by"] == "item_no" and not e.get("suspect"):
+                continue
+            a, b = pos.get(e["from"]), pos.get(e["to"])
+            if not a or not b:
+                continue
+            n_edges += 1
+            x1, y1 = (a[0] + a[2]) / 2 * W, (a[1] + a[3]) / 2 * H
+            x2, y2 = (b[0] + b[2]) / 2 * W, (b[1] + b[3]) / 2 * H
+            if abs(x2 - x1) >= abs(y2 - y1):
+                sx = (a[2] if x2 > x1 else a[0]) * W
+                if abs(y2 - y1) < EPS:
+                    ex = (b[0] if x2 > x1 else b[2]) * W
+                    d = f'M{sx:.0f},{y1:.0f}H{ex:.0f}'
+                else:
+                    ey = (b[1] if y2 > y1 else b[3]) * H
+                    d = f'M{sx:.0f},{y1:.0f}H{x2:.0f}V{ey:.0f}'
+            else:
+                sy = (a[3] if y2 > y1 else a[1]) * H
+                if abs(x2 - x1) < EPS:
+                    ey = (b[1] if y2 > y1 else b[3]) * H
+                    d = f'M{x1:.0f},{sy:.0f}V{ey:.0f}'
+                else:
+                    ex = (b[0] if x2 > x1 else b[2]) * W
+                    d = f'M{x1:.0f},{sy:.0f}V{y2:.0f}H{ex:.0f}'
+            if e.get("suspect"):
+                col, dash, mk = "#D93F3F", ' stroke-dasharray="4 5"', ""
+            elif e["dir_by"] in ("arrow", "manual"):
+                col, dash, mk = "#2A3441", "", ' marker-end="url(#ba)"'
+            else:
+                col, dash, mk = "#046AFB", "", ' marker-end="url(#bv)"'
+            p.append(f'<path d="{d}" fill="none" stroke="{col}" stroke-width="2" '
+                     f'stroke-linejoin="round" opacity="0.9"{dash}{mk}/>')
+        p.append('</g>')
+
+    # 2) 控制迴路信號線（ISA 虛線）：同迴路儀錶串起來
+    ins_pos = {}
+    for it in m.get("instruments", []):
+        b = it.get("bbox")
+        if b:
+            ins_pos[it["tag"]] = ((b[0] + b[2]) / 2 * W, (b[1] + b[3]) / 2 * H)
+    for lp in m.get("loops", []):
+        pts = [ins_pos[t] for t in lp.get("members", []) if t in ins_pos]
+        if len(pts) < 2:
+            continue
+        d = f'M{pts[0][0]:.0f},{pts[0][1]:.0f}' + "".join(
+            f'L{x:.0f},{y:.0f}' for x, y in pts[1:])
+        p.append(f'<path d="{d}" fill="none" stroke="#046AFB" stroke-width="0.9" '
+                 'stroke-dasharray="2 3" opacity="0.5"/>')
+
+    # 3) 管線編號（OCR 推定的型別化資產，未逐條審核→淺色）
+    for ln in m.get("lines", []):
+        b = ln.get("bbox")
+        if not b:
+            continue
+        p.append(f'<text x="{b[0] * W:.0f}" y="{(b[1] + b[3]) / 2 * H:.0f}" '
+                 f'font-size="9" fill="#8A5B00" opacity="0.8">{_x(ln.get("raw", ""))}</text>')
+
+    # 4) 定位器候選（待審）：虛線框，與已審實線分兩級
+    seen_cand: set = set()
+    for e in m.get("equipment", []):
+        b = e.get("candidate_bbox")
+        if not b or e.get("bbox"):
+            continue
+        k = (round(b[0], 3), round(b[1], 3), round(b[2], 3), round(b[3], 3))
+        if k in seen_cand:
+            continue
+        seen_cand.add(k)
+        x0, y0 = b[0] * W, b[1] * H
+        w, h = (b[2] - b[0]) * W, (b[3] - b[1]) * H
+        p.append(f'<rect x="{x0:.0f}" y="{y0:.0f}" width="{w:.0f}" height="{h:.0f}" '
+                 'fill="none" stroke="#0B8A46" stroke-width="1.2" '
+                 'stroke-dasharray="6 4" rx="4" opacity="0.75"/>')
+        p.append(f'<text x="{x0 + 3:.0f}" y="{y0 + 12:.0f}" font-size="10" '
+                 f'fill="#0B8A46" opacity="0.85">{_x(e.get("tag", ""))}　'
+                 f'{_x(e.get("name") or e.get("type") or "")}</text>')
+
+    # 5) 已審設備：資料庫的設備方塊（位號＋名稱置中）
+    n_eq = 0
+    for e in m.get("equipment", []):
+        b = e.get("bbox")
+        if not b:
+            continue
+        n_eq += 1
+        x0, y0 = b[0] * W, b[1] * H
+        w, h = (b[2] - b[0]) * W, (b[3] - b[1]) * H
+        p.append(f'<rect x="{x0:.0f}" y="{y0:.0f}" width="{w:.0f}" height="{h:.0f}" '
+                 'fill="rgba(11,138,70,0.05)" stroke="#0B8A46" stroke-width="2" rx="4"/>')
+        name = e.get("name") or e.get("type") or ""
+        fs = min(max(h * 0.22, 9), 13)
+        tx, ty = x0 + w / 2, y0 + h / 2
+        p.append(f'<text x="{tx:.0f}" y="{ty - 2:.0f}" font-size="{fs:.1f}" '
+                 f'fill="#0B6B36" text-anchor="middle" font-weight="700">'
+                 f'{_x(e.get("tag", ""))}</text>')
+        if name:
+            p.append(f'<text x="{tx:.0f}" y="{ty + fs:.0f}" font-size="{fs * 0.8:.1f}" '
+                     f'fill="#0B6B36" text-anchor="middle">{_x(name)}</text>')
+
+    # 6) 已審閥件：蝴蝶結符號由屬性生成
+    n_vv = 0
+    for vv in m.get("valves", []):
+        b = vv.get("bbox")
+        if not b:
+            continue
+        n_vv += 1
+        x, y = (b[0] + b[2]) / 2 * W, (b[1] + b[3]) / 2 * H
+        s = min(max((b[2] - b[0]) * W * 0.5, 5), 10)
+        p.append(f'<path d="M{x - s:.0f},{y - s * 0.8:.0f}L{x + s:.0f},{y + s * 0.8:.0f}'
+                 f'L{x + s:.0f},{y - s * 0.8:.0f}L{x - s:.0f},{y + s * 0.8:.0f}Z" '
+                 'fill="#fff" stroke="#046AFB" stroke-width="1.6"/>')
+        lab = vv.get("id", "")
+        if vv.get("size"):
+            lab += f'　{vv["size"]}'
+        p.append(f'<text x="{x:.0f}" y="{y + s * 0.8 + 11:.0f}" font-size="9.5" '
+                 f'fill="#046AFB" text-anchor="middle">{_x(lab)}</text>')
+
+    # 7) 已審儀錶：ISA 符號由 mounting 生成（現場＝圓、盤面/DCS＝方框內圓）
+    for it in m.get("instruments", []):
+        b = it.get("bbox")
+        if not b:
+            continue
+        cx, cy = (b[0] + b[2]) / 2 * W, (b[1] + b[3]) / 2 * H
+        r = min(max((b[3] - b[1]) * H * 0.55, 10), 18)
+        mnt = str(it.get("mounting", "")).lower()
+        if any(kw in mnt for kw in ("dcs", "panel", "盤", "控制室")):
+            s = r * 0.95
+            p.append(f'<rect x="{cx - s:.0f}" y="{cy - s:.0f}" width="{s * 2:.0f}" '
+                     f'height="{s * 2:.0f}" rx="2" fill="#fff" stroke="#046AFB" '
+                     'stroke-width="1.5"/>')
+            p.append(f'<circle cx="{cx:.0f}" cy="{cy:.0f}" r="{r * 0.78:.0f}" '
+                     'fill="none" stroke="#046AFB" stroke-width="1.2"/>')
+        else:
+            p.append(f'<circle cx="{cx:.0f}" cy="{cy:.0f}" r="{r:.0f}" fill="#fff" '
+                     'stroke="#046AFB" stroke-width="1.5"/>')
+        mm = re.match(r"^([A-Z]+)(.*)$", it.get("tag", ""))
+        top, bot = (mm.group(1), mm.group(2)) if mm else (it.get("tag", ""), "")
+        fs = min(max(r * 0.5, 6.5), 10.5)
+        p.append(f'<text x="{cx:.0f}" y="{cy - r * 0.08:.0f}" font-size="{fs:.1f}" '
+                 f'fill="#061027" text-anchor="middle" font-weight="600">{_x(top)}</text>')
+        if bot:
+            p.append(f'<text x="{cx:.0f}" y="{cy + r * 0.55:.0f}" font-size="{fs:.1f}" '
+                     f'fill="#061027" text-anchor="middle">{_x(bot)}</text>')
+
+    # 8) OPC 跨圖接續角旗（同描圖模式——它是型別化的接續資產）
+    for o in m.get("opcs", []):
+        x, y = o["x"] * W, o["y"] * H
+        hw = max(len(o["code"]) * 3.6, 26)
+        p.append(f'<path d="M{x - hw:.0f},{y - 9:.0f}H{x + hw - 10:.0f}'
+                 f'L{x + hw:.0f},{y:.0f}L{x + hw - 10:.0f},{y + 9:.0f}'
+                 f'H{x - hw:.0f}Z" fill="#FFF6E3" stroke="#8A5B00" '
+                 'stroke-width="1.3"/>')
+        p.append(f'<text x="{x - 3:.0f}" y="{y + 3.5:.0f}" font-size="10" '
+                 f'fill="#8A5B00" font-weight="600" '
+                 f'text-anchor="middle">{_x(o["code"])}</text>')
+
+    # 9) 現場評註（同描圖模式——原圖上一個字都沒有的知識）
+    if notes:
+        p.append('<g id="notes">')
+        for n in notes:
+            b = n.get("bbox") or []
+            if len(b) != 4 and n.get("tag"):
+                hit = next((e for e in m.get("equipment", [])
+                            if e.get("tag") == n["tag"] and e.get("bbox")), None)
+                b = (hit or {}).get("bbox") or []
+            if len(b) != 4:
+                continue
+            x0, y0 = b[0] * W, b[1] * H
+            w, h = max((b[2] - b[0]) * W, 22), max((b[3] - b[1]) * H, 16)
+            p.append(f'<rect x="{x0:.0f}" y="{y0:.0f}" width="{w:.0f}" height="{h:.0f}" '
+                     'fill="rgba(4,106,251,0.06)" stroke="#046AFB" stroke-width="1.4" '
+                     'stroke-dasharray="4 3" rx="3"/>')
+            p.append(f'<rect x="{x0 - 1:.0f}" y="{y0 - 13:.0f}" '
+                     f'width="{max(len(n["id"]) * 8, 22):.0f}" height="13" '
+                     'fill="#046AFB" rx="3"/>')
+            p.append(f'<text x="{x0 + 3:.0f}" y="{y0 - 3:.0f}" font-size="10" '
+                     f'fill="#fff" font-weight="700">{_x(n["id"])}</text>')
+        p.append("</g>")
+
+    # 10) 圖例（右上角）：這張圖畫了什麼、沒畫的去哪了
+    n_unloc = sum(1 for e in m.get("equipment", [])
+                  if not e.get("bbox") and not e.get("candidate_bbox"))
+    rows = [
+        ("盲重建｜只畫資料庫語意層", True),
+        (f"設備 {n_eq} 台（候選 {len(seen_cand)}、未定位 {n_unloc}）", False),
+        (f"儀錶 {len(ins_pos)}｜閥件 {n_vv}｜流向 {n_edges} 條", False),
+        ("線稿不描原圖：走線由拓撲生成", False),
+    ]
+    bh = len(rows) * 15 + 12
+    p.append(f'<g><rect x="{W - 286}" y="10" width="276" height="{bh}" rx="6" '
+             'fill="rgba(255,255,255,0.92)" stroke="#DBDDE0"/>')
+    for i, (t, bold) in enumerate(rows):
+        p.append(f'<text x="{W - 274}" y="{29 + i * 15}" font-size="11" '
+                 f'fill="{"#061027" if bold else "#5C6773"}"'
+                 f'{" font-weight=\"700\"" if bold else ""}>{_x(t)}</text>')
+    p.append('</g>')
+
+    p.append("</svg>")
+    return "".join(p)
+
+
 # ---------------------------------------------------------------- endpoints
 @router.post("/build/{filename}")
 def model_build(filename: str, request: Request) -> dict:
@@ -1365,15 +1600,18 @@ def _flow_override_path(filename: str, domain: str) -> Path:
 
 @router.get("/{filename}/rebuild.svg")
 def model_rebuild_svg(filename: str, request: Request,
-                      flow: int = 1, notes: int = 1):
-    """盲測重建圖——**這才是交付物**。
+                      flow: int = 1, notes: int = 1, mode: str = "trace"):
+    """重建圖，兩種模式，驗的東西不同：
 
-    驗收標準是「只靠資料庫能不能把這座廠重現」，所以重建圖不能只有幾何，
-    要把資料庫知道的**語意**一起畫出來：
-      · 製程流向（設備→設備，含分流匯流）——原圖只隱含，我們是明確知道
-      · 現場評註——走過現場的人留下的知識，圖上本來沒有
-    製程說明引用了哪些評註，重建圖上就看得到那些評註標在哪裡；
-    說明與重建圖是同一份資料的兩種呈現，不是兩件事。
+    · mode=trace（描圖）＝原圖幾何轉錄＋語意疊加。線稿／文字／氣泡是建模時
+      從 PDF 抄的——驗的是「幾何與 OCR 進庫的完整度」，不是理解。
+    · mode=blind（盲重建）＝只畫資料庫語意層（審核後資產＋流向拓撲），
+      一條原圖線稿都不描，管線走線由拓撲重新生成。這才是
+      「只靠資料庫重現這座廠」的誠實版本：畫得出來的＝系統懂的，
+      與原圖並排的差距＝辨識缺口。
+
+    兩種模式都帶語意層（流向、評註）：製程說明引用了哪些評註，
+    重建圖上就看得到標在哪裡——說明與重建圖是同一份資料的兩種呈現。
     """
     from fastapi.responses import Response
 
@@ -1384,7 +1622,8 @@ def model_rebuild_svg(filename: str, request: Request,
         from .pid_notes import list_notes
 
         nt = list_notes(filename, current_domain_of(request))
-    return Response(content=_svg_of(m, fl, nt), media_type="image/svg+xml")
+    render = _svg_blind if mode == "blind" else _svg_of
+    return Response(content=render(m, fl, nt), media_type="image/svg+xml")
 
 
 @router.get("/{filename}")

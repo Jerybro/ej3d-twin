@@ -104,7 +104,9 @@ def current_actor(request: Request) -> str:
 # 平台上已存放客戶 P&ID（台化、中油大林），首頁會列出圖面清單與專案資訊，
 # 說明書也含平台能力細節，兩者都不該對未登入者開放。
 # 原本 `/` 與 `/docs` 是公開的，此處一併收回。
-PUBLIC_PREFIXES = ("/login", "/logout", "/static/", "/favicon", "/api/me")
+# /healthz 開放：部署健檢（deploy/auto-pull.ps1）與監控要能不帶 session 打，
+# 它只回 "ok" 純文字，無資訊洩漏疑慮。
+PUBLIC_PREFIXES = ("/login", "/logout", "/static/", "/favicon", "/api/me", "/healthz")
 
 
 async def auth_guard(request: Request, call_next):

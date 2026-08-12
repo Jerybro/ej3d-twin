@@ -13,6 +13,12 @@ uploads/
 # P&ID 解析衍生場景含客戶位號，不進版控
 data/scenes/pid-*.json
 data/pid_batch_status.json
+# 圖組是伺服器執行期會寫入的狀態檔：進版控會讓部署機工作樹永遠是髒的，
+# 擋掉自動部署（deploy/auto-pull.ps1 的 dirty 防呆）
+data/pid_groups.json
+
+# 自動部署紀錄
+deploy/auto-pull.log
 
 # 產出物（可由程式重新生成）
 exports/*.usda
@@ -36,13 +42,13 @@ server_8601.log
 # AutoML 模型持久化（含使用者資料衍生）
 data/automl/
 
-# �{�Ҿ��һP���_�]�����i�����^
+# �{�Ҿ��һP���_�]�����i�����^
 .env
 .secret_key
 
 batch_rerun.log
 
 
-# P&ID �ХܤơG�H�u�е��P�]�֭y��t�Ȥ�츹�A���i����
+# P&ID �ХܤơG�H�u�е��P�]�֭y��t�Ȥ�츹�A���i����
 data/pid_annot/
 logs/

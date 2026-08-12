@@ -61,6 +61,21 @@ git pull
 nssm restart ej3d-twin      # 或重跑腳本（Funnel 設定會保留）
 ```
 
+### 自動追版（push 即部署，建議）
+
+在別台機器開發、桌機當測試場（地端 VLM／API key 都在桌機）時，
+免去每次手動 pull。桌機「系統管理員」PowerShell 跑一次：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\auto-pull.ps1 -Install
+```
+
+之後排程每 2 分鐘檢查 `origin/main`：有新 commit → `git pull --ff-only` →
+（requirements.txt 有變更才）`pip install` → 重啟服務 → healthz 健康檢查，
+**檢查失敗自動回退前一版**。工作樹有未提交修改或分支發散時不動、只記 log。
+紀錄：`deploy\auto-pull.log`；移除：`-Uninstall`；
+參數：`-IntervalMinutes`、`-ServiceName`、`-Branch`、`-Port`。
+
 ## 停止 / 收回公開
 
 ```powershell

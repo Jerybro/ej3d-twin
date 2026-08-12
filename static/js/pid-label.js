@@ -1561,5 +1561,25 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// 左欄收合：筆電畫面窄，收起來把寬度讓給圖面。選擇記在 localStorage；
+// 沒選過的人在窄螢幕（≤1440px）預設收起。
+{
+  const aside = document.querySelector('aside');
+  const tg = $('aside-toggle');
+  const KEY = 'pid.aside.collapsed';
+  const apply = c => {
+    aside.classList.toggle('collapsed', c);
+    tg.textContent = c ? '»' : '«';
+    tg.title = c ? '展開選單' : '收合選單';
+  };
+  const saved = localStorage.getItem(KEY);
+  apply(saved === null ? matchMedia('(max-width: 1440px)').matches : saved === '1');
+  tg.addEventListener('click', () => {
+    const c = !aside.classList.contains('collapsed');
+    localStorage.setItem(KEY, c ? '1' : '0');
+    apply(c);
+  });
+}
+
 loadFiles();
 loadGroups();

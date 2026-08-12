@@ -113,11 +113,34 @@ if ($Install) {
   $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
     -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) `
     -RepetitionDuration (New-TimeSpan -Days 3650)
-  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Highest
   $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
-  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-    -Principal $principal -Settings $settings -Force | Out-Null
+  # S4U＋Highest 要系統管理員權限；沒有就退回 Interactive（登入時才跑）。
+  # 這支不需要管理員：它只做 git 操作與啟動使用者程序，而且 uvicorn 本來
+  # 就該跑在使用者工作階段（Tailscale Funnel 也是）。退回不是妥協。
+  $ok = $false
+  foreach ($mode in @('S4U', 'Interactive')) {
+    try {
+      if ($mode -eq 'S4U') {
+        $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Highest
+      } else {
+        $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive
+      }
+      Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+        -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+      $ok = $true
+      if ($mode -eq 'Interactive') {
+        Write-Host "（非系統管理員：已用 Interactive 模式註冊——需維持登入狀態；要改成登出也跑，請用系統管理員 PowerShell 重跑 -Install）"
+      }
+      break
+    } catch {
+      if ($mode -eq 'Interactive') { Write-Host "排程註冊失敗：$_" }
+    }
+  }
+  if (-not $ok) {
+    Write-Host "排程未註冊——請改用系統管理員 PowerShell 重跑 -Install"
+    exit 1
+  }
   Write-Host "已註冊排程 $TaskName：每 $IntervalMinutes 分鐘檢查 origin/$Branch，有新版自動部署 $ServiceName"
   Write-Host "立即執行第一次檢查…"
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath `

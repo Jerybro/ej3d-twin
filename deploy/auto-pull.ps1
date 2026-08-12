@@ -66,9 +66,16 @@ function Restart-App {
   }
   $py = Get-PythonPath
   try {
+    # 輸出必須落地：隱藏視窗跑的 uvicorn 一旦炸掉（OCR 原生層 crash、
+    # 例外 traceback）什麼痕跡都不留，前端只看得到一個 502。
+    # 「請看終端機訊息」在這種跑法下根本沒有終端機——日誌就是終端機。
+    $logDir = Join-Path $RepoDir "logs"
+    New-Item -ItemType Directory -Force $logDir | Out-Null
     Start-Process -FilePath $py -WindowStyle Hidden -WorkingDirectory $RepoDir `
+      -RedirectStandardOutput (Join-Path $logDir "uvicorn.out.log") `
+      -RedirectStandardError (Join-Path $logDir "uvicorn.err.log") `
       -ArgumentList '-m','uvicorn','server.main:app','--host','127.0.0.1','--port',"$Port"
-    Log "[重啟] 程序模式 $py -m uvicorn :$Port"
+    Log "[重啟] 程序模式 $py -m uvicorn :$Port（日誌 logs\uvicorn.*.log）"
     return $true
   } catch { Log "[錯誤] 程序啟動失敗：$_"; return $false }
 }

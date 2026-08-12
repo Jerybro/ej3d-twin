@@ -249,6 +249,7 @@ async function openDoc(name) {
   renderZoneMap();
   await loadAnnots();
   render();
+  loadAnchorsList();           // 錨點層（向量幾何，1~3 秒，背景載）
   loadConvention(name);
   assetModel = null;
   loadModel(true);           // 之前建過模就直接帶出資產庫（404 靜默）
@@ -413,11 +414,113 @@ $('scan-all-btn').addEventListener('click', async () => {
     $('cc-state').innerHTML = `幾何驗證通過自動放行 <b style="color:var(--hi)">${auto}</b> 項｜`
       + `需人工審核 <b>${items.length - auto}</b> 項`;
     scheduleDesc();
+    updateAnchorBtn();               // OCR 認掉的錨點從未結案數扣掉
     loadLocateCandidates();          // PFD：設備定位候選另外補進佇列
   } catch (e) {
     alert('辨識失敗：' + (e.message || ''));
   } finally {
     b.disabled = false; b.textContent = '重新辨識整張圖面';
+  }
+});
+
+// ------------------------------------- 錨定問答（第一輪強化）
+// 向量幾何宣告「這裡有東西」（氣泡/蝴蝶結/殼體輪廓，座標像素級、零成本），
+// 模型只回答「它是什麼」——語意與座標各用各的強項。
+// 錨點結案率＝召回率的可量測代理：每個錨點都要被解決（入庫成資產、
+// 或判定非元件），未結案數歸零才叫「這張圖掃完了」。
+let anchorList = [];
+
+async function loadAnchorsList() {
+  if (!curFile) return;
+  try {
+    const d = await getJSON(`/api/pid/vlm/anchors/${encodeURIComponent(curFile)}`);
+    anchorList = d.anchors || [];
+  } catch { anchorList = []; }
+  updateAnchorBtn();
+}
+
+function anchorDoneSet() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem('pid.anchors.done.' + curFile) || '[]'));
+  } catch { return new Set(); }
+}
+
+function markAnchorsDone(ids) {
+  if (!ids.length) return;
+  const s = anchorDoneSet();
+  ids.forEach(i => s.add(i));
+  localStorage.setItem('pid.anchors.done.' + curFile, JSON.stringify([...s]));
+}
+
+// 未結案 = 沒被判非元件、也沒有任何標註（含已否決）蓋住它
+function unresolvedAnchors() {
+  const done = anchorDoneSet();
+  const inB = (x, y, b, p) => x >= b[0] - p && x <= b[2] + p && y >= b[1] - p && y <= b[3] + p;
+  return anchorList.filter(a => {
+    if (done.has(a.id)) return false;
+    const ax = (a.bbox[0] + a.bbox[2]) / 2, ay = (a.bbox[1] + a.bbox[3]) / 2;
+    return !items.some(it => it.bbox
+      && (inB((it.bbox[0] + it.bbox[2]) / 2, (it.bbox[1] + it.bbox[3]) / 2, a.bbox, 0.004)
+          || inB(ax, ay, it.bbox, 0.004)));
+  });
+}
+
+function updateAnchorBtn() {
+  const b = $('anchor-btn');
+  if (!curFile || !anchorList.length) { b.disabled = !curFile; return; }
+  const un = unresolvedAnchors().length;
+  b.disabled = un === 0;
+  b.textContent = un ? `錨定問答（未結案錨點 ${un}／${anchorList.length}）`
+                     : `錨定問答（錨點 ${anchorList.length} 全數結案）`;
+}
+
+$('anchor-btn').addEventListener('click', async () => {
+  if (!curFile) return;
+  const b = $('anchor-btn');
+  b.disabled = true;
+  const TC = 4, TR = 3, OV = 0.06;
+  let found = 0, closed = 0, fail = 0;
+  try {
+    for (let r = 0; r < TR; r++) {
+      for (let c = 0; c < TC; c++) {
+        const box = [Math.max(0, c / TC - OV), Math.max(0, r / TR - OV),
+                     Math.min(1, (c + 1) / TC + OV), Math.min(1, (r + 1) / TR + OV)];
+        // 每塊重算未結案（前面塊入庫/結案的錨點不再重問；重疊區自然去重）
+        let pend = unresolvedAnchors().filter(a => {
+          const ax = (a.bbox[0] + a.bbox[2]) / 2, ay = (a.bbox[1] + a.bbox[3]) / 2;
+          return ax >= box[0] && ax <= box[2] && ay >= box[1] && ay <= box[3];
+        });
+        while (pend.length) {
+          const batch = pend.slice(0, 25);
+          pend = pend.slice(25);
+          b.innerHTML = `<span class="spin"></span> 錨定問答 分塊 ${r * TC + c + 1}/${TC * TR}`
+            + `｜入庫 ${found}｜結案 ${closed}`;
+          try {
+            const d = await getJSON('/api/pid/vlm/anchor_ask', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ filename: curFile, bbox: box,
+                                     anchors: batch, provider: engine() }),
+            });
+            const fresh = (d.items || []).map(x => ({ ...x, state: 'pending' }));
+            if (fresh.length) { items = items.concat(fresh); found += fresh.length; }
+            const dis = (d.dismissed || []).map(x => x.id).filter(x => x != null);
+            markAnchorsDone(dis);
+            closed += dis.length;
+            render();
+          } catch { fail++; }
+        }
+      }
+    }
+    $('cc-state').innerHTML = `錨定問答完成：入庫待審 <b style="color:var(--accent)">${found}</b> 項、`
+      + `判非元件結案 ${closed} 個${fail ? `、${fail} 批失敗` : ''}`
+      + `｜剩餘未結案 <b>${unresolvedAnchors().length}</b> 個錨點`;
+    if (found) {
+      curIdx = items.findIndex(x => x.state === 'pending');
+      render(); focusItem(Math.max(curIdx, 0));
+    }
+  } finally {
+    b.disabled = false;
+    updateAnchorBtn();
   }
 });
 
@@ -455,6 +558,7 @@ $('gap-scan-btn').addEventListener('click', async () => {
     }
     $('cc-state').innerHTML = `缺口掃描完成：新增 <b style="color:var(--accent)">${found}</b> 項待審`
       + `（與已知重複略過 ${dup}${fail ? `，${fail} 塊失敗` : ''}）`;
+    updateAnchorBtn();
     if (found) {
       curIdx = items.findIndex(x => x.state === 'pending');
       render(); focusItem(Math.max(curIdx, 0));

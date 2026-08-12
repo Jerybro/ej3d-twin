@@ -443,6 +443,9 @@
           <div id="conv-box" class="conv" style="display:none"></div>
           <button class="mini-btn primary" id="scan-all-btn" disabled
                   style="width:100%;padding:10px;margin-bottom:6px">辨識整張圖面</button>
+          <button class="mini-btn" id="anchor-btn" disabled
+                  title="向量幾何宣告「這裡有東西」（氣泡/蝴蝶結/殼體輪廓，座標像素級），AI 只回答「它是什麼」——錨點全數結案＝這張圖真的掃完了"
+                  style="width:100%;padding:9px;margin-bottom:6px">錨定問答</button>
           <button class="mini-btn" id="gap-scan-btn" disabled
                   title="把已標註項疊回原圖給 AI 對照（盲重建×原圖雙圖比對），只獵還沒被標到的元件——補第一輪 OCR/幾何管線的天生盲區"
                   style="width:100%;padding:9px;margin-bottom:12px">第二輪：缺口掃描（AI 對照已標註）</button>
@@ -542,6 +545,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260812i"></script>
+  <script src="/static/js/pid-label.js?v=20260812j"></script>
 </body>
 </html>

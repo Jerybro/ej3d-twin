@@ -1624,6 +1624,194 @@ def gap_scan(req: GapScanReq) -> dict:
     return {"items": items, "skipped_dup": dups, "marks": n_marks}
 
 
+# ------------------------------------------------------ 錨定問答（第一輪強化）
+# 架構：向量幾何宣告「這裡有個東西」（座標像素級、零成本），VLM 只回答
+# 「它是什麼」。模型答語意、不答座標——各用各的強項。
+@router.get("/anchors/{filename}")
+def anchors(filename: str) -> dict:
+    """全圖候選錨點：儀錶氣泡＋閥件＋設備本體（向量層）。"""
+    from .pid_parse import detect_bodies, detect_valves, pdf_to_norm
+
+    _, meta = _ensure_base(filename)
+    rot = meta.get("rot", 0)
+    out = []
+    for cx, cy, rx, ry, shape in _bubbles_norm(filename):
+        out.append({"bbox": [cx - rx, cy - ry, cx + rx, cy + ry],
+                    "hint": "bubble", "shape": shape})
+    try:
+        vl, pw, ph = detect_valves(_safe_pdf(filename))
+        for x, y, s in vl:
+            r = max(float(s) * 0.7, 6.0)
+            rx = r / (ph if rot in (90, 270) else pw)
+            ry = r / (pw if rot in (90, 270) else ph)
+            u, v = pdf_to_norm(x, y, pw, ph, rot)
+            out.append({"bbox": [u - rx, v - ry, u + rx, v + ry], "hint": "valve"})
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        bl, pw, ph = detect_bodies(_safe_pdf(filename))
+        for x0, y0, x1, y1, kind in bl:
+            u0, v0 = pdf_to_norm(x0, y0, pw, ph, rot)
+            u1, v1 = pdf_to_norm(x1, y1, pw, ph, rot)
+            out.append({"bbox": [min(u0, u1), min(v0, v1),
+                                 max(u0, u1), max(v0, v1)],
+                        "hint": "body", "shape": kind})
+    except Exception:  # noqa: BLE001
+        pass
+    for i, a in enumerate(out):
+        a["id"] = i
+        a["bbox"] = [round(v, 4) for v in a["bbox"]]
+    return {"anchors": out, "count": len(out)}
+
+
+SYSTEM_ANCHOR = (
+    "你是 P&ID 判讀引擎，正在做「錨定問答」。圖上有多個紅色編號標記，"
+    "每個編號框住一個由幾何偵測到的候選元件。逐一回答每個編號是什麼：\n"
+    "· instrument＝儀錶氣泡（圓／六角／方框）。圈內有位號請合成 tag："
+    "上排功能字母＋下排數字，如 PI 61301 → PI61301。\n"
+    "· valve＝閥件（閘閥/球閥/蝶閥/逆止/控制閥/安全閥）。有位號才填 tag，"
+    "symbol 填閥型；看得到口徑（如 3/4\"、2\"）寫進 note。\n"
+    "· equipment＝設備本體（塔/槽/泵/換熱器/壓縮機/過濾器）。symbol 填"
+    "設備類型；框內或緊鄰有位號（V612、P632A 這類）就填 tag。\n"
+    "· pipe＝其實是管線元件（縮管、盲板、軟管等）。\n"
+    "· none＝誤偵測：圖框、表格、註記文字、箭頭、裝飾——不是元件。\n"
+    "只依據圖面可見內容回答；看不清楚 confidence 給低分；絕不臆造位號。"
+)
+ANCHOR_SCHEMA_HINT = (
+    '輸出格式（僅輸出 JSON，不要其他文字）：\n'
+    '{"items":[{"n":1,"kind":"instrument|valve|equipment|pipe|none",'
+    '"tag":"位號或空","symbol":"中文說明","confidence":0.0,"note":""}]}'
+)
+
+
+class AnchorAskReq(BaseModel):
+    filename: str
+    bbox: list = Field(..., min_length=4, max_length=4)   # 分塊（0-1 全圖座標）
+    anchors: list = []      # [{id, bbox, hint}] 本塊未結案錨點（建議 ≤25）
+    provider: str = "cloud"
+
+
+@router.post("/anchor_ask")
+def anchor_ask(req: AnchorAskReq) -> dict:
+    """錨定問答：編號標記疊上圖塊，模型逐號答身分。
+
+    回傳 items（同 scan_all schema，bbox＝錨點框＝向量精度）與
+    dismissed（模型判「none」的錨點 id——結案為非元件，不進佇列）。
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    if not req.anchors:
+        return {"items": [], "dismissed": [], "asked": 0}
+    img_p, meta = _ensure_base(req.filename)
+    W, H = meta["w"], meta["h"]
+    x0, y0, x1, y1 = (float(v) for v in req.bbox)
+    x0, x1 = sorted((max(0.0, x0), min(1.0, x1)))
+    y0, y1 = sorted((max(0.0, y0), min(1.0, y1)))
+    px0, py0, px1, py1 = int(x0 * W), int(y0 * H), int(x1 * W), int(y1 * H)
+    if px1 - px0 < 8 or py1 - py0 < 8:
+        raise HTTPException(422, "分塊範圍太小")
+
+    with Image.open(img_p) as im:
+        crop = im.crop((px0, py0, px1, py1)).convert("RGB")
+    cw, ch = crop.size
+    scale = 1.0
+    if crop.width < CROP_MIN:
+        scale = min(CROP_MIN / crop.width, 4.0)
+    elif crop.width > CROP_MAX:
+        scale = CROP_MAX / crop.width
+    if scale != 1.0:
+        crop = crop.resize((int(cw * scale), int(ch * scale)), Image.LANCZOS)
+
+    dr = ImageDraw.Draw(crop)
+    try:
+        fnt = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf",
+                                 max(14, int(crop.width / 70)))
+    except OSError:
+        fnt = ImageFont.load_default()
+    asked = []                      # 依編號順序對回 anchor
+    for a in req.anchors[:25]:
+        ab = a.get("bbox") or []
+        if len(ab) != 4:
+            continue
+        mx0 = (ab[0] * W - px0) * scale
+        my0 = (ab[1] * H - py0) * scale
+        mx1 = (ab[2] * W - px0) * scale
+        my1 = (ab[3] * H - py0) * scale
+        if mx1 < 0 or my1 < 0 or mx0 > crop.width or my0 > crop.height:
+            continue
+        n = len(asked) + 1
+        asked.append(a)
+        dr.rectangle([mx0 - 3, my0 - 3, mx1 + 3, my1 + 3],
+                     outline=(220, 30, 30), width=3)
+        lab = str(n)
+        tb = dr.textbbox((mx0, my0 - fnt.size - 6), lab, font=fnt)
+        dr.rectangle([tb[0] - 3, tb[1] - 2, tb[2] + 3, tb[3] + 2],
+                     fill=(220, 30, 30))
+        dr.text((mx0, my0 - fnt.size - 6), lab, fill=(255, 255, 255), font=fnt)
+    if not asked:
+        return {"items": [], "dismissed": [], "asked": 0}
+
+    buf = io.BytesIO()
+    crop.save(buf, format="JPEG", quality=90)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    prompt = (f"圖上共有 {len(asked)} 個紅色編號標記（1~{len(asked)}）。"
+              "請逐號回答每個標記框住的是什麼。\n" + ANCHOR_SCHEMA_HINT)
+    raw = _vlm(req.provider, SYSTEM_ANCHOR, prompt, b64, want_json=True)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        m2 = re.search(r"\{.*\}", raw, re.S)
+        try:
+            data = json.loads(m2.group(0)) if m2 else None
+        except json.JSONDecodeError:
+            data = None
+    if not isinstance(data, dict):
+        raise HTTPException(502, f"模型輸出無法解析：{raw[:160]}")
+
+    items, dismissed = [], []
+    eng = "雲端" if req.provider == "cloud" else "地端"
+    for r_ in (data.get("items") or [])[:len(asked) + 5]:
+        try:
+            n = int(r_.get("n"))
+        except (TypeError, ValueError):
+            continue
+        if not (1 <= n <= len(asked)):
+            continue
+        a = asked[n - 1]
+        kind = str(r_.get("kind") or "").strip()
+        conf = min(max(float(r_.get("confidence") or 0.5), 0.05), 0.9)
+        if kind == "none":
+            dismissed.append({"id": a.get("id"), "note": str(r_.get("note") or "")})
+            continue
+        if kind not in ("instrument", "valve", "equipment", "pipe"):
+            continue
+        tagn = re.sub(r"[\s\-]", "", str(r_.get("tag") or "").upper())
+        dec = (_decode_isa(tagn) if kind == "instrument" else
+               _decode_equip(tagn) if kind == "equipment" else "")
+        hint_txt = {"bubble": "氣泡", "valve": "蝴蝶結", "body": "殼體輪廓"}.get(
+            a.get("hint", ""), "幾何特徵")
+        items.append({
+            "tag": tagn, "kind": kind,
+            "symbol": str(r_.get("symbol") or "") or dec
+                      or _GAP_KIND_TXT.get(kind, "元件"),
+            "note": str(r_.get("note") or ""), "mounting": "", "mount_conf": 0.0,
+            "confidence": round(conf, 2),
+            "evidence": [
+                {"stage": "向量錨點", "ok": True, "score": 1.0,
+                 "detail": f"幾何層以{hint_txt}宣告此處有元件——座標為向量"
+                           "精度，非模型目測"},
+                {"stage": f"錨定問答（{eng}）", "ok": True, "score": round(conf, 2),
+                 "detail": f"模型判定編號 {n} 為{_GAP_KIND_TXT.get(kind, kind)}"
+                           + (f"「{tagn}」" if tagn else "")},
+            ],
+            "auto_ok": False,
+            "bbox": [round(float(v), 4) for v in a["bbox"]],
+            "anchor_id": a.get("id"),
+            "source": f"anchor-{req.provider}",
+        })
+    return {"items": items, "dismissed": dismissed, "asked": len(asked)}
+
+
 class ClassifyOneReq(BaseModel):
     filename: str
     bbox: list = Field(..., min_length=4, max_length=4)

@@ -1158,6 +1158,216 @@ def detect_tables(pdf_path: Path, min_rows: int = 6) -> tuple[list, float, float
     return out, pw, ph
 
 
+# 設備本體尺寸範圍（pt）
+BODY_SIDE_MIN = 45.0                       # 長邊最短（塔/槽本體）
+BODY_GAP_MIN, BODY_GAP_MAX = 14.0, 120.0   # 兩長邊間距（殼徑）
+BODY_CIRCLE_MAX = 100.0                    # 大圓上限（泵/換熱器）
+BODY_CAP_ZONE = 18.0                       # 端蓋搜尋帶（pt）：端點外擴這麼多內要有封頭
+
+
+def detect_bodies(pdf_path: Path) -> tuple[list, float, float]:
+    """設備本體錨點（向量幾何）→ [(x0, y0, x1, y1, kind)]（PDF 點座標）。
+
+    錨定問答管線的「存在性」來源：設備沒有位號文字時 OCR 整條路都瞎，
+    但外形輪廓在向量層是免費的。兩類：
+      vessel＝一對「平行、等長、大幅重疊」的長邊（塔/槽/滾筒，直式臥式皆可，
+              外擴 12pt 蓋住封頭/端蓋）
+      round ＝大圓（泵/換熱器/壓縮機；r 超出氣泡上限 BUBBLE_MAX 才算，
+              與儀錶氣泡半徑範圍互斥、不會重複認領）
+    誤判防線：貼頁框不要（圖框）、縱橫線都很多的不要（格狀表格；
+    塔內部層板只有橫線多、縱線少，不會被誤殺）、落在 detect_tables
+    偵測到的表格區內不要。
+    """
+    # styled_segments 會把折線拆成逐段——封頭（碟形頭的折線近似）才進得來；
+    # page_segments 只收兩點子路徑，折線全被歸到弧線清單，封頭證據會漏光。
+    raw, pw, ph = styled_segments(pdf_path)
+    segs = [(a, b) for a, b, _w, _d in raw]
+
+    vraw, hraw, shorts = [], [], []        # (位置, 低端, 高端)；短段當封頭證據
+    for (x0, y0), (x1, y1) in segs:
+        dx, dy = abs(x1 - x0), abs(y1 - y0)
+        if dx < 1.5 and dy >= 6:
+            vraw.append(((x0 + x1) / 2, min(y0, y1), max(y0, y1)))
+        elif dy < 1.5 and dx >= 6:
+            hraw.append(((y0 + y1) / 2, min(x0, x1), max(x0, x1)))
+        if math.hypot(dx, dy) < 40:
+            shorts.append((min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)))
+
+    def chain(lines: list) -> list:
+        """共線接續：殼線被接管口打斷成數段（實測臥式槽整條殼線
+        碎成 3~4 段），同位置、間隙 ≤12pt 的接起來再談配對。"""
+        lines = sorted(lines)
+        out: list = []
+        for p, lo, hi in lines:
+            if out and abs(out[-1][0] - p) < 1.2 and lo - out[-1][2] <= 12:
+                out[-1] = (out[-1][0], out[-1][1], max(out[-1][2], hi))
+            else:
+                out.append((p, lo, hi))
+        return [ln for ln in out if ln[2] - ln[1] >= BODY_SIDE_MIN]
+
+    verts, horis = chain(vraw), chain(hraw)
+
+    def capped(x0: float, y0: float, x1: float, y1: float, is_vert: bool) -> bool:
+        """兩端都要有封頭證據——這是「設備殼體」與「平行管線走廊」的分水嶺。
+        封頭（碟形/橢圓/平底）在向量層是一串短段，端帶內找得到整段落在
+        殼寬範圍的短段就算數；平行管線的端點是開放的，找不到。"""
+        def zone_has(lo_a, hi_a, lo_b, hi_b) -> bool:
+            n = 0
+            for sx0, sy0, sx1, sy1 in shorts:
+                a0, a1 = (sx0, sx1) if is_vert else (sy0, sy1)
+                b0, b1 = (sy0, sy1) if is_vert else (sx0, sx1)
+                if a0 >= lo_a - 3 and a1 <= hi_a + 3 and b0 >= lo_b and b1 <= hi_b:
+                    n += 1
+                    if n >= 2:              # 折線封頭至少兩小段；單段多為雜線
+                        return True
+            return False
+        if is_vert:
+            return (zone_has(x0, x1, y0 - BODY_CAP_ZONE, y0 + BODY_CAP_ZONE)
+                    and zone_has(x0, x1, y1 - BODY_CAP_ZONE, y1 + BODY_CAP_ZONE))
+        return (zone_has(y0, y1, x0 - BODY_CAP_ZONE, x0 + BODY_CAP_ZONE)
+                and zone_has(y0, y1, x1 - BODY_CAP_ZONE, x1 + BODY_CAP_ZONE))
+
+    def pair_boxes(lines: list, is_vert: bool) -> list:
+        out = []
+        lines = sorted(lines)
+        for i, (p1, lo1, hi1) in enumerate(lines):
+            for p2, lo2, hi2 in lines[i + 1:]:
+                gap = p2 - p1
+                if gap > BODY_GAP_MAX:
+                    break                   # 已按位置排序，後面只會更遠
+                if gap < BODY_GAP_MIN:
+                    continue
+                l1, l2 = hi1 - lo1, hi2 - lo2
+                ov = min(hi1, hi2) - max(lo1, lo2)
+                if ov < BODY_SIDE_MIN or ov < 0.8 * min(l1, l2):
+                    continue
+                if min(l1, l2) / max(l1, l2) < 0.7:
+                    continue
+                lo, hi = min(lo1, lo2), max(hi1, hi2)
+                if is_vert:
+                    if not capped(p1, lo, p2, hi, True):
+                        continue
+                    out.append((p1, lo - 12, p2, hi + 12))
+                else:
+                    if not capped(lo, p1, hi, p2, False):
+                        continue
+                    out.append((lo - 12, p1, hi + 12, p2))
+        return out
+
+    cands = pair_boxes(verts, True) + pair_boxes(horis, False)
+
+    def ok_frame(b) -> bool:               # 圖框防線
+        x0, y0, x1, y1 = b
+        if x0 < 8 or y0 < 8 or x1 > pw - 8 or y1 > ph - 8:
+            return False
+        return (x1 - x0) <= 0.45 * pw and (y1 - y0) <= 0.9 * ph
+
+    def grid_like(b) -> bool:              # 表格防線（兩軸都多才是格子）
+        x0, y0, x1, y1 = b
+        nv = sum(1 for p, lo, hi in verts
+                 if x0 + 2 < p < x1 - 2 and lo < y1 and hi > y0)
+        nh = sum(1 for p, lo, hi in horis
+                 if y0 + 2 < p < y1 - 2 and lo < x1 and hi > x0)
+        return nv >= 4 and nh >= 4
+
+    try:
+        tables, _, _ = detect_tables(pdf_path)
+    except Exception:  # noqa: BLE001
+        tables = []
+
+    def in_table(b) -> bool:
+        cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
+        return any(t[0] - 5 <= cx <= t[2] + 5 and t[1] - 5 <= cy <= t[3] + 5
+                   for t in tables)
+
+    def pierced(b) -> bool:
+        """貫穿線檢查：長線從兩側牆「穿進又穿出」＝管線走廊，不是設備。
+        真設備的接管停在殼壁、塔盤停在殼內，不會兩頭都突出殼外。"""
+        x0, y0, x1, y1 = b
+        n = sum(1 for p, lo, hi in horis
+                if y0 + 8 < p < y1 - 8 and lo < x0 - 10 and hi > x1 + 10)
+        n += sum(1 for p, lo, hi in verts
+                 if x0 + 8 < p < x1 - 8 and lo < y0 - 10 and hi > y1 + 10)
+        return n >= 2
+
+    max_area = 0.04 * pw * ph              # 單台設備不會佔掉 4% 版面
+    cands = [b for b in cands
+             if ok_frame(b) and not grid_like(b) and not in_table(b)
+             and not pierced(b)
+             and (b[2] - b[0]) * (b[3] - b[1]) <= max_area]
+
+    # 巢狀合併：同一台設備的雙層描邊/殼板線會生出多個候選，留最外框
+    cands.sort(key=lambda b: -(b[2] - b[0]) * (b[3] - b[1]))
+    kept: list = []
+    for b in cands:
+        area = (b[2] - b[0]) * (b[3] - b[1])
+        dup = any((min(b[2], k[2]) - max(b[0], k[0])) > 0
+                  and (min(b[3], k[3]) - max(b[1], k[1])) > 0
+                  and (min(b[2], k[2]) - max(b[0], k[0]))
+                  * (min(b[3], k[3]) - max(b[1], k[1])) > 0.5 * area
+                  for k in kept)
+        if not dup:
+            kept.append(b)
+    bodies = [(x0, y0, x1, y1, "vessel") for x0, y0, x1, y1 in kept]
+
+    # 大圓：泵/換熱器/壓縮機。子路徑收集邏輯與 detect_bubbles 同款，
+    # 半徑範圍接在氣泡上限之後，兩個偵測器互斥。
+    import ctypes
+
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as praw
+
+    doc = pdfium.PdfDocument(str(pdf_path))
+    try:
+        page = doc[0]
+        subs = []
+        for i in range(praw.FPDFPage_CountObjects(page.raw)):
+            obj = praw.FPDFPage_GetObject(page.raw, i)
+            if praw.FPDFPageObj_GetType(obj) != praw.FPDF_PAGEOBJ_PATH:
+                continue
+            m = praw.FS_MATRIX()
+            praw.FPDFPageObj_GetMatrix(obj, ctypes.byref(m))
+            cur: list = []
+            for j in range(praw.FPDFPath_CountSegments(obj)):
+                seg = praw.FPDFPath_GetPathSegment(obj, j)
+                x = ctypes.c_float()
+                y = ctypes.c_float()
+                praw.FPDFPathSegment_GetPoint(seg, ctypes.byref(x), ctypes.byref(y))
+                st = praw.FPDFPathSegment_GetType(seg)
+                X = m.a * x.value + m.c * y.value + m.e
+                Y = m.b * x.value + m.d * y.value + m.f
+                if st == praw.FPDF_SEGMENT_MOVETO:
+                    if len(cur) >= 8:
+                        subs.append(cur)
+                    cur = [(X, Y)]
+                else:
+                    cur.append((X, Y))
+            if len(cur) >= 8:
+                subs.append(cur)
+    finally:
+        doc.close()
+    circles = []
+    for pts in subs:
+        n = len(pts)
+        cx = sum(p[0] for p in pts) / n
+        cy = sum(p[1] for p in pts) / n
+        ds = [math.dist(p, (cx, cy)) for p in pts]
+        r = sum(ds) / n
+        if not (BUBBLE_MAX < r <= BODY_CIRCLE_MAX):
+            continue
+        if max(ds) > r * 1.3 or min(ds) < r * 0.7:
+            continue
+        if any(math.dist((cx, cy), c[:2]) < max(r, c[2]) * 0.6 for c in circles):
+            continue
+        circles.append((cx, cy, r))
+    for cx, cy, r in circles:
+        b = (cx - r, cy - r, cx + r, cy + r)
+        if ok_frame(b) and not in_table(b):
+            bodies.append((*b, "round"))
+
+    return bodies, pw, ph
+
+
 def pdf_to_norm(x: float, y: float, pw: float, ph: float, rot: int) -> tuple:
     """PDF 點座標 → 底圖正規化座標（0-1，左上原點），依 _render 實際套用的旋轉。"""
     u = x / pw

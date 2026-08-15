@@ -61,3 +61,5 @@ data/pid_notes/
 
 # 評測產出（可重跑，不進版控）
 data/pid_inspect/
+server_8600.err.log
+server_8600.out.log

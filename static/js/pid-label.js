@@ -45,9 +45,24 @@ async function loadFiles() {
     const files = await fetch('/api/pid/list').then(r => r.json());
     if (!files.length) { el.innerHTML = '<span class="hint">尚無圖面。</span>'; return; }
     el.innerHTML = files.map(f =>
-      `<div class="file-item" data-name="${esc(f.name)}">${esc(f.name)}</div>`).join('');
+      `<div class="file-item" data-name="${esc(f.name)}">${esc(f.name)}
+         <span class="fx" data-del="${esc(f.name)}" title="刪除此圖面">×</span></div>`).join('');
     el.querySelectorAll('.file-item').forEach(d =>
       d.addEventListener('click', () => openDoc(d.dataset.name)));
+    el.querySelectorAll('.fx').forEach(x => x.addEventListener('click', async e => {
+      e.stopPropagation();
+      const name = x.dataset.del;
+      // 說清楚刪什麼、留什麼——審核成果不連坐，同檔名重新上傳就接得回來
+      if (!confirm(`刪除圖面「${name}」？\n\n會刪：PDF 與底圖快取。\n`
+        + '會留：審核紀錄、資產模型、評註（同檔名重新上傳即可接回既有進度）。')) return;
+      try {
+        const r = await fetch(`/api/pid/file/${encodeURIComponent(name)}`,
+                              { method: 'DELETE' });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.status);
+        if (curFile === name) { location.reload(); return; }
+        loadFiles();
+      } catch (err) { alert('刪除失敗：' + err.message); }
+    }));
   } catch { el.innerHTML = '<span class="hint">清單載入失敗。</span>'; }
 }
 
@@ -244,6 +259,7 @@ async function openDoc(name) {
   if (sheet.complete && sheet.naturalWidth) fitZoom();
   else sheet.addEventListener('load', fitZoom, { once: true });
   bindSelection();
+  bindRebuildPan();
   $('scan-all-btn').disabled = false;
   $('gap-scan-btn').disabled = false;
   renderZoneMap();
@@ -299,7 +315,9 @@ function setCompare(mode) {
   cmpMode = mode;
   const w = $('canvas-wrap'), pb = $('pane-b'), pa = $('pane-a'), img = $('rebuild-img');
   if (!w || !pb) return;
-  w.classList.toggle('side', mode === 'side');
+  // 'sbs' 不叫 'side'：右側欄的 CSS 類別就叫 .side，撞名會把右欄的
+  // 直排規則套到畫布上（並排實測變成上下疊，找了三層才發現是這個）
+  w.classList.toggle('sbs', mode === 'side');
   w.classList.toggle('ov', mode === 'overlay');
   // 必須給 'block'——設空字串會退回 CSS 的 display:none（實測並排整個不出現）
   pb.style.display = mode === 'off' ? 'none' : 'block';
@@ -336,6 +354,32 @@ $('cmp-m-trace').addEventListener('click', () => setRbMode('trace'));
 $('cmp-op').addEventListener('input', e => {
   $('rebuild-img').style.opacity = e.target.value / 100;
 });
+
+// 資產模型側可拖曳平移。原圖側的拖曳有框選語意（新增/重框），但重建圖
+// 那一側沒有——使用者在那裡拖曳的自然預期就是移動視野，不給就是「不能動」。
+function bindRebuildPan() {
+  const pb = $('pane-b');
+  if (!pb) return;
+  pb.style.cursor = 'grab';
+  pb.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY;
+    const l0 = stage.scrollLeft, t0 = stage.scrollTop;
+    pb.style.cursor = 'grabbing';
+    const mv = ev => {
+      stage.scrollLeft = l0 - (ev.clientX - sx);
+      stage.scrollTop = t0 - (ev.clientY - sy);
+    };
+    const up = () => {
+      removeEventListener('pointermove', mv);
+      removeEventListener('pointerup', up);
+      pb.style.cursor = 'grab';
+    };
+    addEventListener('pointermove', mv);
+    addEventListener('pointerup', up);
+  });
+}
 
 // -------------------------------------------------------------------- 縮放
 function applyZoom() {
@@ -1066,8 +1110,12 @@ async function decide(state) {
     }
   } catch { /* 留痕失敗不擋流程 */ }
   refreshRebuild();      // 後端已把這格 patch 進模型，比對圖立刻跟上（免 121 秒重建）
-  const nxt = items.findIndex((x, i) => i > curIdx && x.state === 'pending');
-  focusItem(nxt >= 0 ? nxt : Math.min(items.length - 1, curIdx + 1));
+  // 跳下一項：往後找不到待審就**回頭**找前面漏掉的；連前面都沒有＝全審完，
+  // focusItem 觸發的 render 會切到完成畫面。原本「停在原地」在最後一項
+  // 按否決時看起來就是沒反應——按了沒動靜比錯誤訊息更糟。
+  let nxt = items.findIndex((x, i) => i > curIdx && x.state === 'pending');
+  if (nxt < 0) nxt = items.findIndex(x => x.state === 'pending');
+  focusItem(nxt >= 0 ? nxt : curIdx);
   checkStale();          // 標註一改，既有製程說明就可能過期
 }
 

@@ -436,6 +436,29 @@ PID_DIR = UPLOADS_DIR / "pid"
 PID_DIR.mkdir(parents=True, exist_ok=True)
 
 
+@app.delete("/api/pid/file/{filename}")
+def pid_file_delete(filename: str) -> dict:
+    """刪掉一張圖面：PDF＋底圖／OCR 快取。
+
+    審核紀錄、資產模型、評註**刻意保留**——那是人力審出來的成果，
+    同檔名重新上傳就接得回既有進度（與同檔名沿用機制同一條邏輯）。
+    要連成果一併清除是另一個決定，不做靜默連坐。
+    """
+    from .pid_vlm import VLM_DIR, _safe_pdf, _slug
+
+    pdf = _safe_pdf(filename)          # 也擋路徑穿越
+    slug = _slug(Path(filename).stem)
+    pdf.unlink()
+    n = 1
+    for p in VLM_DIR.glob(f"{slug}.*"):
+        try:
+            p.unlink()
+            n += 1
+        except OSError:
+            pass
+    return {"ok": True, "removed": n}
+
+
 @app.post("/api/pid/upload")
 async def pid_upload(file: "UploadFile" = FastAPIFile(...)) -> dict:
     name = Path(file.filename or "upload.pdf").name  # 去除路徑成分

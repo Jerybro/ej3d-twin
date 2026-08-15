@@ -43,10 +43,15 @@
       cursor: pointer; transition: border-color .15s, color .15s; }
     .drop:hover, .drop.over { border-color: var(--accent); color: var(--accent);
       background: var(--accent-deep); }
-    .file-item { padding: 7px 10px; border-radius: 7px; cursor: pointer;
+    .file-item { padding: 7px 22px 7px 10px; border-radius: 7px; cursor: pointer;
       margin-bottom: 4px; background: var(--panel2); border: 1px solid var(--bdr);
-      font-size: 12px; word-break: break-all; }
+      font-size: 12px; word-break: break-all; position: relative; }
     .file-item:hover, .file-item.active { border-color: var(--accent); color: var(--accent); }
+    .file-item .fx { position: absolute; top: 3px; right: 5px; width: 16px; height: 16px;
+      line-height: 15px; text-align: center; border-radius: 5px; color: var(--dim);
+      font-size: 13px; visibility: hidden; }
+    .file-item:hover .fx { visibility: visible; }
+    .file-item .fx:hover { background: rgba(217,63,63,0.12); color: var(--lo); }
     .mini-btn { padding: 5px 10px; border-radius: 6px; font-size: 11.5px; cursor: pointer;
       background: var(--panel2); border: 1px solid var(--bdr); color: var(--text);
       font-family: inherit; display: inline-block; text-decoration: none; }
@@ -92,9 +97,15 @@
     #pane-a { position: relative; overflow: hidden; }
     #sheet, #rebuild-img { display: block; user-select: none; -webkit-user-drag: none; }
     #overlay { position: absolute; inset: 0; }
-    /* 並排：兩欄同一個捲動與縮放，天生對齊 */
-    #canvas-wrap.side { display: flex; align-items: flex-start; gap: 10px; }
-    #canvas-wrap.side #pane-b { border-left: 1px dashed var(--bdr); padding-left: 10px; }
+    /* 並排：兩欄同一個捲動與縮放，天生對齊。
+       class 叫 sbs 不叫 side——右側欄的類別就叫 .side（直排＋寬度 clamp），
+       掛同名等於把右欄的版面規則整組套到畫布上，並排會變成上下疊。 */
+    #canvas-wrap.sbs { display: flex; flex-direction: row; align-items: flex-start;
+      gap: 10px; }
+    /* flex:0 0 auto 不可省：pane-a 有 overflow:hidden（聚光燈裁切），
+       它的 flex 最小寬度因此歸零，在 flex row 裡會被壓成 2px 細條 */
+    #canvas-wrap.sbs #pane-a, #canvas-wrap.sbs #pane-b { flex: 0 0 auto; }
+    #canvas-wrap.sbs #pane-b { border-left: 1px dashed var(--bdr); padding-left: 10px; }
     /* 疊圖：重建層蓋在原圖上，透明度可調 */
     #canvas-wrap.ov #pane-b { position: absolute; inset: 0; pointer-events: none; }
     #canvas-wrap.ov #rebuild-img { opacity: 0.8; }
@@ -604,6 +615,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260815d"></script>
+  <script src="/static/js/pid-label.js?v=20260815f"></script>
 </body>
 </html>

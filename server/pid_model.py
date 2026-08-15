@@ -1305,9 +1305,10 @@ def _svg_blind(m: dict, flow: dict | None = None, notes: list | None = None) -> 
     p.append(f'<g><rect x="{W - 286}" y="10" width="276" height="{bh}" rx="6" '
              'fill="rgba(255,255,255,0.92)" stroke="#DBDDE0"/>')
     for i, (t, bold) in enumerate(rows):
+        fw = ' font-weight="700"' if bold else ''
         p.append(f'<text x="{W - 274}" y="{29 + i * 15}" font-size="11" '
                  f'fill="{"#061027" if bold else "#5C6773"}"'
-                 f'{" font-weight=\"700\"" if bold else ""}>{_x(t)}</text>')
+                 f'{fw}>{_x(t)}</text>')
     p.append('</g>')
 
     p.append("</svg>")

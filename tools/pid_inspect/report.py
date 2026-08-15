@@ -15,7 +15,10 @@ body{font:13px/1.6 Inter,"Noto Sans TC","Microsoft JhengHei",sans-serif;
  background:#F6F7FA;color:#061027;display:flex;height:100vh;overflow:hidden}
 #stage{flex:1;overflow:auto;background:#E9EDF2;position:relative}
 #wrap{position:relative;display:inline-block}
-#wrap img{display:block}
+#wrap img{display:block;width:100%}
+.zm{position:sticky;top:0;left:0;z-index:5;background:rgba(255,255,255,.94);
+ border-bottom:1px solid #DBDDE0;padding:6px 10px;display:flex;gap:6px;align-items:center}
+.zm b{font-weight:600;color:#5C6773;font-size:11.5px;margin-right:4px}
 .mk{position:absolute;border:2px solid #D93F3F;border-radius:2px;pointer-events:none;
  min-width:10px;min-height:10px}
 .mk.on{border-color:#046AFB;box-shadow:0 0 0 3px rgba(4,106,251,.25);
@@ -81,19 +84,50 @@ function dump(){
  const b=new Blob([JSON.stringify(out,null,1)],{type:'application/json'});
  const a=document.createElement('a'); a.href=URL.createObjectURL(b);
  a.download=FILE; a.click();}
+// 縮放：3572px 寬的圖，貼齊寬度看不清、原尺寸又要一直捲。
+// 寬度用注入的 IMGW 算，不讀 naturalWidth——不依賴圖片載入狀態。
+let z=1;
+function zoom(v){z=(v>0.02?v:1); $('#wrap').style.width=(IMGW*z)+'px';
+ document.querySelectorAll('.zm button').forEach(b=>
+  b.classList.toggle('p', Math.abs(+b.dataset.z-z)<1e-6));
+ const m=$(`.mk[data-i="${cur}"]`); if(m)m.scrollIntoView({block:'center',inline:'center'});}
+// 量到 0 就等下一幀再量：腳本在版面算完之前跑，clientWidth 會是 0，
+// 直接拿去除就把圖縮成零寬——元素都在、就是看不見（跟並排那次同一類）。
+function fit(){const w=$('#stage').clientWidth;
+ if(!w){requestAnimationFrame(fit);return;} zoom(w/IMGW);}
+addEventListener('resize',()=>{if(Math.abs(z-$('#stage').clientWidth/IMGW)<0.02)fit();});
+
 // 立刻畫（不等圖）：百分比定位不需要圖片尺寸，圖載不到也還能判讀清單
-draw();list();sel(0);
+draw();list();sel(0);fit();
 $('#im').addEventListener('error',()=>{
  document.getElementById('warn').textContent='底圖載入失敗，標記位置仍正確（相對比例）';});
 """
 
 
-def build_html(out_path: Path, title: str, img_rel: str, items: list,
-               subtitle: str = "") -> Path:
+def _data_uri(img: Path) -> str:
+    """底圖直接內嵌。相對路徑在「用什麼方式打開這個檔」上太脆弱——
+    雙擊、預覽窗、丟給別人看，三種情境的 base URL 都不一樣，圖載不到
+    就等於整張表廢掉。檔案 0.5～0.9MB，內嵌是划算的。"""
+    import base64
+
+    return ("data:image/jpeg;base64,"
+            + base64.b64encode(img.read_bytes()).decode("ascii"))
+
+
+def build_html(out_path: Path, title: str, img_path: Path, items: list,
+               img_w: float, subtitle: str = "") -> Path:
     """items: [{box:[x0,y0,x1,y1] 正規化, title, detail, ...}]"""
+    src = _data_uri(img_path) if img_path.exists() else ""
     html = f"""<!doctype html><meta charset="utf-8"><title>{title}</title>
 <style>{_CSS}</style>
-<div id="stage"><div id="wrap"><img id="im" src="{img_rel}"></div></div>
+<div id="stage">
+ <div class="zm"><b>縮放</b>
+  <button data-z="0" onclick="fit()">貼齊寬度</button>
+  <button data-z="0.5" onclick="zoom(0.5)">50%</button>
+  <button data-z="1" onclick="zoom(1)">100%</button>
+  <button data-z="2" onclick="zoom(2)">200%</button>
+ </div>
+ <div id="wrap"><img id="im" src="{src}"></div></div>
 <aside>
  <header><h1>{title}</h1><div class="sub">{subtitle}</div>
   <div class="sub" id="warn" style="color:#D93F3F"></div></header>
@@ -108,6 +142,7 @@ def build_html(out_path: Path, title: str, img_rel: str, items: list,
 <script>
 const DATA={json.dumps(items, ensure_ascii=False)};
 const FILE={json.dumps(out_path.stem + '.verdict.json')};
+const IMGW={float(img_w):.0f};
 {_JS}
 </script>"""
     out_path.write_text(html, encoding="utf-8")

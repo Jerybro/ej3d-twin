@@ -58,9 +58,10 @@ def run_one(pdf: str, rebuild: bool = False) -> dict:
         "title": f"case{d['case']}　{d['sym_kind']} {d['sym_tag']}".strip(),
         "detail": d["why"], "seg": d["seg"],
     } for d in l_list]
+    base_jpg = common.VLM_DIR / f"{slug}.jpg"
     report.build_html(
         common.OUT_DIR / f"{slug}.lines.html", f"①線段交點檢查｜{Path(pdf).stem[:28]}",
-        f"../../uploads/pid/_vlm/{slug}.jpg", l_items,
+        base_jpg, l_items, W,
         f"{len(l_items)} 條可疑　鍵盤 1=真錯 2=誤報 ↑↓ 換條")
 
     # ---- ② 文字碎裂 ----
@@ -77,7 +78,7 @@ def run_one(pdf: str, rebuild: bool = False) -> dict:
     } for d in t_list]
     report.build_html(
         common.OUT_DIR / f"{slug}.text.html", f"②文字碎裂檢查｜{Path(pdf).stem[:28]}",
-        f"../../uploads/pid/_vlm/{slug}.jpg", t_items,
+        base_jpg, t_items, W,
         f"{len(t_items)} 對可疑　鍵盤 1=真錯 2=誤報 ↑↓ 換條")
 
     return {

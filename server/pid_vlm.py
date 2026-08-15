@@ -1131,7 +1131,71 @@ def annot_add(filename: str, item: Annot, request: Request) -> dict:
                            "tag": rec.get("tag", ""), "source": rec.get("source", ""),
                            "by": rec.get("verified_by", "")})
         _save_annots(filename, d, dom, f"{action}:{rec.get('tag', '')}")
+    _sync_model(filename, dom, rec.get("kind", ""), rec.get("tag", ""), rec["bbox"])
     return {"ok": True, "id": rid, "count": len(d["items"])}
+
+
+def _sync_model(filename: str, domain: str, kind: str, tag: str,
+                bbox: list | None) -> None:
+    """把這一筆的框同步進資產模型——盡力而為，失敗不影響入庫。
+
+    台帳是真相，模型是編譯產物；但編譯一次要 121 秒，審一台等兩分鐘沒人用。
+    這裡做增量套用，比對視圖就能即時反映（模型還沒建過就靜默略過）。
+    """
+    try:
+        from .pid_model import patch_model_bbox
+
+        patch_model_bbox(filename, domain, kind, tag, bbox)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+class ReboxReq(BaseModel):
+    bbox: list
+
+
+@router.patch("/annot/{filename}/{item_id}/bbox")
+def annot_rebox(filename: str, item_id: str, req: ReboxReq,
+                request: Request) -> dict:
+    """L1 重框：只改框、不動身分。
+
+    為什麼要獨立端點而不重用 annot_add：後者的 upsert 靠「同位號且位置相近
+    （<0.02）」認定是同一元件的重審，而重框的本質就是把框移走——移超過那個
+    距離就會被當成另一個元件多長一列，正好把「修正」變成「重複」。
+
+    舊框寫進稽核：框畫錯過、後來改到哪，是要能追的。
+    """
+    from datetime import datetime, timezone
+
+    from .auth import current_actor, current_domain
+
+    _safe_pdf(filename)
+    b = [float(v) for v in (req.bbox or [])]
+    if len(b) != 4 or b[2] <= b[0] or b[3] <= b[1]:
+        raise HTTPException(422, "框的座標不合法（需要 x0<x1、y0<y1 的四個值）")
+    dom = current_domain(request)
+    who = current_actor(request)
+    with ANNOT_LOCK:
+        d = _load_annots(filename, dom)
+        it = next((x for x in d["items"] if x.get("id") == item_id), None)
+        if it is None:
+            raise HTTPException(404, "找不到這一筆標註（可能已被刪除）")
+        old = list(it.get("bbox") or [])
+        now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+        it["bbox"] = b
+        it["updated_at"] = now
+        it["verified_by"] = who or it.get("verified_by", "")
+        it.setdefault("evidence", []).append({
+            "stage": "人工重框", "ok": True, "score": 1.0,
+            "detail": f"由 {who or '工程師'} 調整框選範圍"
+                      f"（原 {[round(v, 4) for v in old]}）"})
+        d["audit"].append({"at": now, "action": "rebox", "id": item_id,
+                           "tag": it.get("tag", ""), "by": who,
+                           "from": [round(v, 4) for v in old],
+                           "to": [round(v, 4) for v in b]})
+        _save_annots(filename, d, dom, f"rebox:{it.get('tag', '')}")
+    _sync_model(filename, dom, it.get("kind", ""), it.get("tag", ""), b)
+    return {"ok": True, "id": item_id, "bbox": b}
 
 
 def _flag_text_zone_valves(items: list, hits: list, W: float, H: float) -> None:

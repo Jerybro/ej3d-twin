@@ -1315,6 +1315,64 @@ def _svg_blind(m: dict, flow: dict | None = None, notes: list | None = None) -> 
     return "".join(p)
 
 
+def patch_model_bbox(filename: str, domain: str, kind: str, tag: str,
+                     bbox: list | None, *, confirmed: bool = True) -> bool:
+    """把單一元件的框直接寫進資產模型 JSON，不重建整份模型。
+
+    完整重建實測要 **121 秒**（OCR、向量解析、定位器全跑一遍）。審一台設備
+    就等兩分鐘才看得到結果，那個迴路沒有人會用——而重建圖是即時從模型 JSON
+    產生的，所以只要把那一格改掉，比對視圖立刻就對。
+
+    這不是把模型與台帳搞成兩套真相：模型本來就是台帳的編譯產物，這裡做的
+    是「增量套用同一筆變更」，之後任何一次完整重建都會產出相同結果。
+    """
+    # 寫入一律落在**自己網域**的檔案。_model_path 在本網域尚未建模時會回傳
+    # 共用基線的路徑（那是給「讀」用的），直接拿來寫等於把 A 公司的審核結果
+    # 寫進 B 公司也在讀的那份基線——第一次寫入時先把基線複製成自己的一份。
+    from .pid_vlm import _slug
+
+    src = _model_path(filename, domain)
+    if not src.exists():
+        return False
+    if domain:
+        own = (MODEL_DIR / re.sub(r"[^a-z0-9.-]+", "-", domain.lower())
+               / f"{_slug(Path(filename).stem)}.json")
+        if own != src:
+            own.parent.mkdir(parents=True, exist_ok=True)
+            own.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        p = own
+    else:
+        p = src
+    try:
+        m = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+
+    bucket = {"equipment": "equipment", "instrument": "instruments",
+              "valve": "valves"}.get(kind, "equipment")
+    rows = m.get(bucket) or []
+    key = "id" if bucket == "valves" else "tag"
+    hit = next((r for r in rows if str(r.get(key, "")) == str(tag)), None)
+    if hit is None:
+        if not tag or bbox is None:
+            return False
+        hit = {key: tag, "type": "", "name": "", "note": "", "verified_by": ""}
+        rows.append(hit)
+        m[bucket] = rows
+    hit["bbox"] = list(bbox) if bbox else None
+    if bbox and confirmed:
+        hit.pop("candidate_bbox", None)
+        hit["on_drawing"] = True
+        src = str(hit.get("source", ""))
+        if "審核確認" not in src:
+            hit["source"] = ("審核確認＋清冊" if "清冊" in src else "審核確認")
+    if bucket == "equipment":
+        st = m.setdefault("stats", {})
+        st["equipment_on_drawing"] = sum(1 for e in m["equipment"] if e.get("bbox"))
+    p.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
+    return True
+
+
 # ---------------------------------------------------------------- endpoints
 @router.post("/build/{filename}")
 def model_build(filename: str, request: Request) -> dict:

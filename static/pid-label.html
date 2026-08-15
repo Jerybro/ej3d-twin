@@ -294,6 +294,21 @@
     .fl-e.suspect { border-left-color: var(--lo); background: rgba(217,63,63,0.06); }
     .fl-e div { color: var(--dim); font-size: 10.5px; }
 
+    /* ------------------------------------------------------ 批次確認候選 */
+    /* 一次看得到十幾台、當下那台醒目——批次的重點是「掃」而不是「讀」，
+       所以列高壓到最小，規格靠右對齊讓眼睛可以直向掃描。 */
+    .bm-list { max-height: 46vh; overflow-y: auto; margin: 9px 0;
+      border: 1px solid var(--bdr); border-radius: 8px; }
+    .bm { display: flex; align-items: baseline; gap: 7px; padding: 5px 9px;
+      font-size: 12px; cursor: pointer; border-bottom: 1px solid var(--bdr); }
+    .bm:last-child { border-bottom: 0; }
+    .bm:hover { background: var(--panel2); }
+    .bm.cur { background: var(--accent-deep); box-shadow: inset 3px 0 0 var(--accent); }
+    .bm b { min-width: 58px; font-variant-numeric: tabular-nums; }
+    .bm span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; }
+    .bm i { color: var(--dim); font-size: 11px; font-style: normal; }
+
     /* -------------------------------------------------------- 歷史建檔 */
     .hv { display: flex; align-items: center; gap: 6px; font-size: 11px;
       padding: 4px 7px; border: 1px solid var(--bdr); border-radius: 6px;
@@ -545,6 +560,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260812j"></script>
+  <script src="/static/js/pid-label.js?v=20260815a"></script>
 </body>
 </html>

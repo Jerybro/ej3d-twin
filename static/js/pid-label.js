@@ -654,6 +654,17 @@ function render() {
        已確認 <b>${items.filter(i => i.state === 'accepted').length}</b> 項`
     : '尚未辨識';
   $('li-count').textContent = total ? `（${total}）` : '';
+  // 候選多的時候，逐項精審不是最省時的路——直接把批次入口擺在進度旁邊
+  const nCand = items.filter(i => i.state === 'pending' && i.kind === 'equipment').length;
+  if (nCand >= 5 && !batchMode) {
+    $('prog-txt').innerHTML += ` <button class="mini-btn" id="bm-on"
+      style="margin-left:6px">批次確認 ${nCand} 台設備候選 →</button>`;
+    $('bm-on').onclick = () => {
+      batchMode = true;
+      const f = items.findIndex(i => i.state === 'pending' && i.kind === 'equipment');
+      if (f >= 0) focusItem(f); else render();
+    };
+  }
   renderReviewCard();
   renderList();
   drawBoxes();
@@ -665,6 +676,141 @@ function render() {
       ? `再確認 ${3 - acc} 項就會自動產生說明`
       : '準備產生說明…';
   }
+}
+
+// ------------------------------------------------------------ L1 重框
+// 「標得不準」的修法：不是叫人重新辨識，而是讓他直接把框拉對。
+// 拖曳機制沿用既有的框選（bindSelection），差別只在收尾時綁到哪一項。
+let reboxIdx = -1;
+
+function startRebox(i) {
+  const it = items[i];
+  if (!it) return;
+  reboxIdx = i;
+  showRing(it.bbox, (it.tag || '此項') + '｜請在圖上拖出正確範圍');
+  $('rebox-hint').style.display = '';
+  $('rebox-hint').innerHTML =
+    `<b>重框中：${esc(it.tag || '（無位號）')}</b>　在圖上拖出正確範圍；按 Esc 取消`;
+}
+
+function cancelRebox() {
+  reboxIdx = -1;
+  const h = $('rebox-hint');
+  if (h) h.style.display = 'none';
+  if (selEl) { selEl.remove(); selEl = null; }
+}
+
+async function applyRebox(box) {
+  const i = reboxIdx, it = items[i];
+  cancelRebox();
+  if (!it) return;
+  const old = it.bbox;
+  it.bbox = box;
+  // 已入庫的要打 API 改（annot_add 的 upsert 靠「位置相近」認定同一元件，
+  // 框一移遠就會被當成新元件多長一列——正好把修正變成重複）。
+  // 還沒入庫的候選只改本地，等按「接受」時一起帶上正確的框。
+  if (it.state === 'accepted') {
+    try {
+      let r;
+      if (it.id) {
+        r = await fetch(
+          `/api/pid/vlm/annot/${encodeURIComponent(curFile)}/${encodeURIComponent(it.id)}/bbox`,
+          { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bbox: box }) });
+      } else {
+        // 沒有 id（極少數情況：入庫回應遺失）→ 用整筆重送，upsert 會接住
+        r = await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...it, bbox: box }) });
+        const j = await r.clone().json().catch(() => ({}));
+        if (j && j.id) it.id = j.id;
+      }
+      if (!r.ok) throw new Error(await r.text());
+      refreshRebuild();
+    } catch (err) {
+      it.bbox = old;
+      alert('重框失敗：' + err.message);
+    }
+  }
+  render();
+  showRing(it.bbox, (it.tag || '') + ' 已重框');
+}
+
+// 資產模型那側即時反映——後端在入庫/重框時已把該格 patch 進模型 JSON，
+// 重建圖是即時從 JSON 產的，所以換個 cache-buster 重載就會是新的。
+function refreshRebuild() {
+  const img = $('rebuild-img'), pb = $('pane-b');
+  if (!img || !curFile || !pb || pb.style.display === 'none') return;
+  // 網址形態要跟 setCompare 一致（含 rbMode），否則會抓成另一種模式的圖
+  img.src = rbMode === 'annot'
+    ? `/api/pid/model/${encodeURIComponent(curFile)}/annotated.jpg?t=${Date.now()}`
+    : `/api/pid/model/${encodeURIComponent(curFile)}/rebuild.svg` +
+      `?mode=${rbMode}&t=${Date.now()}`;
+}
+
+// ------------------------------------------------------ 批次確認候選
+// 為什麼另做一個面板：審核卡是「逐項精審」設計的，每開一項要抓局部圖、
+// 還要叫 LLM 判角色——85 台候選走那條路要等到天亮。但候選有個關鍵特性：
+// 它們**已經帶著清冊的位號、名稱、規格**，人要判的只有一件事「這個框是不是
+// 落在對的方塊上」。那是一眼的事，所以只留清單、鍵盤流與圖上高亮。
+let batchMode = false;
+
+function batchItems() {
+  return items.map((it, i) => ({ it, i }))
+    .filter(x => x.it.state === 'pending' && x.it.kind === 'equipment');
+}
+
+function renderBatchCard(host) {
+  const rows = batchItems();
+  if (!rows.length) {
+    host.innerHTML = `<div class="rev"><div class="rev-sub">
+      沒有待審的設備候選了。<button class="mini-btn" id="bm-off">回一般審核</button>
+      </div></div>`;
+    $('bm-off').onclick = () => { batchMode = false; render(); };
+    return;
+  }
+  const cur = rows.find(x => x.i === curIdx) || rows[0];
+  if (cur.i !== curIdx) { curIdx = cur.i; showRing(cur.it.bbox, cur.it.tag || ''); }
+  host.innerHTML = `
+    <div class="rev">
+      <div class="rev-top">
+        <span class="rev-tag">批次確認候選</span>
+        <span class="rev-sub">剩 <b>${rows.length}</b> 台</span>
+      </div>
+      <div class="rev-sub">每台只判一件事：<b>框有沒有落在對的方塊上</b>。
+        位號、名稱、規格已由清冊帶入，不必逐項確認。</div>
+      <div class="rev-sub" id="rebox-hint" style="display:none;color:var(--accent)"></div>
+      <div class="bm-list" id="bm-list">${rows.map(x => {
+        const r = registryRows.find(z => z.item === x.it.registry_item) || {};
+        return `<div class="bm ${x.i === curIdx ? 'cur' : ''}" data-i="${x.i}">
+          <b>${esc(x.it.tag || '（無位號）')}</b>
+          <span>${esc(r.name || x.it.symbol || '')}</span>
+          <i>${esc(r.spec || '')}</i>
+        </div>`; }).join('')}</div>
+      <div class="rev-act">
+        <button class="mini-btn primary" id="bm-acc">框對，寫入台帳 <span style="opacity:.75">(Enter)</span></button>
+        <button class="mini-btn" id="bm-re">框不對，重畫 <span style="opacity:.6">(E)</span></button>
+        <button class="mini-btn" id="bm-rej">不是這台 <span style="opacity:.6">(N)</span></button>
+      </div>
+      <div class="rev-act" style="margin-top:6px">
+        <button class="mini-btn" id="bm-all">框都對，全部寫入（${rows.length} 台）</button>
+        <button class="mini-btn" id="bm-off2">回一般審核</button>
+      </div>
+      <div class="act-note">每一筆都會記上你的簽名與時間，可在「歷史」回到上一動。</div>
+    </div>`;
+  host.querySelectorAll('.bm').forEach(el =>
+    el.addEventListener('click', () => focusItem(+el.dataset.i)));
+  $('bm-acc').onclick = () => decide('accepted');
+  $('bm-rej').onclick = () => decide('rejected');
+  $('bm-re').onclick = () => startRebox(curIdx);
+  $('bm-off2').onclick = () => { batchMode = false; render(); };
+  $('bm-all').onclick = async () => {
+    if (!confirm(`把 ${rows.length} 台候選全部寫入台帳？\n`
+      + '（框不對的可以事後再重框，或用「回到上一動」整批退回）')) return;
+    for (const x of rows) { curIdx = x.i; await decide('accepted'); }
+    refreshRebuild();
+    render();
+  };
 }
 
 // 提問句：把「現在在問你什麼」講成一句人話。
@@ -683,6 +829,7 @@ function askText(it) {
 
 function renderReviewCard() {
   const host = $('rev-host');
+  if (batchMode) { renderBatchCard(host); return; }
   const it = items[curIdx];
   // 全部審完 → 給明確的完成畫面與後續動作，不要讓人點完最後一項沒反應
   if (items.length && allReviewed()) {
@@ -748,9 +895,11 @@ function renderReviewCard() {
       <input class="rev-note" id="rev-note" placeholder="備註（選填）：寫下判斷理由或現場補充"
              value="${esc(it.user_note || '')}" />
       <div class="ask">${askText(it)}</div>
+      <div class="rev-sub" id="rebox-hint" style="display:none;color:var(--accent)"></div>
       <div class="rev-act">
         <button class="mini-btn primary" id="acc-b">是，寫入台帳 <span style="opacity:.75">(Y)</span></button>
         <button class="mini-btn" id="rej-b">不是，判讀有誤 <span style="opacity:.6">(N)</span></button>
+        <button class="mini-btn" id="rebox-b">框不準，重畫 <span style="opacity:.6">(E)</span></button>
       </div>
       <button class="mini-btn" id="note-b" style="width:100%;margin-top:6px">
         為這一項加現場評註</button>
@@ -761,6 +910,7 @@ function renderReviewCard() {
   $('next-b').onclick = () => focusItem(Math.min(items.length - 1, curIdx + 1));
   $('acc-b').onclick = () => decide('accepted');
   $('rej-b').onclick = () => decide('rejected');
+  $('rebox-b').onclick = () => startRebox(curIdx);
   $('note-b').onclick = () => openNoteFor(it);
   bindRegPicker(it);
 }
@@ -893,10 +1043,14 @@ async function decide(state) {
   it.state = state;
   try {
     if (state === 'accepted') {
-      await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {
+      // 回傳的 id 一定要收下來：沒有 id 就無法對這一筆做「只改框」的更新，
+      // 重框會退化成本地修改（看起來成功、其實沒進台帳）。
+      const r = await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...it, source: it.source === '定位器' ? 'locate' : 'scan' }),
       });
+      const j = await r.json().catch(() => ({}));
+      if (j && j.id) it.id = j.id;
     } else {
       await fetch(`/api/pid/vlm/reject/${encodeURIComponent(curFile)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -904,6 +1058,7 @@ async function decide(state) {
       });
     }
   } catch { /* 留痕失敗不擋流程 */ }
+  refreshRebuild();      // 後端已把這格 patch 進模型，比對圖立刻跟上（免 121 秒重建）
   const nxt = items.findIndex((x, i) => i > curIdx && x.state === 'pending');
   focusItem(nxt >= 0 ? nxt : Math.min(items.length - 1, curIdx + 1));
   checkStale();          // 標註一改，既有製程說明就可能過期
@@ -1487,6 +1642,11 @@ async function loadModel(silent) {
     renderModel();
     $('as-state').textContent = '上次建模：' +
       (assetModel.built_at || '').replace('T', ' ').slice(0, 16);
+    // 已經建過模＝定位候選早就算好了，開圖就該看得到。
+    // 原本只在「重新辨識整張圖面」之後才補進佇列，等於逼人為了看候選去跑
+    // 一次全圖 VLM 掃描（慢又花錢），而那 85 台候選其實已經躺在模型裡。
+    // 只在有模型時才叫——沒有模型的話這支 API 會觸發建模，實測要 121 秒。
+    loadLocateCandidates();
   } catch (e) {
     assetModel = null;
     $('as-body').innerHTML = '';
@@ -1671,6 +1831,8 @@ function bindSelection() {
     const y0 = Math.min(sy, cy) / r.height, y1 = Math.max(sy, cy) / r.height;
     if ((x1 - x0) < 0.004 || (y1 - y0) < 0.004) { if (selEl) { selEl.remove(); selEl = null; } return; }
     const box = [x0, y0, x1, y1];
+    // 重框中的話，這一拖是要修某一項的框，不是要新增元件或選作用區域
+    if (reboxIdx >= 0) { applyRebox(box); return; }
     setSel(box, `框選 ${Math.round((x1 - x0) * 100)}%×${Math.round((y1 - y0) * 100)}%`);
     openManual(box);          // 框選即可手動補標，也同時成為問答的作用區域
   });
@@ -1719,7 +1881,9 @@ $('engine').addEventListener('change', () => location.reload());
 document.addEventListener('keydown', e => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName || '')) || !items.length) return;
   const k = e.key.toLowerCase();
-  if (k === 'y' || e.key === 'Enter') { e.preventDefault(); decide('accepted'); }
+  if (e.key === 'Escape' && reboxIdx >= 0) { e.preventDefault(); cancelRebox(); return; }
+  if (k === 'e') { e.preventDefault(); startRebox(curIdx); }
+  else if (k === 'y' || e.key === 'Enter') { e.preventDefault(); decide('accepted'); }
   else if (k === 'n') { e.preventDefault(); decide('rejected'); }
   else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
     e.preventDefault(); focusItem(Math.min(items.length - 1, curIdx + 1));

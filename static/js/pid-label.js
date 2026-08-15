@@ -252,7 +252,12 @@ async function openDoc(name) {
   stage.innerHTML = `<div id="canvas-wrap">
       <div id="pane-a"><img id="sheet" src="${esc(baseMeta.url)}" draggable="false" />
         <div id="overlay"></div></div>
-      <div id="pane-b"><img id="rebuild-img" draggable="false" alt="重建圖" /></div>
+      <div id="pane-b"><div id="pane-b-in">
+        <img id="rebuild-img" draggable="false" alt="重建圖" />
+        <div id="overlay-b"></div>
+        <svg id="edge-hit" preserveAspectRatio="none"></svg>
+        <div id="edge-menu" style="display:none"></div>
+      </div></div>
     </div>`;
   wrap = $('canvas-wrap'); sheet = $('sheet'); overlay = $('overlay');
   setCompare('off');
@@ -275,6 +280,7 @@ async function openDoc(name) {
   $('cmp-grp').style.display = '';
   $('flow-btn').style.display = '';
   $('rebuild-img').dataset.for = '';        // 換圖要重抓重建圖
+  flowEdges = null;                          // 流向命中線也是圖的一部分
 }
 
 // 開掃之前先告訴使用者這張圖是什麼體系、將套用哪份規範、信心多少。
@@ -334,6 +340,11 @@ function setCompare(mode) {
       : `/api/pid/model/${encodeURIComponent(curFile)}/rebuild.svg` +
         `?mode=${rbMode}&t=${Date.now()}`;
   }
+  // 流向邊命中線：模型側一開就載（點箭頭改方向要用）
+  if (mode !== 'off' && curFile) {
+    if (flowEdges && flowEdges._for === curFile) drawEdgeHits();
+    else { flowEdges = null; loadFlowEdges().then(() => { if (flowEdges) flowEdges._for = curFile; }); }
+  }
   applyZoom();
 }
 
@@ -380,6 +391,84 @@ function bindRebuildPan() {
     addEventListener('pointerup', up);
   });
 }
+
+// ---------------------------------------------------- 流向邊的人工修正
+// 資產模型上的箭頭是拓撲結論，畫在 SVG 圖片裡點不到——這裡在模型側疊一層
+// 透明命中線（幾何與後端盲重建同一套肘形），點一條邊跳出三個動作：
+// 確認方向／調轉方向／這條連線不存在。結論寫進覆寫層，重建不會洗掉。
+let flowEdges = null;
+
+async function loadFlowEdges() {
+  const svg = $('edge-hit');
+  if (!svg || !curFile) return;
+  try {
+    const d = await getJSON(`/api/pid/model/flow/${encodeURIComponent(curFile)}`);
+    if (!d.ok) return;
+    flowEdges = d;
+    drawEdgeHits();
+  } catch { /* 尚未建模，靜默 */ }
+}
+
+function drawEdgeHits() {
+  const svg = $('edge-hit');
+  if (!svg || !flowEdges) return;
+  const aspect = (assetModel && assetModel.geometry && assetModel.geometry.aspect) || 0.7;
+  const W = 1600, H = Math.round(W * aspect);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = '';
+  const pos = {};
+  for (const n of flowEdges.nodes || []) if (n.bbox) pos[n.tag] = n.bbox;
+  for (const e of flowEdges.edges || []) {
+    if (e.dir_by === 'item_no' && !e.suspect) continue;   // 盲重建沒畫的不給點
+    const a = pos[e.from], b = pos[e.to];
+    if (!a || !b) continue;
+    const x1 = (a[0] + a[2]) / 2 * W, y1 = (a[1] + a[3]) / 2 * H;
+    const x2 = (b[0] + b[2]) / 2 * W, y2 = (b[1] + b[3]) / 2 * H;
+    // 與後端 _svg_blind 同一套肘形（中心到中心的粗略版就夠命中用）
+    const d2 = Math.abs(x2 - x1) >= Math.abs(y2 - y1)
+      ? `M${x1},${y1}H${x2}V${y2}` : `M${x1},${y1}V${y2}H${x2}`;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d2);
+    path.setAttribute('class', 'eh');
+    path.addEventListener('click', ev => {
+      ev.stopPropagation();
+      openEdgeMenu(e, ev);
+    });
+    svg.appendChild(path);
+  }
+}
+
+function openEdgeMenu(e, ev) {
+  const m = $('edge-menu'), host = $('pane-b-in');
+  if (!m || !host) return;
+  const r = host.getBoundingClientRect();
+  m.style.left = Math.min(ev.clientX - r.left + 6, r.width - 190) + 'px';
+  m.style.top = (ev.clientY - r.top + 6) + 'px';
+  m.style.display = '';
+  m.innerHTML = `
+    <div class="em-t">${esc(e.from)} → ${esc(e.to)}
+      <span>${esc({ arrow: '圖面箭頭', vlm: 'AI 判定', manual: '人工判定',
+                    item_no: '編號推測' }[e.dir_by] || e.dir_by)}</span></div>
+    <button data-act="confirm">✓ 方向正確（人工確認）</button>
+    <button data-act="reverse">⇄ 方向相反（${esc(e.to)} → ${esc(e.from)}）</button>
+    <button data-act="remove" class="em-danger">✕ 這條連線不存在</button>`;
+  m.querySelectorAll('button').forEach(btn => btn.addEventListener('click', async () => {
+    m.style.display = 'none';
+    try {
+      await getJSON(`/api/pid/model/flow/${encodeURIComponent(curFile)}/manual`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ a: e.from, b: e.to, action: btn.dataset.act }),
+      });
+      refreshRebuild();       // 模型圖重畫（調轉/移除立即反映）
+      loadFlowEdges();        // 命中線跟著更新
+    } catch (err) { alert('流向修正失敗：' + (err.message || '')); }
+  }));
+}
+
+document.addEventListener('pointerdown', e => {
+  const m = $('edge-menu');
+  if (m && m.style.display !== 'none' && !m.contains(e.target)) m.style.display = 'none';
+});
 
 // -------------------------------------------------------------------- 縮放
 function applyZoom() {
@@ -568,48 +657,42 @@ $('anchor-btn').addEventListener('click', async () => {
   }
 });
 
-// ------------------------------------- 缺口掃描（第二輪）
-// 第一輪是確定性管線（OCR＋幾何），讀得到字才找得到。第二輪把已標註項
-// 疊回原圖（＝盲重建與原圖的雙圖對比，合成同一張所以對位天生正確），
-// 讓視覺模型對照著已知格式只獵「沒被標到的」——補第一輪的天生盲區。
-// 分塊逐一送審：每塊掃完就把新項加進佇列與 known，重疊區靠這個去重。
+// ------------------------------------- 框選區域加強辨識
+// 原本是整張圖 12 分塊全掃一輪——慢、貴，而且人明明知道哪一塊沒標好。
+// 改成人指哪裡打哪裡：框選一塊區域，AI 把已標註項疊上去對照，只獵
+// 「這塊裡還沒被標到的」。同一個 gap_scan 端點，只是打一發而不是十二發。
 $('gap-scan-btn').addEventListener('click', async () => {
   if (!curFile) return;
+  if (!sel) {
+    $('cc-state').innerHTML =
+      '<b style="color:var(--accent)">先在圖上框選一塊區域</b>，再按一次此按鈕';
+    return;
+  }
   const b = $('gap-scan-btn');
   b.disabled = true;
-  const TC = 4, TR = 3, OV = 0.06;   // 與整張辨識同一套分塊
-  let found = 0, dup = 0, fail = 0;
+  b.innerHTML = '<span class="spin"></span> 加強辨識框選區域中…';
   try {
-    for (let r = 0; r < TR; r++) {
-      for (let c = 0; c < TC; c++) {
-        const i = r * TC + c + 1;
-        b.innerHTML = `<span class="spin"></span> 複查中 分塊 ${i}/${TC * TR}｜已新增 ${found} 項`;
-        const box = [Math.max(0, c / TC - OV), Math.max(0, r / TR - OV),
-                     Math.min(1, (c + 1) / TC + OV), Math.min(1, (r + 1) / TR + OV)];
-        // 已否決也算 known——否決是結論，不該被第二輪翻案重新排隊
-        const known = items.filter(x => x.bbox)
-          .map(x => ({ bbox: x.bbox, tag: x.tag || '', kind: x.kind }));
-        try {
-          const d = await getJSON('/api/pid/vlm/gap_scan', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filename: curFile, bbox: box, known, provider: engine() }),
-          });
-          dup += d.skipped_dup || 0;
-          const fresh = (d.items || []).map(x => ({ ...x, state: 'pending' }));
-          if (fresh.length) { items = items.concat(fresh); found += fresh.length; render(); }
-        } catch { fail++; }
-      }
-    }
-    $('cc-state').innerHTML = `複查完成：新增 <b style="color:var(--accent)">${found}</b> 項待審`
-      + `（與已知重複略過 ${dup}${fail ? `，${fail} 塊失敗` : ''}）`;
+    // 已否決也算 known——否決是結論，不該被翻案重新排隊
+    const known = items.filter(x => x.bbox)
+      .map(x => ({ bbox: x.bbox, tag: x.tag || '', kind: x.kind }));
+    const d = await getJSON('/api/pid/vlm/gap_scan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: curFile, bbox: sel, known, provider: engine() }),
+    });
+    const fresh = (d.items || []).map(x => ({ ...x, state: 'pending' }));
+    items = items.concat(fresh);
+    $('cc-state').innerHTML = `區域加強辨識完成：新增 <b style="color:var(--accent)">`
+      + `${fresh.length}</b> 項待審（與已知重複略過 ${d.skipped_dup || 0}）`;
     updateAnchorBtn();
-    if (found) {
-      curIdx = items.findIndex(x => x.state === 'pending');
+    if (fresh.length) {
+      curIdx = items.indexOf(fresh[0]);
       render(); focusItem(Math.max(curIdx, 0));
-    }
+    } else render();
+  } catch (e2) {
+    $('cc-state').textContent = '加強辨識失敗：' + (e2.message || '');
   } finally {
     b.disabled = false;
-    b.textContent = '找漏掉的元件（AI 複查）';
+    b.textContent = '加強辨識框選區域';
   }
 });
 
@@ -1168,33 +1251,43 @@ function drawBoxes() {
       + `width:${(b[2] - b[0]) * 100}%;height:${(b[3] - b[1]) * 100}%`;
     overlay.appendChild(d);
   }
+  const ovB = $('overlay-b');
+  if (ovB) ovB.querySelectorAll('.an-box').forEach(b => b.remove());
   for (const [i, a] of items.entries()) {
     if (a.state === 'rejected' || !Array.isArray(a.bbox)) continue;
-    const [x0, y0, x1, y1] = a.bbox;
-    const d = document.createElement('div');
-    d.className = 'an-box ' + confClass2(a) + (a.state === 'pending' ? ' pending' : '')
-      + (a.kind === 'equipment' ? ' eq' : '') + (i === curIdx ? ' cur' : '');
-    d.title = boxTitle(a);
-    d.style.cssText = `left:${x0 * 100}%;top:${y0 * 100}%;` +
-      `width:${(x1 - x0) * 100}%;height:${(y1 - y0) * 100}%`;
-    // 點框＝選中該項；選中的框直接長出把手可拖拉（見 startBoxDrag）。
-    // stopPropagation 讓「從框上起拖」不會觸發外層的框選新增。
-    d.addEventListener('pointerdown', e => {
-      e.stopPropagation();
-      if (i !== curIdx) { e.preventDefault(); focusItem(i); return; }
-      startBoxDrag(i, e.target.classList.contains('bh')
-        ? e.target.dataset.dir : 'move', e);
-    });
-    if (i === curIdx) {
-      for (const dir of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) {
-        const h = document.createElement('i');
-        h.className = 'bh bh-' + dir;
-        h.dataset.dir = dir;
-        d.appendChild(h);
-      }
-    }
-    overlay.appendChild(d);
+    overlay.appendChild(_mkBox(a, i, false));
+    // 鏡射到資產模型側：SVG 已經把框畫在圖裡，這層只負責互動
+    // （點選、拖移、改大小）——模型側的框不能動＝使用者修不了模型。
+    if (ovB) ovB.appendChild(_mkBox(a, i, true));
   }
+}
+
+function _mkBox(a, i, mirror) {
+  const [x0, y0, x1, y1] = a.bbox;
+  const d = document.createElement('div');
+  d.className = 'an-box ' + (mirror ? 'mb ' : '') + confClass2(a)
+    + (a.state === 'pending' ? ' pending' : '')
+    + (a.kind === 'equipment' ? ' eq' : '') + (i === curIdx ? ' cur' : '');
+  d.title = boxTitle(a);
+  d.style.cssText = `left:${x0 * 100}%;top:${y0 * 100}%;` +
+    `width:${(x1 - x0) * 100}%;height:${(y1 - y0) * 100}%`;
+  // 點框＝選中該項；選中的框直接長出把手可拖拉（見 startBoxDrag）。
+  // stopPropagation 讓「從框上起拖」不會觸發外層的框選新增／平移。
+  d.addEventListener('pointerdown', e => {
+    e.stopPropagation();
+    if (i !== curIdx) { e.preventDefault(); focusItem(i); return; }
+    startBoxDrag(i, e.target.classList.contains('bh')
+      ? e.target.dataset.dir : 'move', e);
+  });
+  if (i === curIdx) {
+    for (const dir of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) {
+      const h = document.createElement('i');
+      h.className = 'bh bh-' + dir;
+      h.dataset.dir = dir;
+      d.appendChild(h);
+    }
+  }
+  return d;
 }
 
 // ---- 直接拉框：拖把手改大小、拖框身移動，放開即存 ----
@@ -1203,7 +1296,10 @@ function startBoxDrag(i, dir, e) {
   e.preventDefault();
   const it = items[i];
   if (!it) return;
-  const r = overlay.getBoundingClientRect();
+  // 座標系取「這顆框所在的那層」——原圖側是 overlay、模型側是 overlay-b，
+  // 兩層幾何相同（同一張圖的正規化座標），拖哪邊改的都是同一筆資料
+  const host = e.currentTarget.closest('#overlay, #overlay-b') || overlay;
+  const r = host.getBoundingClientRect();
   const b0 = it.bbox.slice();
   const x0 = (e.clientX - r.left) / r.width, y0 = (e.clientY - r.top) / r.height;
   const el = e.currentTarget.classList.contains('an-box')

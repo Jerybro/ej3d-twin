@@ -1479,6 +1479,12 @@ def _apply_flow_overrides(flow: dict, filename: str, domain: str) -> dict:
         o = ov.get(k)
         if not o:
             continue
+        if o.get("by") == "manual-remove":
+            # 人工判定「這條連線不存在」：整條拿掉，不是標紅留著。
+            # 可疑（suspect）是「待人確認」，remove 是人已經確認過的結論。
+            e["_drop"] = True
+            n_applied += 1
+            continue
         if o.get("by") == "vlm-suspect":
             n_suspect += 1
             e["suspect"] = True
@@ -1494,6 +1500,8 @@ def _apply_flow_overrides(flow: dict, filename: str, domain: str) -> dict:
         e["confidence"] = conf
         e["evidence"] = (f"{label}：{o.get('detail', '') or '依圖面判定方向'}"
                          f"（{o['from']}→{o['to']}）")
+
+    flow["edges"] = [e for e in flow["edges"] if not e.get("_drop")]
 
     # 方向改了，分流匯流要跟著重算——這兩個是圖論定義，不能沿用舊值
     import networkx as nx
@@ -1547,6 +1555,44 @@ class FlowVlmReq(BaseModel):
     pairs: list = []             # [[from_tag, to_tag], ...]，空＝全部弱證據邊
     provider: str = "cloud"
     limit: int = 20              # 成本閘門：一次最多問幾條
+
+
+class FlowManualReq(BaseModel):
+    a: str                       # 目前這條邊的 from
+    b: str                       # 目前這條邊的 to
+    action: str                  # confirm | reverse | remove
+
+
+@router.post("/flow/{filename}/manual")
+def model_flow_manual(filename: str, req: FlowManualReq, request: Request) -> dict:
+    """人工改一條流向邊：確認方向／調轉方向／判定連線不存在。
+
+    寫進覆寫層（與 VLM 判定同一個檔），下次重建模型不會洗掉；
+    人工優先權最高——manual 蓋 vlm、之後 VLM 再跑也不會蓋回來
+    （model_flow_vlm 只問弱證據邊，manual 邊信心 1.0 不在其列）。
+    """
+    from .pid_vlm import _safe_pdf
+
+    _safe_pdf(filename)
+    if req.action not in ("confirm", "reverse", "remove"):
+        raise HTTPException(422, "action 需為 confirm / reverse / remove")
+    p = _flow_override_path(filename, current_domain_of(request))
+    cur = {}
+    if p.exists():
+        try:
+            cur = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            cur = {}
+    k = f"{min(req.a, req.b)}|{max(req.a, req.b)}"
+    if req.action == "remove":
+        cur[k] = {"by": "manual-remove", "detail": "人工判定兩台之間無此連線"}
+    else:
+        frm, to = (req.b, req.a) if req.action == "reverse" else (req.a, req.b)
+        cur[k] = {"from": frm, "to": to, "by": "manual",
+                  "detail": "人工調轉方向" if req.action == "reverse" else "人工確認方向"}
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"ok": True, "key": k, **cur[k]}
 
 
 @router.post("/flow/{filename}/vlm")

@@ -110,6 +110,31 @@
     #canvas-wrap.ov #pane-b { position: absolute; inset: 0; pointer-events: none; }
     #canvas-wrap.ov #rebuild-img { opacity: 0.8; }
     #pane-b { display: none; }
+    /* 模型側互動層：SVG 圖裡的框點不到，這層鏡射同一批框當互動面 */
+    #pane-b-in { position: relative; display: inline-block; }
+    #overlay-b { position: absolute; inset: 0; pointer-events: none; }
+    #overlay-b .an-box { pointer-events: auto; }
+    .an-box.mb { border-color: transparent; background: transparent; }
+    .an-box.mb:hover { border-color: var(--accent); }
+    .an-box.mb.cur { border-color: var(--accent);
+      background: rgba(4,106,251,0.05); }
+    /* 流向邊命中線：透明粗線蓋在箭頭上，滑過微亮示意可點 */
+    #edge-hit { position: absolute; inset: 0; width: 100%; height: 100%;
+      pointer-events: none; }
+    #edge-hit .eh { fill: none; stroke: transparent; stroke-width: 16;
+      pointer-events: stroke; cursor: pointer; }
+    #edge-hit .eh:hover { stroke: rgba(4,106,251,0.16); }
+    #edge-menu { position: absolute; z-index: 30; background: #fff;
+      border: 1px solid var(--bdr); border-radius: 9px; padding: 6px;
+      box-shadow: 0 6px 22px rgba(6,16,39,0.14); width: 184px; }
+    #edge-menu .em-t { font-size: 11.5px; font-weight: 700; padding: 3px 6px 6px;
+      display: flex; justify-content: space-between; align-items: baseline; }
+    #edge-menu .em-t span { font-weight: 400; color: var(--dim); font-size: 10.5px; }
+    #edge-menu button { display: block; width: 100%; text-align: left;
+      font: inherit; font-size: 12px; padding: 6px 8px; border: 0;
+      background: none; border-radius: 6px; cursor: pointer; }
+    #edge-menu button:hover { background: var(--accent-deep); color: var(--accent); }
+    #edge-menu .em-danger:hover { background: rgba(217,63,63,0.10); color: var(--lo); }
 
     /* 標註框：顏色＝信心度、線型＝審核狀態。待審用虛線，已確認用實線，
        設備線較粗。有警示者一律紅色——警示的意思就是「別信那個數字」。 */
@@ -517,8 +542,8 @@
                   title="系統已在圖上偵測到這些符號的位置（氣泡/閥件/設備輪廓），但還不知道它們是什麼——這一步讓 AI 逐一判讀。全部判完＝這張圖真的掃完了"
                   style="width:100%;padding:9px;margin-bottom:6px">判讀剩餘符號</button>
           <button class="mini-btn" id="gap-scan-btn" disabled
-                  title="把已標好的項目疊回原圖給 AI 對照，只找還沒被標到的元件——補第一輪自動辨識的盲區"
-                  style="width:100%;padding:9px;margin-bottom:12px">找漏掉的元件（AI 複查）</button>
+                  title="先在圖上框選一塊區域，AI 會把已標好的項目疊上去對照，只獵這塊裡還沒被標到的元件——人指哪裡打哪裡，不用整張重掃"
+                  style="width:100%;padding:9px;margin-bottom:12px">加強辨識框選區域</button>
           <div class="prog"><i id="prog-bar"></i></div>
           <div class="prog-txt" id="prog-txt">尚未辨識</div>
           <div class="prog-txt" id="cc-state" style="margin-top:-8px"></div>
@@ -615,6 +640,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260815f"></script>
+  <script src="/static/js/pid-label.js?v=20260815g"></script>
 </body>
 </html>

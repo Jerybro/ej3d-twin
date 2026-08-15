@@ -58,17 +58,38 @@
 
     /* ------------------------------------------------------------ 畫布 */
     main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-    .toolbar { height: 46px; flex-shrink: 0; border-bottom: 1px solid var(--bdr);
+    /* 工具列：控制項多，靠三件事維持整潔——同組按鈕合成分段控制元（一顆
+       膠囊，不是一排散裝按鈕）、長檔名限寬省略、擠不下時整列換行對齊。 */
+    .toolbar { min-height: 46px; flex-shrink: 0; border-bottom: 1px solid var(--bdr);
       background: var(--panel); display: flex; align-items: center; gap: 9px;
-      padding: 0 13px; font-size: 12.5px; }
+      row-gap: 6px; flex-wrap: wrap; padding: 6px 13px; font-size: 12.5px; }
     .toolbar .sp { flex: 1; }
+    .toolbar .mini-btn { white-space: nowrap; }
+    .doc { font-weight: 600; max-width: 300px; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; }
+    .tb-lab { font-size: 11px; color: var(--dim); white-space: nowrap; }
+    .seg { display: inline-flex; align-items: stretch; border: 1px solid var(--bdr);
+      border-radius: 7px; overflow: hidden; background: var(--panel); }
+    .seg button { font: inherit; font-size: 11.5px; padding: 5px 11px; border: 0;
+      border-left: 1px solid var(--bdr); background: transparent; color: var(--dim);
+      cursor: pointer; white-space: nowrap; }
+    .seg button:first-child { border-left: 0; }
+    .seg button:hover { color: var(--accent); }
+    .seg button.on { background: var(--accent-deep); color: var(--accent);
+      font-weight: 600; }
+    .seg .seg-val { padding: 5px 4px; min-width: 44px; text-align: center;
+      color: var(--dim); font-size: 11.5px; align-self: center;
+      font-variant-numeric: tabular-nums; }
+    #cmp-grp, #cmp-mode { display: inline-flex; align-items: center; gap: 7px; }
     .lg { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px;
       color: var(--dim); margin-left: 2px; }
     .lg i { width: 11px; height: 9px; border: 1.5px solid; border-radius: 2px; display: inline-block; }
     #stage { flex: 1; overflow: auto; background: #E9EDF2; position: relative; }
     #stage.empty { display: flex; align-items: center; justify-content: center; color: var(--dim); }
     #canvas-wrap { position: relative; display: inline-block; }
-    #pane-a { position: relative; }
+    /* overflow:hidden＝把聚光燈的壓暗層裁在原圖範圍內，並排時右側的
+       資產模型不跟著變暗（比對用的那一側要保持可讀） */
+    #pane-a { position: relative; overflow: hidden; }
     #sheet, #rebuild-img { display: block; user-select: none; -webkit-user-drag: none; }
     #overlay { position: absolute; inset: 0; }
     /* 並排：兩欄同一個捲動與縮放，天生對齊 */
@@ -88,15 +109,32 @@
     .an-box.lo  { border-color: var(--lo); background: rgba(217,63,63,0.12); }
     .an-box.pending { border-style: dashed; opacity: 0.85; }
     .an-box.eq { border-width: 2.5px; }
-    /* 審核中的那一項：醒目脈動，讓使用者一眼找到它在圖上哪裡 */
-    .focus-ring { position: absolute; border: 3px solid var(--lo); border-radius: 4px;
-      pointer-events: none; box-shadow: 0 0 0 3px rgba(217,63,63,0.18);
-      animation: pulse 1.1s ease-in-out infinite; }
-    .focus-ring::after { content: attr(data-t); position: absolute; top: -22px; left: -2px;
-      background: var(--lo); color: #fff; font-size: 11px; font-weight: 700;
+    /* 選中的框＝可直接編輯：拖把手改大小、拖框身移動。框選新增仍然可用
+       （從空白處起拖），兩種手勢靠「起點是不是既有框」自然分流。 */
+    .an-box.cur { border-style: solid; border-color: var(--accent); cursor: move;
+      background: rgba(4,106,251,0.05); opacity: 1; }
+    .bh { position: absolute; width: 9px; height: 9px; background: #fff;
+      border: 1.5px solid var(--accent); border-radius: 2px; }
+    .bh-nw { left: -5px; top: -5px; cursor: nwse-resize; }
+    .bh-n  { left: calc(50% - 5px); top: -5px; cursor: ns-resize; }
+    .bh-ne { right: -5px; top: -5px; cursor: nesw-resize; }
+    .bh-e  { right: -5px; top: calc(50% - 5px); cursor: ew-resize; }
+    .bh-se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+    .bh-s  { left: calc(50% - 5px); bottom: -5px; cursor: ns-resize; }
+    .bh-sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
+    .bh-w  { left: -5px; top: calc(50% - 5px); cursor: ew-resize; }
+    /* 審核中的那一項：聚光燈。原本用紅色脈動框，但標註框本身就有紅
+       （低信心）與粉紅底（警示），在清冊表格那種整排紅框疊在一起的區域，
+       使用者分不出哪個才是「現在在問的範圍」。改成：框外整片壓暗、
+       框本身用品牌藍＋白色隔圈——顏色與標註框系統（綠/黃/紅）完全錯開，
+       被問的範圍就是唯一亮著的那一塊。 */
+    .focus-ring { position: absolute; border: 2.5px solid var(--accent);
+      border-radius: 4px; pointer-events: none;
+      box-shadow: 0 0 0 3px rgba(255,255,255,0.92),
+                  0 0 0 9999px rgba(6,16,39,0.30); }
+    .focus-ring::after { content: attr(data-t); position: absolute; top: -24px; left: -3px;
+      background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
       padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
-    @keyframes pulse { 0%,100% { transform: scale(1); opacity: 1; }
-                       50% { transform: scale(1.08); opacity: 0.75; } }
 
     /* ------------------------------------------------------------- 右欄 */
     /* 寬度隨視窗縮放：桌機維持 384px，筆電依 24vw 遞減，最窄 264px */
@@ -390,27 +428,33 @@
 
     <main>
       <div class="toolbar">
-        <span id="doc-name" style="font-weight:600">未選擇圖面</span>
+        <span id="doc-name" class="doc" title="">未選擇圖面</span>
         <span class="sp"></span>
-        <button class="mini-btn" id="zoom-out">−</button>
-        <span id="zoom-val" style="color:var(--dim);min-width:40px;text-align:center">100%</span>
-        <button class="mini-btn" id="zoom-in">＋</button>
-        <button class="mini-btn" id="zoom-fit">全圖</button>
+        <span class="seg">
+          <button id="zoom-out">−</button>
+          <span class="seg-val" id="zoom-val">100%</span>
+          <button id="zoom-in">＋</button>
+          <button id="zoom-fit">全圖</button>
+        </span>
         <span id="cmp-grp" style="display:none">
-          <span class="hint" style="margin-right:2px">資產模型</span>
-          <button class="mini-btn on" id="cmp-off">關</button>
-          <button class="mini-btn" id="cmp-side">並排</button>
-          <button class="mini-btn" id="cmp-ov">疊圖</button>
-          <button class="mini-btn" id="cmp-only">僅資產模型</button>
-          <span id="cmp-mode" style="display:none;margin-left:6px">
-            <button class="mini-btn on" id="cmp-m-blind"
-                    title="只畫資料庫語意層（審核後資產＋流向拓撲），不描原圖線稿——畫得出來的＝系統懂的">盲重建</button>
-            <button class="mini-btn" id="cmp-m-annot"
-                    title="原圖一筆不動，資產模型逐層疊上（設備綠/儀錶藍/閥件紫/管線琥珀/OPC 紅橘）——對著原圖驗收的交付物">標示</button>
-            <button class="mini-btn" id="cmp-m-trace"
-                    title="原圖幾何轉錄＋語意疊加——檢查線稿/OCR/氣泡進庫完整度">描圖</button>
+          <span class="tb-lab">資產模型</span>
+          <span class="seg">
+            <button class="on" id="cmp-off">關</button>
+            <button id="cmp-side">並排</button>
+            <button id="cmp-ov">疊圖</button>
+            <button id="cmp-only">僅資產模型</button>
           </span>
-          <span class="hint" id="cmp-ctl" style="display:none;margin-left:4px">
+          <span id="cmp-mode" style="display:none">
+            <span class="seg">
+              <button class="on" id="cmp-m-blind"
+                      title="只畫資料庫語意層（審核後資產＋流向拓撲），不描原圖線稿——畫得出來的＝系統懂的">盲重建</button>
+              <button id="cmp-m-annot"
+                      title="原圖一筆不動，資產模型逐層疊上（設備綠/儀錶藍/閥件紫/管線琥珀/OPC 紅橘）——對著原圖驗收的交付物">標示</button>
+              <button id="cmp-m-trace"
+                      title="原圖幾何轉錄＋語意疊加——檢查線稿/OCR/氣泡進庫完整度">描圖</button>
+            </span>
+          </span>
+          <span class="hint" id="cmp-ctl" style="display:none">
             透明度 <input type="range" id="cmp-op" min="15" max="100" value="80"
                         style="vertical-align:middle;width:80px;accent-color:var(--accent)" />
           </span>
@@ -459,11 +503,11 @@
           <button class="mini-btn primary" id="scan-all-btn" disabled
                   style="width:100%;padding:10px;margin-bottom:6px">辨識整張圖面</button>
           <button class="mini-btn" id="anchor-btn" disabled
-                  title="向量幾何宣告「這裡有東西」（氣泡/蝴蝶結/殼體輪廓，座標像素級），AI 只回答「它是什麼」——錨點全數結案＝這張圖真的掃完了"
-                  style="width:100%;padding:9px;margin-bottom:6px">錨定問答</button>
+                  title="系統已在圖上偵測到這些符號的位置（氣泡/閥件/設備輪廓），但還不知道它們是什麼——這一步讓 AI 逐一判讀。全部判完＝這張圖真的掃完了"
+                  style="width:100%;padding:9px;margin-bottom:6px">判讀剩餘符號</button>
           <button class="mini-btn" id="gap-scan-btn" disabled
-                  title="把已標註項疊回原圖給 AI 對照（盲重建×原圖雙圖比對），只獵還沒被標到的元件——補第一輪 OCR/幾何管線的天生盲區"
-                  style="width:100%;padding:9px;margin-bottom:12px">第二輪：缺口掃描（AI 對照已標註）</button>
+                  title="把已標好的項目疊回原圖給 AI 對照，只找還沒被標到的元件——補第一輪自動辨識的盲區"
+                  style="width:100%;padding:9px;margin-bottom:12px">找漏掉的元件（AI 複查）</button>
           <div class="prog"><i id="prog-bar"></i></div>
           <div class="prog-txt" id="prog-txt">尚未辨識</div>
           <div class="prog-txt" id="cc-state" style="margin-top:-8px"></div>
@@ -560,6 +604,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260815a"></script>
+  <script src="/static/js/pid-label.js?v=20260815d"></script>
 </body>
 </html>

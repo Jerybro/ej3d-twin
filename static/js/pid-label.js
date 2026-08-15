@@ -78,7 +78,7 @@ async function uploadFiles(files) {
   }
   st.innerHTML = `<span style="color:var(--hi)">已上傳 ${ok} 個檔案</span>`
     + (reused.length ? `<div style="margin-top:4px;line-height:1.6">同名檔已存在，
-        <b>既有的審核台帳、現場評註與製程說明都會沿用</b>：<br>${reused.map(esc).join('<br>')}</div>` : '');
+        <b>既有的審核紀錄、現場評註與製程說明都會沿用</b>：<br>${reused.map(esc).join('<br>')}</div>` : '');
   await loadFiles();
   loadGroups();            // 新圖進來 → 重算建議分組
 }
@@ -470,8 +470,8 @@ function updateAnchorBtn() {
   if (!curFile || !anchorList.length) { b.disabled = !curFile; return; }
   const un = unresolvedAnchors().length;
   b.disabled = un === 0;
-  b.textContent = un ? `錨定問答（未結案錨點 ${un}／${anchorList.length}）`
-                     : `錨定問答（錨點 ${anchorList.length} 全數結案）`;
+  b.textContent = un ? `判讀剩餘符號（還剩 ${un}／${anchorList.length} 處）`
+                     : `符號全數判讀完成（${anchorList.length} 處）`;
 }
 
 $('anchor-btn').addEventListener('click', async () => {
@@ -493,7 +493,7 @@ $('anchor-btn').addEventListener('click', async () => {
         while (pend.length) {
           const batch = pend.slice(0, 25);
           pend = pend.slice(25);
-          b.innerHTML = `<span class="spin"></span> 錨定問答 分塊 ${r * TC + c + 1}/${TC * TR}`
+          b.innerHTML = `<span class="spin"></span> 判讀符號中 分塊 ${r * TC + c + 1}/${TC * TR}`
             + `｜入庫 ${found}｜結案 ${closed}`;
           try {
             const d = await getJSON('/api/pid/vlm/anchor_ask', {
@@ -511,7 +511,7 @@ $('anchor-btn').addEventListener('click', async () => {
         }
       }
     }
-    $('cc-state').innerHTML = `錨定問答完成：入庫待審 <b style="color:var(--accent)">${found}</b> 項、`
+    $('cc-state').innerHTML = `符號判讀完成：新增待審 <b style="color:var(--accent)">${found}</b> 項、`
       + `判非元件結案 ${closed} 個${fail ? `、${fail} 批失敗` : ''}`
       + `｜剩餘未結案 <b>${unresolvedAnchors().length}</b> 個錨點`;
     if (found) {
@@ -539,7 +539,7 @@ $('gap-scan-btn').addEventListener('click', async () => {
     for (let r = 0; r < TR; r++) {
       for (let c = 0; c < TC; c++) {
         const i = r * TC + c + 1;
-        b.innerHTML = `<span class="spin"></span> 缺口掃描 分塊 ${i}/${TC * TR}｜已新增 ${found} 項`;
+        b.innerHTML = `<span class="spin"></span> 複查中 分塊 ${i}/${TC * TR}｜已新增 ${found} 項`;
         const box = [Math.max(0, c / TC - OV), Math.max(0, r / TR - OV),
                      Math.min(1, (c + 1) / TC + OV), Math.min(1, (r + 1) / TR + OV)];
         // 已否決也算 known——否決是結論，不該被第二輪翻案重新排隊
@@ -556,7 +556,7 @@ $('gap-scan-btn').addEventListener('click', async () => {
         } catch { fail++; }
       }
     }
-    $('cc-state').innerHTML = `缺口掃描完成：新增 <b style="color:var(--accent)">${found}</b> 項待審`
+    $('cc-state').innerHTML = `複查完成：新增 <b style="color:var(--accent)">${found}</b> 項待審`
       + `（與已知重複略過 ${dup}${fail ? `，${fail} 塊失敗` : ''}）`;
     updateAnchorBtn();
     if (found) {
@@ -565,7 +565,7 @@ $('gap-scan-btn').addEventListener('click', async () => {
     }
   } finally {
     b.disabled = false;
-    b.textContent = '第二輪：缺口掃描（AI 對照已標註）';
+    b.textContent = '找漏掉的元件（AI 複查）';
   }
 });
 
@@ -701,8 +701,15 @@ function cancelRebox() {
 }
 
 async function applyRebox(box) {
-  const i = reboxIdx, it = items[i];
+  const i = reboxIdx;
   cancelRebox();
+  await commitBox(i, box);
+}
+
+// 共用的「框變更提交」：重畫（applyRebox）與拖拉把手（startBoxDrag）
+// 收尾走同一條路——已入庫的打 API 留稽核，待審的只改本地等入庫時帶上。
+async function commitBox(i, box) {
+  const it = items[i];
   if (!it) return;
   const old = it.bbox;
   it.bbox = box;
@@ -788,7 +795,7 @@ function renderBatchCard(host) {
           <i>${esc(r.spec || '')}</i>
         </div>`; }).join('')}</div>
       <div class="rev-act">
-        <button class="mini-btn primary" id="bm-acc">框對，寫入台帳 <span style="opacity:.75">(Enter)</span></button>
+        <button class="mini-btn primary" id="bm-acc">框對，存入資產庫 <span style="opacity:.75">(Enter)</span></button>
         <button class="mini-btn" id="bm-re">框不對，重畫 <span style="opacity:.6">(E)</span></button>
         <button class="mini-btn" id="bm-rej">不是這台 <span style="opacity:.6">(N)</span></button>
       </div>
@@ -805,7 +812,7 @@ function renderBatchCard(host) {
   $('bm-re').onclick = () => startRebox(curIdx);
   $('bm-off2').onclick = () => { batchMode = false; render(); };
   $('bm-all').onclick = async () => {
-    if (!confirm(`把 ${rows.length} 台候選全部寫入台帳？\n`
+    if (!confirm(`把 ${rows.length} 台候選全部存入資產庫？\n`
       + '（框不對的可以事後再重框，或用「回到上一動」整批退回）')) return;
     for (const x of rows) { curIdx = x.i; await decide('accepted'); }
     refreshRebuild();
@@ -897,13 +904,13 @@ function renderReviewCard() {
       <div class="ask">${askText(it)}</div>
       <div class="rev-sub" id="rebox-hint" style="display:none;color:var(--accent)"></div>
       <div class="rev-act">
-        <button class="mini-btn primary" id="acc-b">是，寫入台帳 <span style="opacity:.75">(Y)</span></button>
+        <button class="mini-btn primary" id="acc-b">是，存入資產庫 <span style="opacity:.75">(Y)</span></button>
         <button class="mini-btn" id="rej-b">不是，判讀有誤 <span style="opacity:.6">(N)</span></button>
         <button class="mini-btn" id="rebox-b">框不準，重畫 <span style="opacity:.6">(E)</span></button>
       </div>
       <button class="mini-btn" id="note-b" style="width:100%;margin-top:6px">
         為這一項加現場評註</button>
-      <div class="act-note">寫入台帳＝這筆成為正式資產資料並記上你的簽名；
+      <div class="act-note">存入資產庫＝這筆成為正式資產資料並記上你的簽名；
         判讀有誤＝不入庫，但保留稽核紀錄（不會靜默消失）。</div>
     </div>`;
   $('prev-b').onclick = () => focusItem(Math.max(0, curIdx - 1));
@@ -1113,17 +1120,73 @@ function drawBoxes() {
       + `width:${(b[2] - b[0]) * 100}%;height:${(b[3] - b[1]) * 100}%`;
     overlay.appendChild(d);
   }
-  for (const a of items) {
+  for (const [i, a] of items.entries()) {
     if (a.state === 'rejected' || !Array.isArray(a.bbox)) continue;
     const [x0, y0, x1, y1] = a.bbox;
     const d = document.createElement('div');
     d.className = 'an-box ' + confClass2(a) + (a.state === 'pending' ? ' pending' : '')
-      + (a.kind === 'equipment' ? ' eq' : '');
+      + (a.kind === 'equipment' ? ' eq' : '') + (i === curIdx ? ' cur' : '');
     d.title = boxTitle(a);
     d.style.cssText = `left:${x0 * 100}%;top:${y0 * 100}%;` +
       `width:${(x1 - x0) * 100}%;height:${(y1 - y0) * 100}%`;
+    // 點框＝選中該項；選中的框直接長出把手可拖拉（見 startBoxDrag）。
+    // stopPropagation 讓「從框上起拖」不會觸發外層的框選新增。
+    d.addEventListener('pointerdown', e => {
+      e.stopPropagation();
+      if (i !== curIdx) { e.preventDefault(); focusItem(i); return; }
+      startBoxDrag(i, e.target.classList.contains('bh')
+        ? e.target.dataset.dir : 'move', e);
+    });
+    if (i === curIdx) {
+      for (const dir of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) {
+        const h = document.createElement('i');
+        h.className = 'bh bh-' + dir;
+        h.dataset.dir = dir;
+        d.appendChild(h);
+      }
+    }
     overlay.appendChild(d);
   }
+}
+
+// ---- 直接拉框：拖把手改大小、拖框身移動，放開即存 ----
+// 「重畫」適合框整個錯位；框只差一點時，拉一下把手快得多。
+function startBoxDrag(i, dir, e) {
+  e.preventDefault();
+  const it = items[i];
+  if (!it) return;
+  const r = overlay.getBoundingClientRect();
+  const b0 = it.bbox.slice();
+  const x0 = (e.clientX - r.left) / r.width, y0 = (e.clientY - r.top) / r.height;
+  const el = e.currentTarget.classList.contains('an-box')
+    ? e.currentTarget : e.currentTarget.closest('.an-box');
+  let live = b0.slice(), moved = false;
+  const mv = ev => {
+    const dx = (ev.clientX - r.left) / r.width - x0;
+    const dy = (ev.clientY - r.top) / r.height - y0;
+    let [a, b, c, d2] = b0;
+    if (dir === 'move') { a += dx; c += dx; b += dy; d2 += dy; }
+    else {
+      if (dir.includes('w')) a += dx;
+      if (dir.includes('e')) c += dx;
+      if (dir.includes('n')) b += dy;
+      if (dir.includes('s')) d2 += dy;
+    }
+    if (c - a < 0.004) { if (dir.includes('w')) a = c - 0.004; else c = a + 0.004; }
+    if (d2 - b < 0.004) { if (dir.includes('n')) b = d2 - 0.004; else d2 = b + 0.004; }
+    live = [Math.max(0, a), Math.max(0, b), Math.min(1, c), Math.min(1, d2)];
+    moved = true;
+    el.style.left = live[0] * 100 + '%'; el.style.top = live[1] * 100 + '%';
+    el.style.width = (live[2] - live[0]) * 100 + '%';
+    el.style.height = (live[3] - live[1]) * 100 + '%';
+  };
+  const up = async () => {
+    removeEventListener('pointermove', mv);
+    removeEventListener('pointerup', up);
+    if (moved) await commitBox(i, live);
+  };
+  addEventListener('pointermove', mv);
+  addEventListener('pointerup', up);
 }
 // 有警示一律降級成低信心配色——警示的意義就是「別信這個數字」
 function confClass2(a) {
@@ -1296,7 +1359,7 @@ async function loadHistory() {
     const vs = d.versions || [];
     if (!vs.length) {
       el.innerHTML = `<span class="hint">此網域（${esc(d.domain)}）尚無建檔紀錄。
-        目前台帳 ${d.current.items} 筆。</span>`;
+        目前資產庫 ${d.current.items} 筆。</span>`;
       return;
     }
     el.innerHTML = `<div class="hint" style="margin-bottom:6px">網域
@@ -1309,12 +1372,12 @@ async function loadHistory() {
           ${v.by ? `<span class="hv-b">${esc(v.by.split('@')[0])}</span>` : ''}
         </div>`).join('');
     $('undo-b').onclick = async () => {
-      if (!confirm('回到上一動？目前的台帳狀態會被前一版取代（仍可再往回還原）。')) return;
+      if (!confirm('回到上一動？目前的資產庫內容會被前一版取代（仍可再往回還原）。')) return;
       const r = await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}/undo`,
                             { method: 'POST' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { alert(j.detail || '無法回復'); return; }
-      alert(`已回到上一動，台帳現有 ${j.items} 筆`);
+      alert(`已回到上一動，資產庫現有 ${j.items} 筆`);
       loadHistory();
     };
     el.querySelectorAll('.hv').forEach(h => h.addEventListener('click', async () => {
@@ -1324,7 +1387,7 @@ async function loadHistory() {
         { method: 'POST' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { alert(j.detail || '還原失敗'); return; }
-      alert(`已還原，台帳現有 ${j.items} 筆`);
+      alert(`已還原，資產庫現有 ${j.items} 筆`);
       loadHistory();
     }));
   } catch { el.innerHTML = '<span class="hint">歷史紀錄載入失敗。</span>'; }

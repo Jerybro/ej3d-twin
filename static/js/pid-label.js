@@ -706,10 +706,22 @@ async function loadLocateCandidates() {
   try {
     const d = await getJSON(`/api/pid/model/locate/${encodeURIComponent(curFile)}`);
     registryRows = d.registry || [];
-    const have = new Set(items.map(i => `${i.kind}:${i.tag}`));
-    const add = (d.items || [])
-      .filter(i => !have.has(`equipment:${i.tag}`))
-      .map(i => ({ ...i, state: 'pending' }));
+    // 後端已用「現在的台帳」過濾：處理過的（圖面框已入庫／否決過）不會回來。
+    // 會回來的只有兩種：全新候選、或資產庫那筆是**表格框**的位號（例如早期
+    // 掃描把清冊表格裡的 106 框成設備並接受了）——後者要明講「這是它在圖面
+    // 上的位置」，接受時走重框而不是新增一列，資產庫才不會長出兩個 106。
+    const add = [];
+    for (const c of (d.items || [])) {
+      const twin = items.find(i => i.kind === 'equipment' && i.tag === c.tag);
+      if (twin && twin.state === 'pending') continue;          // 佇列裡已有
+      const it = { ...c, state: 'pending' };
+      if (twin) {
+        it.note = `資產庫已有「${c.tag}」，但那筆框在清冊表格上；`
+                + '此候選是它在圖面上的位置——確認後會以此框為準';
+        it.replaces_id = twin.id || null;
+      }
+      add.push(it);
+    }
     if (!add.length) return;
     items = items.concat(add);
     const s = d.stats || {};
@@ -1176,7 +1188,20 @@ async function decide(state) {
   }
   it.state = state;
   try {
-    if (state === 'accepted') {
+    if (state === 'accepted' && it.replaces_id) {
+      // 這個候選是「資產庫已有那筆」的圖面位置——走重框，不是新增一列，
+      // 否則資產庫會長出兩個 106（一個在表格、一個在圖上）
+      const r = await fetch(
+        `/api/pid/vlm/annot/${encodeURIComponent(curFile)}/${encodeURIComponent(it.replaces_id)}/bbox`,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bbox: it.bbox }) });
+      if (r.ok) {
+        it.id = it.replaces_id;
+        // 舊那筆從清單拿掉，避免同位號兩列並存
+        const oi = items.findIndex(x => x !== it && x.id === it.replaces_id);
+        if (oi >= 0) { items.splice(oi, 1); if (oi < curIdx) curIdx--; }
+      }
+    } else if (state === 'accepted') {
       // 回傳的 id 一定要收下來：沒有 id 就無法對這一筆做「只改框」的更新，
       // 重框會退化成本地修改（看起來成功、其實沒進台帳）。
       const r = await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {

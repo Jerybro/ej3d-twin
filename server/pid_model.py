@@ -1295,18 +1295,28 @@ def _svg_blind(m: dict, flow: dict | None = None, notes: list | None = None) -> 
     # 10) 圖例（右上角）：這張圖畫了什麼、沒畫的去哪了
     n_unloc = sum(1 for e in m.get("equipment", [])
                   if not e.get("bbox") and not e.get("candidate_bbox"))
+    # 圖例要講人話：使用者不需要知道「語意層」「拓撲」，需要知道
+    # 「實線＝已確認、虛線＝還沒、有幾台找不到」以及該去哪按。
     rows = [
-        ("盲重建｜只畫資料庫語意層", True),
-        (f"設備 {n_eq} 台（候選 {len(seen_cand)}、未定位 {n_unloc}）", False),
-        (f"儀錶 {len(ins_pos)}｜閥件 {n_vv}｜流向 {n_edges} 條", False),
-        ("線稿不描原圖：走線由拓撲生成", False),
+        ("資產模型（由資料庫重畫，不描原圖）", True, None),
+        (f"已確認 {n_eq - len(seen_cand)} 台", False, "solid"),
+        (f"待確認 {len(seen_cand)} 台（審核頁「批次確認」）", False, "dash"),
+        (f"圖上找不到 {n_unloc} 台（在圖上框選後「加強辨識」）", False, None),
+        (f"儀錶 {len(ins_pos)}｜閥件 {n_vv}｜流向 {n_edges} 條（點箭頭可修）", False, None),
     ]
     bh = len(rows) * 15 + 12
-    p.append(f'<g><rect x="{W - 286}" y="10" width="276" height="{bh}" rx="6" '
-             'fill="rgba(255,255,255,0.92)" stroke="#DBDDE0"/>')
-    for i, (t, bold) in enumerate(rows):
+    p.append(f'<g><rect x="{W - 316}" y="10" width="306" height="{bh}" rx="6" '
+             'fill="rgba(255,255,255,0.94)" stroke="#DBDDE0"/>')
+    for i, (t, bold, sw) in enumerate(rows):
+        y = 29 + i * 15
+        x = W - 304
+        if sw:  # 小色樣：實線／虛線綠框，跟圖上的框長一樣
+            dash = ' stroke-dasharray="4 3"' if sw == "dash" else ""
+            p.append(f'<rect x="{x}" y="{y - 9}" width="16" height="10" rx="2" '
+                     f'fill="none" stroke="#0B8A46" stroke-width="1.6"{dash}/>')
+            x += 22
         fw = ' font-weight="700"' if bold else ''
-        p.append(f'<text x="{W - 274}" y="{29 + i * 15}" font-size="11" '
+        p.append(f'<text x="{x}" y="{y}" font-size="11" '
                  f'fill="{"#061027" if bold else "#5C6773"}"'
                  f'{fw}>{_x(t)}</text>')
     p.append('</g>')
@@ -1403,7 +1413,28 @@ def model_locate(filename: str, request: Request) -> dict:
         m = build_model(filename, dom)
     rows = (_registry_of(filename) or {}).get("items", [])
     loc = m.get("locate") or {}
-    return {"items": loc.get("items", []),
+    # 候選是**建模當下**算的快照；使用者之後接受／重框／否決的都不在裡面。
+    # 不拿現在的台帳過濾，重新整理就會把已處理過的候選又端出來一次
+    # （實測：313-1 重框存檔後 F5，同一個候選又出現）。規則：
+    #   ・台帳已有同位號且框在圖面上（非清冊表格）→ 已處理，不再給
+    #   ・台帳同位號但那筆是表格框（list_ref）→ 圖面位置仍缺，候選要給
+    #   ・稽核裡被否決過的位號 → 人下過結論，不翻案
+    from .pid_vlm import _load_annots
+
+    ann = _load_annots(filename, dom)
+    # 「表格框」不能用建模快照的 list_ref 判——使用者重框後那筆已經是圖面
+    # 框了。直接看台帳那筆現在的框：落在清冊表格欄（同一條窄直欄堆疊）
+    # 就是表格框。這裡沿用 _demote_list_refs 的判準，對台帳現況跑一次。
+    cur_eq = [{"tag": a.get("tag"), "bbox": list(a["bbox"]), "source": ""}
+              for a in ann.get("items", [])
+              if a.get("kind") == "equipment" and a.get("bbox")]
+    _demote_list_refs(cur_eq)                       # 就地標 list_ref
+    done = {e["tag"] for e in cur_eq if not e.get("list_ref")}
+    rejected = {a.get("tag") for a in ann.get("audit", [])
+                if a.get("action") == "reject" and a.get("tag")}
+    items = [i for i in loc.get("items", [])
+             if i["tag"] not in done and i["tag"] not in rejected]
+    return {"items": items,
             "stats": {k: v for k, v in loc.items() if k != "items"},
             "registry": [{"item": r.get("item"), "name": r.get("name", ""),
                           "spec": r.get("spec", ""), "range": r.get("range")}

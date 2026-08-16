@@ -877,26 +877,21 @@ def _svg_of(m: dict, flow: dict | None = None, notes: list | None = None) -> str
                  f'<path d="M{x + 6:.0f},{y:.0f}L{x - 4:.0f},{y - 4:.0f}'
                  f'L{x - 4:.0f},{y + 4:.0f}Z" fill="#2A3441"/></g>')
 
-    # 2) 閥件節點（拓撲層：蝴蝶結符號）
-    for u, v, _ci in g.get("valve_nodes", []):
-        x, y, s = u * W, v * H, 6
-        p.append(f'<path d="M{x - s:.0f},{y - s:.0f}L{x + s:.0f},{y + s:.0f}'
-                 f'L{x + s:.0f},{y - s:.0f}L{x - s:.0f},{y + s:.0f}Z" '
-                 'fill="#fff" stroke="#6B7683" stroke-width="1.3"/>')
+    # 2) 拓撲層閥件節點（灰蝴蝶結）——不畫。那是幾何偵測結果、沒經過審核；
+    #    描圖模式的原線稿本來就含閥件符號，再疊一顆灰的只是視覺噪音。
+    #    （盲重建有自己的閥件符號生成，不受影響。）
 
-    # 3) 已確認閥件：accent 標記＋屬性
+    # 3) 已確認閥件：只標位號與屬性，不畫圈——符號本身在線稿裡
     for vv in m.get("valves", []):
         b = vv.get("bbox")
         if not b:
             continue
         x, y = (b[0] + b[2]) / 2 * W, (b[1] + b[3]) / 2 * H
-        p.append(f'<circle cx="{x:.0f}" cy="{y:.0f}" r="11" fill="none" '
-                 'stroke="#046AFB" stroke-width="1.6"/>')
         lab = vv.get("id", "")
         if vv.get("size"):
             lab += f'　{vv["size"]}'
-        p.append(f'<text x="{x:.0f}" y="{y + 24:.0f}" font-size="10" '
-                 f'fill="#046AFB" text-anchor="middle">{_x(lab)}</text>')
+        p.append(f'<text x="{x:.0f}" y="{y + 20:.0f}" font-size="10" '
+                 f'fill="#046AFB" font-weight="600" text-anchor="middle">{_x(lab)}</text>')
 
     # 4) 儀錶氣泡：實測幾何＋形狀（圓/六角/DCS 方框）。已審者對位到
     #    最近氣泡；沒審到的畫灰圈——重建圖同時是「哪裡還沒審」的待辦地圖。
@@ -954,13 +949,9 @@ def _svg_of(m: dict, flow: dict | None = None, notes: list | None = None) -> str
             p.append(f'<text x="{cx:.0f}" y="{cy + r * 0.52:.0f}" font-size="{fs:.1f}" '
                      f'fill="#061027" text-anchor="middle">{_x(bot)}</text>')
 
-    # 未審核的偵測氣泡：灰虛圈（審完會逐顆變藍）
-    for i, bb in enumerate(bubs):
-        if i in used_bub:
-            continue
-        shape = bb[4] if len(bb) > 4 else "circle"
-        p.append(_bub_shape(bb[0] * W, bb[1] * H, max(bb[2] * W, 10), shape,
-                            "#C3CAD2", ' stroke-dasharray="4 3"'))
+    # 未審核的偵測氣泡——不畫。原本想當「哪裡還沒審」的待辦地圖，但實測
+    # 潤泰三張圖 87 顆偵測氣泡有六成落在設備框內（是設備符號自己的圓，
+    # 不是儀錶），畫出來只是滿版灰虛圈的噪音；待辦已由審核清單承擔。
 
     # 5) OPC 跨圖接續角旗：琥珀色旗形＋接續碼——這張圖跟誰相連
     for o in m.get("opcs", []):
@@ -1005,8 +996,11 @@ def _svg_of(m: dict, flow: dict | None = None, notes: list | None = None) -> str
         p.append(f'<rect x="{x0:.0f}" y="{y0:.0f}" width="{w:.0f}" height="{h:.0f}" '
                  'fill="none" stroke="#0B8A46" stroke-width="1.2" '
                  'stroke-dasharray="6 4" rx="2" opacity="0.8"/>')
+        # 標籤放框外上方，與已審框同格式——原本壓在框內左上角，遇到兩個候選
+        # 框共用同一個左上角（定位器從同一項次號長出不同高度）時，標籤會跟
+        # 另一框的角落疊成一個「不明小方框」
         name = e.get("name") or e.get("type") or ""
-        p.append(f'<text x="{x0 + 3:.0f}" y="{y0 + 12:.0f}" font-size="10" '
+        p.append(f'<text x="{x0:.0f}" y="{y0 - 5:.0f}" font-size="11" '
                  f'fill="#0B8A46" opacity="0.85">{_x(e.get("tag", ""))}　'
                  f'{_x(name)}</text>')
 
@@ -1187,7 +1181,9 @@ def _svg_blind(m: dict, flow: dict | None = None, notes: list | None = None) -> 
         p.append(f'<rect x="{x0:.0f}" y="{y0:.0f}" width="{w:.0f}" height="{h:.0f}" '
                  'fill="none" stroke="#0B8A46" stroke-width="1.2" '
                  'stroke-dasharray="6 4" rx="4" opacity="0.75"/>')
-        p.append(f'<text x="{x0 + 3:.0f}" y="{y0 + 12:.0f}" font-size="10" '
+        # 標籤放框外上方（同描圖模式）：兩個候選框共用左上角時，框內標籤會疊出
+        # 一個看不懂的小方框
+        p.append(f'<text x="{x0:.0f}" y="{y0 - 5:.0f}" font-size="11" '
                  f'fill="#0B8A46" opacity="0.85">{_x(e.get("tag", ""))}　'
                  f'{_x(e.get("name") or e.get("type") or "")}</text>')
 

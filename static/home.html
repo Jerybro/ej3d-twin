@@ -536,9 +536,12 @@
     ];
     const aiQ = document.getElementById('ai-q');
     const aiR = document.getElementById('ai-result');
+    // 按鈕叫「帶我去」就要真的帶過去。原本命中後只顯示一行提示＋一個小連結
+    // 要人再點一次——看起來就是「按了沒反應」。現在：命中即跳轉；停在頁面上
+    // 的只有兩種情況：聽不懂（要提示）、要展開導覽（目標就在本頁）。
     function aiRoute() {
       const q = aiQ.value.trim();
-      if (!q) return;
+      if (!q) { aiQ.focus(); return; }
       const hit = ROUTES.find((r) => r.re.test(q));
       aiR.classList.add('show');
       if (!hit) {
@@ -551,7 +554,8 @@
         document.getElementById('fold-guide').scrollIntoView({ behavior: 'smooth', block: 'center' });
         return;
       }
-      aiR.innerHTML = `💡 ${hit.t}　<a href="${hit.url}">→ 前往</a>`;
+      aiR.innerHTML = `💡 ${hit.t}　<span style="color:var(--dim)">正在前往…</span>`;
+      location.href = hit.url;
     }
     document.getElementById('ai-go').addEventListener('click', aiRoute);
     aiQ.addEventListener('keydown', (e) => { if (e.key === 'Enter') aiRoute(); });

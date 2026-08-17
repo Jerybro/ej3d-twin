@@ -106,7 +106,8 @@ def current_actor(request: Request) -> str:
 # 原本 `/` 與 `/docs` 是公開的，此處一併收回。
 # /healthz 開放：部署健檢（deploy/auto-pull.ps1）與監控要能不帶 session 打，
 # 它只回 "ok" 純文字，無資訊洩漏疑慮。
-PUBLIC_PREFIXES = ("/login", "/logout", "/static/", "/favicon", "/api/me", "/healthz")
+PUBLIC_PREFIXES = ("/login", "/logout", "/static/", "/favicon", "/api/me", "/healthz",
+                   "/api/version")   # 版號不是機密，登入頁也要顯示得出來
 
 
 async def auth_guard(request: Request, call_next):

@@ -432,8 +432,18 @@
 
     <footer class="site">
       <span data-i18n="footer.l">Process Intelligence</span>
+      <span id="ver" title="點開變更紀錄" style="cursor:pointer;color:var(--text2)"></span>
       <span data-i18n="footer.r">OpenUSD 相容・OPC UA 就緒</span>
     </footer>
+    <script>
+      // 版號一定要讓使用者看得到：回報問題時說「0.9.0（56cf79a）」，不是「昨天那版」
+      fetch('/api/version').then(r => r.ok ? r.json() : null).then(v => {
+        if (!v) return;
+        const el = document.getElementById('ver');
+        el.textContent = 'v' + v.version + (v.commit ? '（' + v.commit + '）' : '');
+        el.onclick = () => window.open(v.changelog, '_blank');
+      }).catch(() => {});
+    </script>
   </div>
   <script src="/static/js/i18n.js"></script>
   <script src="/static/js/tour.js"></script>

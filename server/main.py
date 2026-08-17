@@ -347,6 +347,46 @@ def healthz() -> PlainTextResponse:
     return PlainTextResponse("ok")
 
 
+def _read_version() -> str:
+    p = Path(__file__).resolve().parent.parent / "VERSION"
+    try:
+        return p.read_text(encoding="utf-8").strip() or "0.0.0"
+    except OSError:
+        return "0.0.0"
+
+
+def _git_short() -> str:
+    """目前部署的 commit 短碼——版號說「哪一版」，commit 說「精確到哪一刀」。"""
+    import subprocess
+
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
+            cwd=Path(__file__).resolve().parent.parent, timeout=3,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+@app.get("/api/version")
+def api_version() -> dict:
+    """平台版本：VERSION 檔為單一真相；附 commit 短碼與變更紀錄位置。
+
+    使用者回報問題時要能說「我用的是 0.9.0（56cf79a）」，而不是「昨天那版」。
+    """
+    return {"version": _read_version(), "commit": _git_short(),
+            "changelog": "/CHANGELOG.md"}
+
+
+@app.get("/CHANGELOG.md")
+def changelog_md() -> PlainTextResponse:
+    p = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
+    if not p.exists():
+        raise HTTPException(404, "尚無變更紀錄")
+    return PlainTextResponse(p.read_text(encoding="utf-8"),
+                             media_type="text/markdown; charset=utf-8")
+
+
 # ------------------------------------------------------------------ WebSocket
 
 

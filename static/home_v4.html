@@ -302,6 +302,7 @@
           <button class="ai-chip" data-q="上傳數據建模型">上傳數據建模</button>
           <button class="ai-chip" data-q="組一座自己的孿生">組孿生</button>
           <button class="ai-chip" data-q="健康預警">健康預警</button>
+          <button class="ai-chip" data-q="P&ID判讀">P&amp;ID 判讀</button>
           <button class="ai-chip" data-q="把P&ID變3D廠區">P&amp;ID → 3D</button>
         </div>
         <div class="ai-result" id="ai-result" role="status" aria-live="polite"></div>
@@ -379,6 +380,7 @@
           <a href="/twin"><b>3D 數位孿生</b><span>即時數據上 3D</span></a>
           <a href="/studio"><b>3D 設計工作室</b><span>素材庫建場景</span></a>
           <a href="/twin/pid"><b>P&amp;ID 工作流</b><span>OCR 自動建廠</span></a>
+          <a href="/twin/pid/label"><b>P&amp;ID 判讀工作台</b><span>框選問 AI・審核入庫・資產模型</span></a>
         </div>
       </div>
     </section>
@@ -409,6 +411,7 @@
       { re: /嚮導|帶我|新手|怎麼開始/i, url: '/static/wizard.html', t: 'AI 建模嚮導' },
       { re: /健康|預警|PHM|異常|振動/i, url: '/static/block_health.html', t: '設備健康預警' },
       { re: /最佳化|優化|配方/i, url: '/static/incinerator_flowsheet.html', t: '智慧運轉 → 最佳化' },
+      { re: /判讀|標示|審核|框選/i, url: '/twin/pid/label', t: 'P&ID 判讀工作台' },
       { re: /P&?ID|圖面/i, url: '/twin/pid', t: 'P&ID 工作流' },
       { re: /設計器|組.*孿生|flowsheet/i, url: '/static/flowsheet_builder.html', t: 'Flowsheet 設計器' },
       { re: /發布|API/i, url: '/static/model_api.html', t: '模型 API' },

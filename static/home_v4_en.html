@@ -304,6 +304,7 @@
           <button class="ai-chip" data-q="upload data model">Upload data &amp; model</button>
           <button class="ai-chip" data-q="compose twin">Compose a twin</button>
           <button class="ai-chip" data-q="health warning">Health warning</button>
+          <button class="ai-chip" data-q="P&ID labeling">P&amp;ID labeling</button>
           <button class="ai-chip" data-q="P&ID to 3D">P&amp;ID → 3D</button>
         </div>
         <div class="ai-result" id="ai-result" role="status" aria-live="polite"></div>
@@ -381,6 +382,7 @@
           <a href="/twin"><b>3D digital twin</b><span>Live data on 3D</span></a>
           <a href="/studio"><b>3D design studio</b><span>Build scenes from the asset library</span></a>
           <a href="/twin/pid"><b>P&amp;ID workflow</b><span>OCR auto plant-build</span></a>
+          <a href="/twin/pid/label"><b>P&amp;ID labeling workbench</b><span>Ask AI on a region · review · asset model</span></a>
         </div>
       </div>
     </section>
@@ -411,6 +413,7 @@
       { re: /wizard|guide|walk|start|new/i, url: '/static/wizard.html', t: 'AI modeling wizard' },
       { re: /health|warning|PHM|anomal|vibration/i, url: '/static/block_health.html', t: 'Equipment health warning' },
       { re: /optimi|recipe/i, url: '/static/incinerator_flowsheet.html', t: 'Smart operation → optimization' },
+      { re: /label|annotat|review/i, url: '/twin/pid/label', t: 'P&ID labeling workbench' },
       { re: /P&?ID|drawing/i, url: '/twin/pid', t: 'P&ID workflow' },
       { re: /builder|compose|flowsheet/i, url: '/static/flowsheet_builder.html', t: 'Flowsheet builder' },
       { re: /publish|API/i, url: '/static/model_api.html', t: 'Model API' },

@@ -62,7 +62,12 @@
     .tm-item.danger { color: #E5484D; }
     .tm-item.danger svg { stroke: #E5484D; }
     .tm-sep { height: 1px; background: var(--line); margin: 4px 6px; }
-    [data-theme="light"] .tm-pop { box-shadow: 0 12px 34px rgba(11,18,32,0.14); }
+    /* 淺色模式：--bg 變數在 :root 是黑的（淺色只蓋了 body 背景），彈窗若沿用
+       會變成黑底深字＝看不見。彈窗自己的底色與分隔線要在這裡明寫。 */
+    [data-theme="light"] .tm-pop { background: #FFFFFF; border-color: #CFD4DC;
+      box-shadow: 0 12px 34px rgba(11,18,32,0.14); }
+    [data-theme="light"] .tm-user, [data-theme="light"] .tm-sep { border-color: #E4E7EC; background-color: #E4E7EC; }
+    [data-theme="light"] .tm-user { background: transparent; }
     /* 頁尾版號：使用者回報問題要能說「0.9.0（22fb35c）」，點開就是變更紀錄 */
     footer.site #ver { cursor: pointer; }
     footer.site #ver:hover { color: var(--accent-text); }

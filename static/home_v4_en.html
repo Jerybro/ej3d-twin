@@ -329,9 +329,10 @@
           <div class="card key">
             <div class="no">02</div><h3>Compose a twin</h3>
             <ol>
-              <li><a href="/static/flowsheet_builder.html"><span class="i">1</span><span>Flowsheet builder</span></a></li>
-              <li><a href="/static/incinerator_flowsheet.html"><span class="i">2</span><span>Engineering view</span></a></li>
-              <li><a href="/static/incinerator_flowsheet.html"><span class="i">3</span><span>Bind a 3D scene</span></a></li>
+              <li><a href="/data"><span class="i">1</span><span>Upload historical data</span></a></li>
+              <li><a href="/twin/pid/label"><span class="i">2</span><span>Read P&amp;ID · build asset model</span></a></li>
+              <li><a href="/twin/mapping" class="primary"><span class="i">3</span><span>Tag mapping · confirm units &amp; ranges</span></a></li>
+              <li><a href="/static/flowsheet_builder.html"><span class="i">4</span><span>Bind twin · flowsheet</span></a></li>
             </ol>
           </div>
           <div class="card">
@@ -383,6 +384,7 @@
           <a href="/studio"><b>3D design studio</b><span>Build scenes from the asset library</span></a>
           <a href="/twin/pid"><b>P&amp;ID workflow</b><span>OCR auto plant-build</span></a>
           <a href="/twin/pid/label"><b>P&amp;ID labeling workbench</b><span>Ask AI on a region · review · asset model</span></a>
+          <a href="/twin/mapping"><b>Tag mapping</b><span>Data columns ↔ equipment · units · ranges</span></a>
         </div>
       </div>
     </section>
@@ -413,6 +415,7 @@
       { re: /wizard|guide|walk|start|new/i, url: '/static/wizard.html', t: 'AI modeling wizard' },
       { re: /health|warning|PHM|anomal|vibration/i, url: '/static/block_health.html', t: 'Equipment health warning' },
       { re: /optimi|recipe/i, url: '/static/incinerator_flowsheet.html', t: 'Smart operation → optimization' },
+      { re: /mapping|tag|column|connect data/i, url: '/twin/mapping', t: 'Tag mapping' },
       { re: /label|annotat|review/i, url: '/twin/pid/label', t: 'P&ID labeling workbench' },
       { re: /P&?ID|drawing/i, url: '/twin/pid', t: 'P&ID workflow' },
       { re: /builder|compose|flowsheet/i, url: '/static/flowsheet_builder.html', t: 'Flowsheet builder' },

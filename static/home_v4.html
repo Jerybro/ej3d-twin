@@ -313,7 +313,7 @@
   <main>
     <section id="journeys">
       <div class="wrap">
-        <div class="sec-head"><div><h2>三條旅程</h2><p>建模型、組孿生、看運轉。</p></div><a class="link" href="/docs">操作說明<svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></a></div>
+        <div class="sec-head"><div><h2>三條旅程</h2><p>建模型、組孿生（數據 → P&amp;ID → 點位對照 → 綁定）、看運轉。</p></div><a class="link" href="/docs">操作說明<svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></a></div>
         <div class="cards">
           <div class="card">
             <div class="no">01</div><h3>建模型</h3>
@@ -327,9 +327,10 @@
           <div class="card key">
             <div class="no">02</div><h3>組孿生</h3>
             <ol>
-              <li><a href="/static/flowsheet_builder.html"><span class="i">1</span><span>Flowsheet 設計器</span></a></li>
-              <li><a href="/static/incinerator_flowsheet.html"><span class="i">2</span><span>工程檢視</span></a></li>
-              <li><a href="/static/incinerator_flowsheet.html"><span class="i">3</span><span>綁 3D 場景</span></a></li>
+              <li><a href="/data"><span class="i">1</span><span>上傳歷史數據</span></a></li>
+              <li><a href="/twin/pid/label"><span class="i">2</span><span>判讀 P&amp;ID・建資產模型</span></a></li>
+              <li><a href="/twin/mapping" class="primary"><span class="i">3</span><span>點位對照・確認單位與範圍</span></a></li>
+              <li><a href="/static/flowsheet_builder.html"><span class="i">4</span><span>綁定孿生・組 flowsheet</span></a></li>
             </ol>
           </div>
           <div class="card">
@@ -381,6 +382,7 @@
           <a href="/studio"><b>3D 設計工作室</b><span>素材庫建場景</span></a>
           <a href="/twin/pid"><b>P&amp;ID 工作流</b><span>OCR 自動建廠</span></a>
           <a href="/twin/pid/label"><b>P&amp;ID 判讀工作台</b><span>框選問 AI・審核入庫・資產模型</span></a>
+          <a href="/twin/mapping"><b>點位對照</b><span>歷史數據欄位 ↔ 設備・單位・合理範圍</span></a>
         </div>
       </div>
     </section>
@@ -411,6 +413,7 @@
       { re: /嚮導|帶我|新手|怎麼開始/i, url: '/static/wizard.html', t: 'AI 建模嚮導' },
       { re: /健康|預警|PHM|異常|振動/i, url: '/static/block_health.html', t: '設備健康預警' },
       { re: /最佳化|優化|配方/i, url: '/static/incinerator_flowsheet.html', t: '智慧運轉 → 最佳化' },
+      { re: /對照|點位|欄位|接數據|接資料/i, url: '/twin/mapping', t: '點位對照' },
       { re: /判讀|標示|審核|框選/i, url: '/twin/pid/label', t: 'P&ID 判讀工作台' },
       { re: /P&?ID|圖面/i, url: '/twin/pid', t: 'P&ID 工作流' },
       { re: /設計器|組.*孿生|flowsheet/i, url: '/static/flowsheet_builder.html', t: 'Flowsheet 設計器' },

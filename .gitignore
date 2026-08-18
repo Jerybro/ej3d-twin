@@ -64,3 +64,6 @@ data/pid_inspect/
 server_8600.err.log
 server_8600.out.log
 
+
+# 點位對照（執行期資料）
+data/pid_mapping/

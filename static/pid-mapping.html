@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>點位對照｜Process Intelligence</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #F6F7FA; --panel: #ffffff; --panel2: #F1F3F6;
+      --bdr: #DBDDE0; --accent: #046AFB; --accent-deep: #E3EDFE;
+      --text: #061027; --dim: #5C6773;
+      --hi: #12A150; --mid: #E0A415; --lo: #D93F3F;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; background: var(--bg); color: var(--text);
+      font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", sans-serif; font-size: 13px; }
+    button, input, select { font: inherit; }
+    .layout { display: flex; height: 100vh; }
+
+    /* ---------------------------------------------------------- 左欄 */
+    aside { width: 250px; flex-shrink: 0; border-right: 1px solid var(--bdr); background: var(--panel);
+      padding: 15px; overflow-y: auto; }
+    .head { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; }
+    .brand-home { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px;
+      border-radius: 6px; background: rgba(4,106,251,0.08); border: 1px solid var(--bdr); color: var(--accent);
+      font-size: 15px; font-weight: 700; text-decoration: none; }
+    h1 { font-size: 14.5px; font-weight: 700; }
+    .section-title { font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: 1px; margin: 15px 0 8px; }
+    .hint { font-size: 11.5px; color: var(--dim); line-height: 1.7; }
+    .ds { padding: 8px 10px; border-radius: 7px; border: 1px solid var(--bdr); background: var(--panel2);
+      margin-bottom: 5px; cursor: pointer; font-size: 12px; }
+    .ds:hover, .ds.on { border-color: var(--accent); }
+    .ds.on { background: var(--accent-deep); }
+    .ds b { display: block; word-break: break-all; }
+    .ds .m { color: var(--dim); font-size: 11px; margin-top: 2px; }
+    .dw { display: flex; align-items: center; gap: 7px; padding: 5px 2px; font-size: 12px; cursor: pointer; }
+    .dw input { accent-color: var(--accent); }
+    .mini-btn { padding: 5px 10px; border-radius: 6px; font-size: 11.5px; cursor: pointer;
+      background: var(--panel2); border: 1px solid var(--bdr); color: var(--text); }
+    .mini-btn:hover { border-color: var(--accent); }
+    .mini-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    .mini-btn:disabled { opacity: .4; pointer-events: none; }
+
+    /* ---------------------------------------------------------- 主區 */
+    main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .toolbar { height: 46px; flex-shrink: 0; border-bottom: 1px solid var(--bdr); background: var(--panel);
+      display: flex; align-items: center; gap: 10px; padding: 0 14px; }
+    .toolbar .sp { flex: 1; }
+    .doc { font-weight: 600; max-width: 380px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .seg { display: inline-flex; border: 1px solid var(--bdr); border-radius: 7px; overflow: hidden; }
+    .seg button { padding: 5px 12px; border: 0; border-left: 1px solid var(--bdr); background: transparent;
+      color: var(--dim); font-size: 12px; cursor: pointer; }
+    .seg button:first-child { border-left: 0; }
+    .seg button.on { background: var(--accent-deep); color: var(--accent); font-weight: 600; }
+    .search { padding: 5px 9px; border: 1px solid var(--bdr); border-radius: 6px; width: 200px; }
+    #stage { flex: 1; overflow: auto; padding: 14px; }
+    .stat-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    .stat { background: var(--panel); border: 1px solid var(--bdr); border-radius: 8px; padding: 8px 12px; min-width: 96px; }
+    .stat b { display: block; font-size: 18px; font-weight: 700; }
+    .stat span { font-size: 11px; color: var(--dim); }
+    .stat.ok b { color: var(--hi); } .stat.warn b { color: var(--mid); } .stat.bad b { color: var(--lo); }
+
+    /* 欄位視角：表格 */
+    table.pts { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--bdr); border-radius: 8px; overflow: hidden; }
+    .pts th { text-align: left; font-size: 11px; color: var(--dim); font-weight: 600; padding: 8px 8px; border-bottom: 1px solid var(--bdr); background: var(--panel2); white-space: nowrap; }
+    .pts td { padding: 6px 8px; border-bottom: 1px solid var(--bdr); vertical-align: middle; font-size: 12px; }
+    .pts tr:last-child td { border-bottom: 0; }
+    .pts tr.done td { background: rgba(18,161,80,0.05); }
+    .pts tr.ign td { opacity: .45; }
+    .pts tr:hover td { background: var(--accent-deep); }
+    .col { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; font-weight: 600; }
+    .num { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--dim); }
+    .num b { color: var(--text); font-weight: 600; }
+    .spark { display: inline-flex; align-items: flex-end; gap: 1px; height: 18px; }
+    .spark i { display: block; width: 4px; background: #9AA3AE; border-radius: 1px 1px 0 0; }
+    .pts input, .pts select { padding: 3px 6px; border: 1px solid var(--bdr); border-radius: 5px; background: #fff; font-size: 12px; }
+    .pts input.short { width: 58px; }
+    .pts input.rng { width: 66px; }
+    .pts select { max-width: 130px; }
+    .g { color: var(--dim); font-size: 10.5px; }
+    .g.guess { color: #8a5b00; }
+    .g.man { color: var(--accent); }
+    .chk { accent-color: var(--accent); width: 15px; height: 15px; }
+    .x { color: var(--dim); cursor: pointer; padding: 0 5px; }
+    .x:hover { color: var(--lo); }
+    .rowact { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+    .badge { display: inline-block; font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--bdr); color: var(--dim); }
+    .badge.guess { border-color: #E0A415; color: #8a5b00; background: rgba(224,164,21,.08); }
+    .badge.done { border-color: var(--hi); color: #0b6b36; background: rgba(18,161,80,.08); }
+    .badge.none { border-color: var(--lo); color: var(--lo); background: rgba(217,63,63,.06); }
+
+    /* 設備視角 */
+    .eqgrid { display: grid; grid-template-columns: 300px 1fr; gap: 12px; }
+    .eqlist { background: var(--panel); border: 1px solid var(--bdr); border-radius: 8px; max-height: calc(100vh - 170px); overflow-y: auto; }
+    .eq { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--bdr); cursor: pointer; font-size: 12px; }
+    .eq:last-child { border-bottom: 0; }
+    .eq:hover, .eq.on { background: var(--accent-deep); }
+    .eq b { min-width: 46px; font-variant-numeric: tabular-nums; }
+    .eq span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+    .eq .n { color: var(--text); font-weight: 600; min-width: 26px; text-align: right; }
+    .eq .n.zero { color: #C3CAD2; font-weight: 400; }
+    .eqdet { background: var(--panel); border: 1px solid var(--bdr); border-radius: 8px; padding: 12px 14px; }
+    .eqdet h3 { font-size: 15px; margin-bottom: 2px; }
+    .eqdet .sub { color: var(--dim); font-size: 12px; margin-bottom: 10px; }
+    .nb { display: flex; gap: 14px; margin: 8px 0 12px; font-size: 12px; }
+    .nb div { flex: 1; background: var(--panel2); border-radius: 7px; padding: 7px 10px; }
+    .nb b { display: block; font-size: 11px; color: var(--dim); font-weight: 600; margin-bottom: 3px; }
+    .empty { color: var(--dim); font-size: 12.5px; padding: 40px 0; text-align: center; }
+    #series { height: 90px; width: 100%; margin-top: 6px; }
+    .cover { position: sticky; top: 0; }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <div class="head"><a class="brand-home" href="/" title="回首頁">⌂</a><h1>點位對照</h1></div>
+    <div class="hint">把歷史數據的每一欄對到 P&amp;ID 上的設備，並確認量測項、單位、合理範圍。
+      對清楚才綁定孿生。</div>
+    <div class="section-title">資料集</div>
+    <div id="ds-list"><span class="hint">載入中…</span></div>
+    <div class="section-title">對照的圖面</div>
+    <div id="dw-list"><span class="hint">先選資料集</span></div>
+    <button class="mini-btn" id="dw-save" style="width:100%;margin-top:6px" disabled>套用圖面選擇</button>
+    <div class="hint" style="margin-top:12px">資料集來自「資料工作台」；圖面來自「P&amp;ID 判讀工作台」的資產模型。兩邊都做完才對得起來。</div>
+  </aside>
+
+  <main>
+    <div class="toolbar">
+      <span class="doc" id="doc">未選擇資料集</span>
+      <span class="sp"></span>
+      <span class="seg"><button class="on" data-view="cols">欄位視角</button><button data-view="eq">設備視角</button></span>
+      <input class="search" id="q" placeholder="搜欄位／位號／量測項" />
+    </div>
+    <div id="stage"><div class="empty">左側選一個資料集開始。</div></div>
+  </main>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+async function getJSON(url, opt) {
+  const r = await fetch(url, opt); const t = await r.text(); let d = null; try { d = JSON.parse(t); } catch {}
+  if (!r.ok) throw new Error((d && d.detail) || `伺服器錯誤 ${r.status}`); return d;
+}
+const fmt = v => v == null ? '—' : (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2));
+const MEASURES = ['流量','溫度','壓力','液位','電流','頻率','功率','電度','電壓','負載率','轉速','振動','設定值','運轉狀態','其他'];
+const UNITS = ['t/h','kg/h','m³/h','L/h','°C','kPa','bar','%','A','Hz','kW','kWh','V','rpm','mm/s',''];
+
+let sid = null, data = null, view = 'cols', drawingsAll = [], q = '';
+
+// ------------------------------------------------------------ 資料集
+async function loadDatasets() {
+  const el = $('ds-list');
+  try {
+    const rows = await getJSON('/api/pid/mapping/datasets');
+    if (!rows.length) { el.innerHTML = '<span class="hint">資料工作台裡沒有資料集。先去 <a href="/data">上傳</a>。</span>'; return; }
+    el.innerHTML = rows.map(r => `<div class="ds ${r.sid === sid ? 'on' : ''}" data-sid="${esc(r.sid)}">
+      <b>${esc(r.filename || r.sid)}</b>
+      <div class="m">${(r.n_rows || 0).toLocaleString()} 列｜已對 ${r.mapped || 0}／確認 ${r.confirmed || 0}${r.drawings && r.drawings.length ? `｜${r.drawings.length} 張圖` : ''}</div>
+    </div>`).join('');
+    el.querySelectorAll('.ds').forEach(d => d.addEventListener('click', () => open(d.dataset.sid)));
+    // 網址帶 ?sid= 直接開
+    const want = new URLSearchParams(location.search).get('sid');
+    if (want && !sid && rows.some(r => r.sid === want)) open(want);
+  } catch (e) { el.innerHTML = `<span class="hint">${esc(e.message)}</span>`; }
+}
+
+async function loadDrawings() {
+  try { drawingsAll = (await getJSON('/api/pid/list')).map(f => f.name); } catch { drawingsAll = []; }
+}
+
+function renderDrawings() {
+  const el = $('dw-list');
+  if (!sid) { el.innerHTML = '<span class="hint">先選資料集</span>'; $('dw-save').disabled = true; return; }
+  const chosen = new Set((data && data.drawings) || []);
+  el.innerHTML = drawingsAll.length ? drawingsAll.map(n => `<label class="dw"><input type="checkbox" value="${esc(n)}" ${chosen.has(n) ? 'checked' : ''}/> <span>${esc(n.replace(/\.pdf$/i, '').slice(0, 30))}</span></label>`).join('')
+    : '<span class="hint">還沒有圖面。先去 <a href="/twin/pid/label">判讀工作台</a> 上傳。</span>';
+  $('dw-save').disabled = false;
+}
+$('dw-save').addEventListener('click', async () => {
+  const picked = [...document.querySelectorAll('#dw-list input:checked')].map(i => i.value);
+  await getJSON(`/api/pid/mapping/${encodeURIComponent(sid)}/drawings`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ drawings: picked }) });
+  await reload();
+});
+
+async function open(s) {
+  sid = s; history.replaceState(null, '', `?sid=${encodeURIComponent(s)}`);
+  await reload(); loadDatasets();
+}
+async function reload() {
+  $('stage').innerHTML = '<div class="empty">計算欄位統計中…</div>';
+  try { data = await getJSON(`/api/pid/mapping/${encodeURIComponent(sid)}`); }
+  catch (e) { $('stage').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  $('doc').textContent = data.meta.filename || sid;
+  renderDrawings(); render();
+}
+
+// ------------------------------------------------------------ 畫面
+function spark(h, range) {
+  if (!h || !h.length) return '';
+  const mx = Math.max(...h, 1);
+  return `<span class="spark" title="分佈 ${fmt(range?.[0])} ~ ${fmt(range?.[1])}">${h.map(v => `<i style="height:${Math.max(2, v / mx * 18)}px"></i>`).join('')}</span>`;
+}
+function hit(p) {
+  if (!q) return true; const s = q.toLowerCase();
+  return [p.col, p.tag, p.tag_name, p.measure, p.sub].some(v => (v || '').toLowerCase().includes(s));
+}
+function summaryBar(s) {
+  return `<div class="stat-row">
+    <div class="stat"><b>${s.columns}</b><span>欄位</span></div>
+    <div class="stat ok"><b>${s.confirmed}</b><span>已確認</span></div>
+    <div class="stat warn"><b>${s.guessed}</b><span>系統猜的・待確認</span></div>
+    <div class="stat ${s.unassigned ? 'bad' : ''}"><b>${s.unassigned}</b><span>未歸戶</span></div>
+    <div class="stat"><b>${s.ignored}</b><span>已忽略</span></div>
+    <div class="stat"><b>${s.equipment_covered}／${s.equipment_total}</b><span>設備有數據</span></div>
+  </div>`;
+}
+
+function render() {
+  if (!data) return;
+  const st = $('stage');
+  if (!data.drawings.length) {
+    st.innerHTML = summaryBar(data.summary) + '<div class="empty">左側勾選這份資料要對到哪幾張圖，按「套用圖面選擇」，系統會先猜一輪。</div>';
+    return;
+  }
+  st.innerHTML = summaryBar(data.summary) + (view === 'cols' ? renderCols() : renderEq());
+  bind();
+}
+
+function tagOptions(cur) {
+  const eq = data.equipment || [];
+  return `<option value="">— 未歸戶 —</option>` + eq.map(e =>
+    `<option value="${esc(e.tag)}" ${e.tag === cur ? 'selected' : ''}>${esc(e.tag)}　${esc(e.name || '')}</option>`).join('');
+}
+function optList(arr, cur) {
+  const has = arr.includes(cur);
+  return arr.map(v => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(v || '（無）')}</option>`).join('')
+    + (has || !cur ? '' : `<option value="${esc(cur)}" selected>${esc(cur)}</option>`);
+}
+
+function renderCols() {
+  const rows = data.points.filter(hit);
+  const guessed = rows.filter(p => p.guess && p.tag && !p.ignored && (p.guess_conf || 0) >= 0.85);
+  return `<div class="rowact">
+      <button class="mini-btn primary" id="confirm-guessed" ${guessed.length ? '' : 'disabled'}>把 ${guessed.length} 個高信心猜測全部確認</button>
+      <span class="hint">每列可改設備／子部件／量測項／單位／合理範圍；改完按 ✓ 才算確認。合理範圍預設帶資料 p1～p99。</span>
+    </div>
+    <table class="pts"><thead><tr>
+      <th></th><th>欄位</th><th>分佈</th><th>平均</th><th>最小～最大</th><th>缺值</th>
+      <th>設備</th><th>子部件</th><th>量測項</th><th>單位</th><th>統計</th><th>合理範圍</th><th>狀態</th><th></th>
+    </tr></thead><tbody>${rows.map(p => rowHtml(p)).join('')}</tbody></table>`;
+}
+function rowHtml(p) {
+  const s = p.stats || {};
+  const state = p.ignored ? '<span class="badge">忽略</span>'
+    : p.confirmed ? '<span class="badge done">已確認</span>'
+    : p.tag ? `<span class="badge guess">猜的 ${Math.round((p.guess_conf || 0) * 100)}%</span>`
+    : '<span class="badge none">未歸戶</span>';
+  const rng = p.range_by === 'manual' ? '<span class="g man">人工設定</span>' : '<span class="g guess">系統推定 p1~p99</span>';
+  return `<tr class="${p.confirmed ? 'done' : ''}${p.ignored ? ' ign' : ''}" data-col="${esc(p.col)}">
+    <td><input type="checkbox" class="chk" data-sel="${esc(p.col)}"/></td>
+    <td class="col" title="${esc(p.col)}">${esc(p.col)}</td>
+    <td>${spark(s.hist, s.hist_range)}</td>
+    <td class="num"><b>${fmt(s.mean)}</b></td>
+    <td class="num">${fmt(s.min)} ～ ${fmt(s.max)}${s.n_unique <= 3 ? `<br><span class="g">只有 ${s.n_unique} 種值</span>` : ''}</td>
+    <td class="num">${s.missing_pct}%</td>
+    <td><select data-f="tag">${tagOptions(p.tag)}</select></td>
+    <td><input class="short" data-f="sub" value="${esc(p.sub || '')}" placeholder="M20"/></td>
+    <td><select data-f="measure">${optList(MEASURES, p.measure || '')}</select></td>
+    <td><select data-f="unit">${optList(UNITS, p.unit || '')}</select></td>
+    <td><input class="short" data-f="stat" value="${esc(p.stat || '')}" placeholder="平均"/></td>
+    <td class="num"><input class="rng" data-f="lo" value="${p.lo == null ? '' : fmt(p.lo)}"/> ～ <input class="rng" data-f="hi" value="${p.hi == null ? '' : fmt(p.hi)}"/><br>${rng}</td>
+    <td>${state}</td>
+    <td style="white-space:nowrap"><button class="mini-btn primary" data-ok="${esc(p.col)}" title="確認這一列">✓</button>
+      <span class="x" data-ign="${esc(p.col)}" title="${p.ignored ? '取消忽略' : '忽略這欄'}">${p.ignored ? '↺' : '×'}</span></td>
+  </tr>`;
+}
+
+function renderEq() {
+  const eq = (data.equipment || []).filter(e => !q || [e.tag, e.name].some(v => (v || '').toLowerCase().includes(q.toLowerCase())));
+  const cur = window._eqCur || (eq.find(e => e.points > 0) || eq[0] || {}).tag;
+  window._eqCur = cur;
+  const pts = data.points.filter(p => p.tag === cur && !p.ignored);
+  const e = (data.equipment || []).find(x => x.tag === cur);
+  return `<div class="eqgrid">
+    <div class="eqlist">${eq.map(x => `<div class="eq ${x.tag === cur ? 'on' : ''}" data-eq="${esc(x.tag)}">
+      <b>${esc(x.tag)}</b><span>${esc(x.name || '')}</span>
+      <span class="n ${x.points ? '' : 'zero'}">${x.points}</span></div>`).join('')}</div>
+    <div class="eqdet">${e ? `
+      <h3>${esc(e.tag)}　${esc(e.name || '')}</h3>
+      <div class="sub">${esc((e.drawing || '').replace(/\.pdf$/i, ''))}${e.on_drawing ? '' : '｜圖上尚未定位'}</div>
+      <div class="nb"><div><b>掛在這台底下的量測點</b>${pts.length} 個（確認 ${pts.filter(p => p.confirmed).length}、待確認 ${pts.filter(p => !p.confirmed).length}）</div></div>
+      ${pts.length ? `<table class="pts"><thead><tr><th>欄位</th><th>子部件</th><th>量測項</th><th>單位</th><th>統計</th><th>平均</th><th>合理範圍</th><th>狀態</th></tr></thead>
+        <tbody>${pts.map(p => `<tr class="${p.confirmed ? 'done' : ''}" data-col="${esc(p.col)}"><td class="col">${esc(p.col)}</td><td>${esc(p.sub || '—')}</td><td>${esc(p.measure || '—')}</td><td>${esc(p.unit || '—')}</td><td>${esc(p.stat || '—')}</td>
+          <td class="num"><b>${fmt(p.stats?.mean)}</b></td><td class="num">${fmt(p.lo)} ～ ${fmt(p.hi)}</td>
+          <td>${p.confirmed ? '<span class="badge done">已確認</span>' : '<span class="badge guess">待確認</span>'}</td></tr>`).join('')}</tbody></table>
+        <canvas id="series"></canvas><div class="hint" id="series-cap">點上表任一列看趨勢</div>`
+        : '<div class="empty">還沒有欄位對到這台設備。切到「欄位視角」把欄位指過來。</div>'}`
+      : '<div class="empty">左側選一台設備</div>'}</div>
+  </div>`;
+}
+
+// ------------------------------------------------------------ 綁定
+function bind() {
+  document.querySelectorAll('.seg button').forEach(b => b.onclick = () => { view = b.dataset.view; document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b)); render(); });
+  const cg = $('confirm-guessed');
+  if (cg) cg.onclick = async () => {
+    const cols = data.points.filter(p => p.guess && p.tag && !p.ignored && (p.guess_conf || 0) >= 0.85).map(p => p.col);
+    if (!confirm(`把 ${cols.length} 個系統猜測（設備／子部件／量測項／單位／合理範圍）直接標為已確認？\n之後仍可逐列改。`)) return;
+    await bulk(cols, 'confirm'); await reload();
+  };
+  document.querySelectorAll('[data-ok]').forEach(b => b.onclick = () => saveRow(b.dataset.ok));
+  document.querySelectorAll('[data-ign]').forEach(x => x.onclick = async () => {
+    const p = data.points.find(z => z.col === x.dataset.ign);
+    await bulk([x.dataset.ign], p && p.ignored ? 'unignore' : 'ignore'); await reload();
+  });
+  document.querySelectorAll('.eq').forEach(e => e.onclick = () => { window._eqCur = e.dataset.eq; render(); });
+  document.querySelectorAll('.eqdet tr[data-col]').forEach(tr => tr.onclick = () => showSeries(tr.dataset.col));
+  // 改任一輸入就標「人工設定」（合理範圍）並解除猜測狀態的視覺
+  document.querySelectorAll('.pts tr[data-col] [data-f]').forEach(inp => inp.addEventListener('change', () => {
+    const tr = inp.closest('tr'); if (inp.dataset.f === 'lo' || inp.dataset.f === 'hi') { const g = tr.querySelector('.g'); if (g) { g.textContent = '人工設定（未存）'; g.className = 'g man'; } }
+  }));
+}
+async function bulk(cols, action) {
+  return getJSON(`/api/pid/mapping/${encodeURIComponent(sid)}/bulk`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cols, action }) });
+}
+async function saveRow(col) {
+  const tr = document.querySelector(`tr[data-col="${CSS.escape(col)}"]`);
+  const p = data.points.find(z => z.col === col);
+  const g = f => tr.querySelector(`[data-f="${f}"]`)?.value ?? '';
+  const lo = g('lo') === '' ? null : parseFloat(g('lo')), hi = g('hi') === '' ? null : parseFloat(g('hi'));
+  const rangeChanged = (lo !== null && Math.abs(lo - (p.lo ?? NaN)) > 1e-9) || (hi !== null && Math.abs(hi - (p.hi ?? NaN)) > 1e-9);
+  const eq = (data.equipment || []).find(e => e.tag === g('tag'));
+  const body = { col, tag: g('tag'), drawing: eq ? eq.drawing : '', sub: g('sub').trim(), measure: g('measure'), unit: g('unit'),
+    stat: g('stat').trim(), lo, hi, range_by: (rangeChanged || p.range_by === 'manual') ? 'manual' : 'system', note: '', confirmed: true };
+  await getJSON(`/api/pid/mapping/${encodeURIComponent(sid)}/point`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  await reload();
+}
+async function showSeries(col) {
+  const cv = $('series'); if (!cv) return;
+  const d = await getJSON(`/api/pid/mapping/${encodeURIComponent(sid)}/series?col=${encodeURIComponent(col)}`);
+  const ctx = cv.getContext('2d'); const W = cv.width = cv.clientWidth, H = cv.height = 90;
+  ctx.clearRect(0, 0, W, H);
+  const vs = d.v.filter(v => v != null); if (!vs.length) return;
+  const mn = Math.min(...vs), mx = Math.max(...vs) || 1;
+  ctx.strokeStyle = '#046AFB'; ctx.lineWidth = 1.2; ctx.beginPath();
+  d.v.forEach((v, i) => { if (v == null) return; const x = i / (d.v.length - 1) * W, y = H - 4 - (v - mn) / (mx - mn || 1) * (H - 8); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.stroke();
+  $('series-cap').textContent = `${col}｜${d.t[0]} → ${d.t[d.t.length - 1]}｜${fmt(mn)} ～ ${fmt(mx)}`;
+}
+$('q').addEventListener('input', e => { q = e.target.value.trim(); render(); });
+
+loadDrawings().then(loadDatasets);
+</script>
+</body>
+</html>

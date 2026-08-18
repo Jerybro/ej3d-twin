@@ -104,6 +104,7 @@ async function renderMySets() {
       </div>
       <div class="ds-acts">
         ${s.sid === sid ? '' : `<a class="pri" href="/data?sid=${s.sid}">開啟</a>`}
+        <a href="/twin/mapping?sid=${s.sid}" title="把這份資料的欄位對到 P&ID 設備">點位對照</a>
         ${s.has_source ? `<a href="/api/data/${s.sid}/source">下載原檔</a>` : ''}
         <button class="dgr ms-del" data-sid="${s.sid}">刪除</button>
       </div>

@@ -10,7 +10,7 @@
   <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/" } }</script>
   <script>
     // 下段配色：預設炭灰（charcoal），可切淺色（light）；記在 localStorage，URL ?theme= 優先
-    (function () { var q = new URLSearchParams(location.search).get('theme'); var t = q || localStorage.getItem('pi-home-theme') || 'charcoal'; document.documentElement.dataset.theme = t; })();
+    (function () { var q = new URLSearchParams(location.search).get('theme'); var t = q || localStorage.getItem('pi-home-theme') || 'light'; document.documentElement.dataset.theme = t; })();
   </script>
   <style>
     :root {
@@ -170,9 +170,9 @@
     [data-theme="light"] .tm-btn .av { background: #0B1220; color: #fff; }
     [data-theme="light"] .tm-btn:hover { border-color: #9AA3AF; }
     [data-theme="light"] .theme-sw button.on { background: #0B1220; color: #fff; }
-    [data-theme="light"] .hero { background: #F4F5F7; }
-    [data-theme="light"] .hero .media { background: #F4F5F7; }
-    [data-theme="light"] .hero .media::after { background: linear-gradient(90deg, rgba(244,245,247,0.96) 0%, rgba(244,245,247,0.82) 28%, rgba(244,245,247,0.12) 58%, rgba(244,245,247,0) 100%), linear-gradient(180deg, rgba(244,245,247,0.35) 0%, transparent 25%, transparent 78%, #FFFFFF 100%); }
+    [data-theme="light"] .hero { background: #FFFFFF; }
+    [data-theme="light"] .hero .media { background: #FFFFFF; }
+    [data-theme="light"] .hero .media::after { background: linear-gradient(90deg, rgba(255,255,255,0.96) 0%, rgba(255,255,255,0.82) 28%, rgba(255,255,255,0.12) 58%, rgba(255,255,255,0) 100%), linear-gradient(180deg, rgba(255,255,255,0.35) 0%, transparent 25%, transparent 78%, #FFFFFF 100%); }
     [data-theme="light"] h1, [data-theme="light"] .lead, [data-theme="light"] .kicker { text-shadow: none; }
     [data-theme="light"] .btn-outline { border-color: rgba(11,18,32,0.35); color: #0B1220; }
     [data-theme="light"] .btn-outline:hover { border-color: #0B1220; background: rgba(11,18,32,0.05); }
@@ -342,7 +342,7 @@
     // 深/淺 切換
     (function () {
       var sw = document.getElementById('theme-sw'); if (!sw) return;
-      function paint() { var t = document.documentElement.dataset.theme || 'charcoal'; sw.querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', b.dataset.t === t); }); }
+      function paint() { var t = document.documentElement.dataset.theme || 'light'; sw.querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', b.dataset.t === t); }); }
       sw.addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; document.documentElement.dataset.theme = b.dataset.t; localStorage.setItem('pi-home-theme', b.dataset.t); paint(); if (window.__hero) window.__hero.setLight(b.dataset.t === 'light'); });
       paint();
     })();

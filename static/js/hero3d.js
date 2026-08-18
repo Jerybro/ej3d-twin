@@ -32,7 +32,7 @@ export function mountHero(container, opts = {}) {
   // 深／淺兩套環境參數（setLight 切換）
   const ENV = {
     dark:  { bg: 0x000000, fog: 0.011, floor: 0x0a0c0f, grid: [0x1c2026, 0x14171b], hemi: [0x9fbfff, 0x05070a, 0.35], key: 2.4, rim: 1.6, fill: 0.35, exposure: 1.0 },
-    light: { bg: 0xf4f5f7, fog: 0.007, floor: 0xe6e8ec, grid: [0xcfd3da, 0xdadde3], hemi: [0xffffff, 0xb8bcc4, 0.55], key: 2.0, rim: 0.7, fill: 0.5, exposure: 0.95 },
+    light: { bg: 0xffffff, fog: 0.007, floor: 0xeceef1, grid: [0xcfd3da, 0xdadde3], hemi: [0xffffff, 0xb8bcc4, 0.55], key: 2.0, rim: 0.7, fill: 0.5, exposure: 0.95 },
   };
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;

@@ -63,3 +63,6 @@ data/pid_notes/
 data/pid_inspect/
 server_8600.err.log
 server_8600.out.log
+
+# 情境流量（執行期資料）
+data/pid_scenario/

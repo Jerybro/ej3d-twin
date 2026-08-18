@@ -1073,7 +1073,15 @@ def _svg_of(m: dict, flow: dict | None = None, notes: list | None = None) -> str
     return "".join(p)
 
 
-def _svg_blind(m: dict, flow: dict | None = None, notes: list | None = None) -> str:
+def _fmt_flow(v) -> str:
+    if v is None:
+        return "—"
+    v = float(v)
+    return f"{v:.0f}" if v >= 100 else (f"{v:.1f}" if v >= 10 else f"{v:.2f}")
+
+
+def _svg_blind(m: dict, flow: dict | None = None, notes: list | None = None,
+               scn: dict | None = None) -> str:
     """真盲重建——只畫資料庫的**語意層**，一條原圖線稿都不描。
 
     _svg_of（描圖模式）的線稿／文字／氣泡幾何是建模時從原 PDF 轉錄的：
@@ -1104,6 +1112,8 @@ def _svg_blind(m: dict, flow: dict | None = None, notes: list | None = None) -> 
     #    樣式帶證據等級：圖面箭頭／人工＝深實線、VLM 判定＝藍實線、
     #    可疑＝紅虛線（項次號推測一律不畫——推論與事實不混）。
     n_edges = 0
+    # 情境流量：邊 (from,to) → 流量資訊，畫在肘形轉角處；均分推定用虛框
+    ef = {(x["from"], x["to"]): x for x in (scn or {}).get("edges", [])}
     if flow and flow.get("ok"):
         pos = {n["tag"]: n["bbox"] for n in flow["nodes"] if n.get("bbox")}
         EPS = 3.0
@@ -1141,6 +1151,23 @@ def _svg_blind(m: dict, flow: dict | None = None, notes: list | None = None) -> 
                 col, dash, mk = "#046AFB", "", ' marker-end="url(#bv)"'
             p.append(f'<path d="{d}" fill="none" stroke="{col}" stroke-width="2" '
                      f'stroke-linejoin="round" opacity="0.9"{dash}{mk}/>')
+            # ---- 邊上的流量：擺在肘形轉角（線的中點附近，避開兩端方塊）----
+            fx = ef.get((e["from"], e["to"]))
+            if fx and fx.get("value") is not None:
+                mx = (x1 + x2) / 2 if abs(x2 - x1) >= abs(y2 - y1) else x1
+                my = y1 if abs(x2 - x1) >= abs(y2 - y1) else (y1 + y2) / 2
+                lab = f'{_fmt_flow(fx["value"])} {fx.get("unit", "")}'
+                if fx.get("source") == "split":
+                    lab += f'　{fx.get("ratio", 0) * 100:.0f}%'
+                asm = fx.get("assumed", False)
+                bw = len(lab) * 6.0 + 10
+                fc = "#5C6773" if asm else col
+                dsh = ' stroke-dasharray="3 2"' if asm else ''
+                p.append(f'<rect x="{mx - bw / 2:.0f}" y="{my - 17:.0f}" width="{bw:.0f}" '
+                         f'height="14" rx="3" fill="#FFFFFF" stroke="{fc}" stroke-width="1"'
+                         f'{dsh} opacity="0.95"/>')
+                p.append(f'<text x="{mx:.0f}" y="{my - 6:.0f}" font-size="9.5" '
+                         f'fill="{fc}" text-anchor="middle" font-weight="600">{_x(lab)}</text>')
         p.append('</g>')
 
     # 2) 控制迴路信號線（ISA 虛線）：同迴路儀錶串起來
@@ -1166,6 +1193,34 @@ def _svg_blind(m: dict, flow: dict | None = None, notes: list | None = None) -> 
         p.append(f'<text x="{b[0] * W:.0f}" y="{(b[1] + b[3]) / 2 * H:.0f}" '
                  f'font-size="9" fill="#8A5B00" opacity="0.8">{_x(ln.get("raw", ""))}</text>')
 
+    # ---- 流量標籤（方塊底下）：已審方塊與待審候選共用 ----
+    sn = (scn or {}).get("nodes") or {}
+    over = {i["tags"][0] for i in (scn or {}).get("issues", [])
+            if i.get("kind") == "capacity" and i.get("tags")}
+
+    def _flow_badge(tag: str, x0: float, y0: float, w: float, h: float, hot: bool) -> None:
+        node = sn.get(tag)
+        if not node or (node.get("in") or {}).get("value") is None:
+            return
+        fi = node["in"]
+        src = fi.get("source", "")
+        assumed = bool(fi.get("assumed", False))
+        label = f'{_fmt_flow(fi["value"])} {fi.get("unit", "")}'
+        badge = ("人填" if src == "manual" else "加總" if src == "sum"
+                 else "推定" if assumed else "")
+        bw = max(len(label) * 6.2 + (26 if badge else 0) + 10, 40)
+        tx = x0 + w / 2
+        bx, by = tx - bw / 2, y0 + h + 4
+        bcol = "#7A4E00" if hot else ("#5C6773" if assumed else "#0B6B36")
+        dsh = ' stroke-dasharray="3 2"' if assumed else ''
+        p.append(f'<rect x="{bx:.0f}" y="{by:.0f}" width="{bw:.0f}" height="15" rx="3" '
+                 f'fill="#FFFFFF" stroke="{bcol}" stroke-width="1"{dsh}/>')
+        p.append(f'<text x="{bx + 5:.0f}" y="{by + 11:.0f}" font-size="10" '
+                 f'fill="{bcol}" font-weight="700">{_x(label)}</text>')
+        if badge:
+            p.append(f'<text x="{bx + bw - 5:.0f}" y="{by + 11:.0f}" font-size="9" '
+                     f'fill="{bcol}" text-anchor="end" opacity="0.85">{_x(badge)}</text>')
+
     # 4) 定位器候選（待審）：虛線框，與已審實線分兩級
     seen_cand: set = set()
     for e in m.get("equipment", []):
@@ -1186,8 +1241,11 @@ def _svg_blind(m: dict, flow: dict | None = None, notes: list | None = None) -> 
         p.append(f'<text x="{x0:.0f}" y="{y0 - 5:.0f}" font-size="11" '
                  f'fill="#0B8A46" opacity="0.85">{_x(e.get("tag", ""))}　'
                  f'{_x(e.get("name") or e.get("type") or "")}</text>')
+        _flow_badge(e.get("tag", ""), x0, y0, w, h, e.get("tag", "") in over)
 
     # 5) 已審設備：資料庫的設備方塊（位號＋名稱置中）
+    #    有情境結果時方塊下掛流量：數字＋來源籤（人填／推定／加總），
+    #    超產能的方塊變琥珀——數字在圖上流，這是資產模型比原圖多的價值。
     n_eq = 0
     for e in m.get("equipment", []):
         b = e.get("bbox")
@@ -1196,17 +1254,22 @@ def _svg_blind(m: dict, flow: dict | None = None, notes: list | None = None) -> 
         n_eq += 1
         x0, y0 = b[0] * W, b[1] * H
         w, h = (b[2] - b[0]) * W, (b[3] - b[1]) * H
+        tag = e.get("tag", "")
+        hot = tag in over
+        fill, stroke, tcol = (("rgba(224,164,21,0.14)", "#B7791F", "#7A4E00") if hot
+                              else ("rgba(11,138,70,0.05)", "#0B8A46", "#0B6B36"))
         p.append(f'<rect x="{x0:.0f}" y="{y0:.0f}" width="{w:.0f}" height="{h:.0f}" '
-                 'fill="rgba(11,138,70,0.05)" stroke="#0B8A46" stroke-width="2" rx="4"/>')
+                 f'fill="{fill}" stroke="{stroke}" stroke-width="2" rx="4"/>')
         name = e.get("name") or e.get("type") or ""
         fs = min(max(h * 0.22, 9), 13)
         tx, ty = x0 + w / 2, y0 + h / 2
         p.append(f'<text x="{tx:.0f}" y="{ty - 2:.0f}" font-size="{fs:.1f}" '
-                 f'fill="#0B6B36" text-anchor="middle" font-weight="700">'
-                 f'{_x(e.get("tag", ""))}</text>')
+                 f'fill="{tcol}" text-anchor="middle" font-weight="700">'
+                 f'{_x(tag)}</text>')
         if name:
             p.append(f'<text x="{tx:.0f}" y="{ty + fs:.0f}" font-size="{fs * 0.8:.1f}" '
-                     f'fill="#0B6B36" text-anchor="middle">{_x(name)}</text>')
+                     f'fill="{tcol}" text-anchor="middle">{_x(name)}</text>')
+        _flow_badge(tag, x0, y0, w, h, hot)
 
     # 6) 已審閥件：蝴蝶結符號由屬性生成
     n_vv = 0
@@ -1732,7 +1795,8 @@ def _flow_override_path(filename: str, domain: str) -> Path:
 
 @router.get("/{filename}/rebuild.svg")
 def model_rebuild_svg(filename: str, request: Request,
-                      flow: int = 1, notes: int = 1, mode: str = "trace"):
+                      flow: int = 1, notes: int = 1, mode: str = "trace",
+                      scenario: int = 0):
     """重建圖，兩種模式，驗的東西不同：
 
     · mode=trace（描圖）＝原圖幾何轉錄＋語意疊加。線稿／文字／氣泡是建模時
@@ -1754,8 +1818,18 @@ def model_rebuild_svg(filename: str, request: Request,
         from .pid_notes import list_notes
 
         nt = list_notes(filename, current_domain_of(request))
-    render = _svg_blind if mode == "blind" else _svg_of
-    return Response(content=render(m, fl, nt), media_type="image/svg+xml")
+    if mode == "blind":
+        # scenario=1：疊上使用中情境的靜態傳遞結果（數字在圖上流）
+        sc = None
+        if scenario:
+            try:
+                from .pid_scenario import scenario_run
+
+                sc = scenario_run(filename, request)
+            except Exception:  # noqa: BLE001
+                sc = None       # 沒情境／沒流向圖就畫沒數字的版本，不擋
+        return Response(content=_svg_blind(m, fl, nt, sc), media_type="image/svg+xml")
+    return Response(content=_svg_of(m, fl, nt), media_type="image/svg+xml")
 
 
 @router.get("/{filename}/annotated.jpg")

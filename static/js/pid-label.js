@@ -882,6 +882,34 @@ async function commitBox(i, box) {
   showRing(it.bbox, (it.tag || '') + ' 已重框');
 }
 
+// Delete／Backspace：刪掉目前選中的框。已入庫的打 API（留稽核、模型同步拿掉），
+// 待審候選只從佇列移除（沒入庫本來就沒東西可刪，等於否決不留痕——所以候選
+// 走 decide('rejected') 留稽核，語意一致）。
+async function deleteCurrent() {
+  const it = items[curIdx];
+  if (!it) return;
+  if (it.state !== 'accepted' || !it.id) {
+    // 未入庫：當否決處理（有稽核，不會靜默消失）——一樣要問過
+    if (!confirm(`刪掉「${it.tag || '（無位號）'}」這個候選框？\n（等同否決，會留稽核）`)) return;
+    if (it.state === 'pending') { await decide('rejected'); return; }
+    items.splice(curIdx, 1); curIdx = Math.min(curIdx, items.length - 1);
+    render(); return;
+  }
+  if (!confirm(`從資產庫刪除「${it.tag || '（無位號）'}」？\n會留稽核紀錄，「回到上一動」可還原。`)) return;
+  try {
+    const r = await fetch(
+      `/api/pid/vlm/annot/${encodeURIComponent(curFile)}/${encodeURIComponent(it.id)}`,
+      { method: 'DELETE' });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.status);
+    items.splice(curIdx, 1);
+    curIdx = Math.min(curIdx, items.length - 1);
+    clearRing();
+    render();
+    refreshRebuild();
+    checkStale();
+  } catch (err) { alert('刪除失敗：' + err.message); }
+}
+
 // 資產模型那側即時反映——後端在入庫/重框時已把該格 patch 進模型 JSON，
 // 重建圖是即時從 JSON 產的，所以換個 cache-buster 重載就會是新的。
 function refreshRebuild() {
@@ -2114,6 +2142,7 @@ document.addEventListener('keydown', e => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName || '')) || !items.length) return;
   const k = e.key.toLowerCase();
   if (e.key === 'Escape' && reboxIdx >= 0) { e.preventDefault(); cancelRebox(); return; }
+  if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteCurrent(); return; }
   if (k === 'e') { e.preventDefault(); startRebox(curIdx); }
   else if (k === 'y' || e.key === 'Enter') { e.preventDefault(); decide('accepted'); }
   else if (k === 'n') { e.preventDefault(); decide('rejected'); }

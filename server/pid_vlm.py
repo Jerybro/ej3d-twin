@@ -2529,11 +2529,15 @@ def annot_delete(filename: str, item_id: str, request: Request) -> dict:
     dom = current_domain(request)
     with ANNOT_LOCK:
         d = _load_annots(filename, dom)
-        before = len(d["items"])
-        d["items"] = [i for i in d["items"] if i.get("id") != item_id]
-        if len(d["items"]) == before:
+        gone = next((i for i in d["items"] if i.get("id") == item_id), None)
+        if gone is None:
             raise HTTPException(404, "標註不存在")
+        d["items"] = [i for i in d["items"] if i.get("id") != item_id]
         now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-        d["audit"].append({"at": now, "action": "delete", "id": item_id})
-        _save_annots(filename, d, dom, f"delete:{item_id}")
+        d["audit"].append({"at": now, "action": "delete", "id": item_id,
+                           "tag": gone.get("tag", ""), "kind": gone.get("kind", ""),
+                           "bbox": gone.get("bbox")})
+        _save_annots(filename, d, dom, f"delete:{gone.get('tag') or item_id}")
+    # 資產模型同步拿掉這一格：刪了框、模型上還畫著＝兩套真相
+    _sync_model(filename, dom, gone.get("kind", ""), gone.get("tag", ""), None)
     return {"ok": True, "count": len(d["items"])}

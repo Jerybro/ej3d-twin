@@ -409,8 +409,40 @@
       margin: 11px 0 5px; display: flex; align-items: center; gap: 6px; }
     .as-grp i { flex: 1; height: 1px; background: var(--bdr); }
     .as-row { border: 1px solid var(--bdr); border-radius: 7px; background: var(--panel2);
-      padding: 6px 9px; margin-bottom: 4px; font-size: 12px; cursor: pointer; }
+      padding: 6px 9px; margin-bottom: 4px; font-size: 12px; cursor: pointer; position: relative; }
     .as-row:hover { border-color: var(--accent); }
+    .as-row .as-x { position: absolute; top: 4px; right: 6px; width: 16px; height: 16px;
+      line-height: 15px; text-align: center; border-radius: 5px; color: var(--dim);
+      font-size: 13px; visibility: hidden; }
+    .as-row:hover .as-x { visibility: visible; }
+    .as-row .as-x:hover { background: rgba(217,63,63,0.12); color: var(--lo); }
+    .as-chip.dup { border-color: var(--lo); color: var(--lo); background: rgba(217,63,63,0.08); }
+    /* 情境流量面板 */
+    .scn { border: 1px solid var(--bdr); border-radius: 9px; background: var(--panel2);
+      margin-bottom: 10px; }
+    .scn summary { padding: 9px 12px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+      list-style: none; display: flex; align-items: baseline; gap: 6px; }
+    .scn summary::-webkit-details-marker { display: none; }
+    .scn summary::before { content: '›'; color: var(--dim); font-weight: 400; margin-right: 2px;
+      display: inline-block; transition: transform .12s; }
+    .scn[open] summary::before { transform: rotate(90deg); }
+    .scn-body { padding: 0 12px 11px; }
+    .scn-row { display: flex; gap: 6px; }
+    .scn-row input, .scn-row select { flex: 1; min-width: 0; font: inherit; font-size: 12px;
+      padding: 5px 8px; border: 1px solid var(--bdr); border-radius: 6px; background: var(--panel); }
+    .scn-feed { display: grid; grid-template-columns: 1fr 74px 60px; gap: 5px; align-items: center;
+      margin-bottom: 4px; font-size: 12px; }
+    .scn-feed b { font-weight: 600; }
+    .scn-feed .n { color: var(--dim); font-weight: 400; margin-left: 4px; }
+    .scn-feed input, .scn-feed select { font: inherit; font-size: 12px; padding: 4px 6px;
+      border: 1px solid var(--bdr); border-radius: 5px; background: var(--panel); min-width: 0; }
+    .scn-split { font-size: 12px; margin-bottom: 6px; }
+    .scn-split .h { font-weight: 600; margin-bottom: 3px; }
+    .scn-split .r { display: flex; gap: 5px; flex-wrap: wrap; }
+    .scn-split .r label { display: inline-flex; align-items: center; gap: 4px; }
+    .scn-split .r input { width: 52px; font: inherit; font-size: 12px; padding: 3px 5px;
+      border: 1px solid var(--bdr); border-radius: 5px; background: var(--panel); }
+    .scn-issue { color: #8a5b00; font-size: 11.5px; margin-top: 3px; }
     .as-row.nofix { cursor: default; opacity: 0.75; }
     .as-row .t { display: flex; align-items: center; gap: 6px; }
     .as-row .t b { font-size: 12.5px; }
@@ -605,6 +637,27 @@
           <button class="mini-btn primary" id="as-build"
                   style="width:100%;padding:9px;margin-bottom:10px">建立／更新資產模型</button>
           <div class="hint" id="as-state" style="margin-bottom:8px"></div>
+          <!-- 情境流量：資產模型掛數據的第一塊。起點設入料量 → 沿流向圖靜態傳遞 →
+               畫在資產模型（盲重建）上。數字帶來源：人填／推定／加總。 -->
+          <details class="scn" id="scn-box">
+            <summary>情境流量　<span class="hint" id="scn-sum">設起點入料量，看數字在圖上流</span></summary>
+            <div class="scn-body">
+              <div class="scn-row">
+                <input id="scn-name" placeholder="情境名稱（例：設計流量）" value="設計流量" />
+                <select id="scn-pick" title="切換情境"></select>
+              </div>
+              <div class="section-title" style="margin-top:8px">起點入料量</div>
+              <div id="scn-feeds" class="hint">先建立資產模型並確認幾台設備，才有起點可設。</div>
+              <div class="section-title" style="margin-top:8px">分流比例
+                <span class="hint" style="font-weight:400;letter-spacing:0">（沒填＝均分，圖上標「推定」）</span></div>
+              <div id="scn-splits" class="hint">尚無分流點。</div>
+              <div class="rev-act" style="margin-top:9px">
+                <button class="mini-btn primary" id="scn-run">儲存並跑一次</button>
+                <button class="mini-btn" id="scn-clear">清除圖上數字</button>
+              </div>
+              <div class="hint" id="scn-out" style="margin-top:6px"></div>
+            </div>
+          </details>
           <div id="as-body"></div>
         </div>
 
@@ -640,6 +693,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260818a"></script>
+  <script src="/static/js/pid-label.js?v=20260818b"></script>
 </body>
 </html>

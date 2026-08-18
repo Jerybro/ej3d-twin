@@ -29,6 +29,11 @@ export function mountHero(container, opts = {}) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
   scene.fog = new THREE.FogExp2(0x000000, 0.011);
+  // 深／淺兩套環境參數（setLight 切換）
+  const ENV = {
+    dark:  { bg: 0x000000, fog: 0.011, floor: 0x0a0c0f, grid: [0x1c2026, 0x14171b], hemi: [0x9fbfff, 0x05070a, 0.35], key: 2.4, rim: 1.6, fill: 0.35, exposure: 1.0 },
+    light: { bg: 0xf4f5f7, fog: 0.007, floor: 0xe6e8ec, grid: [0xcfd3da, 0xdadde3], hemi: [0xffffff, 0xb8bcc4, 0.55], key: 2.0, rim: 0.7, fill: 0.5, exposure: 0.95 },
+  };
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
@@ -99,9 +104,12 @@ export function mountHero(container, opts = {}) {
 
   // ---------- 地坪 ----------
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), M.floor); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
-  const grid = new THREE.GridHelper(120, 120, 0x1c2026, 0x14171b); grid.position.y = 0.01; grid.material.transparent = true; grid.material.opacity = 0.7; scene.add(grid);
+  const gridDark = new THREE.GridHelper(120, 120, ENV.dark.grid[0], ENV.dark.grid[1]); gridDark.position.y = 0.01; gridDark.material.transparent = true; gridDark.material.opacity = 0.7; scene.add(gridDark);
+  const gridLight = new THREE.GridHelper(120, 120, ENV.light.grid[0], ENV.light.grid[1]); gridLight.position.y = 0.01; gridLight.material.transparent = true; gridLight.material.opacity = 0.9; gridLight.visible = false; scene.add(gridLight);
   // 混凝土基座
-  const pad = add(at(box(30, 0.16, 22, new THREE.MeshStandardMaterial({ color: 0x15181c, roughness: 0.9 })), 0.5, 0.08, 0.5));
+  M.pad = new THREE.MeshStandardMaterial({ color: 0x15181c, roughness: 0.9 });
+  M.bund = new THREE.MeshStandardMaterial({ color: 0x0f1216, roughness: 0.95 });
+  const pad = add(at(box(30, 0.16, 22, M.pad), 0.5, 0.08, 0.5));
 
   // ---------- 儲槽 ×2 ----------
   for (const [tx, tz] of [[5.2, -3.2], [10.4, -3.2]]) {
@@ -116,7 +124,7 @@ export function mountHero(container, opts = {}) {
   }
   // 儲槽防溢堤
   add(at(box(9.4, 0.5, 4.8, M.dark), 7.8, 0.4, -3.2));
-  add(at(box(9.0, 0.6, 4.4, new THREE.MeshStandardMaterial({ color: 0x0f1216, roughness: 0.95 })), 7.8, 0.35, -3.2));
+  add(at(box(9.0, 0.6, 4.4, M.bund), 7.8, 0.35, -3.2));
 
   // ---------- 精餾塔 ----------
   const cx = -3.4, cz = -3.6;
@@ -178,11 +186,26 @@ export function mountHero(container, opts = {}) {
   }
 
   // ---------- 燈光 ----------
-  scene.add(new THREE.HemisphereLight(0x9fbfff, 0x05070a, 0.35));
+  const hemi = new THREE.HemisphereLight(0x9fbfff, 0x05070a, 0.35); scene.add(hemi);
   const key = new THREE.DirectionalLight(0xffffff, 2.4); key.position.set(12, 20, 10); key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -22, right: 22, top: 22, bottom: -22, near: 1, far: 70 }); key.shadow.bias = -0.0006; key.shadow.normalBias = 0.02; scene.add(key);
   const rim = new THREE.DirectionalLight(0x3b8bff, 1.6); rim.position.set(-16, 9, -12); scene.add(rim);
   const fill = new THREE.DirectionalLight(0xffe0c0, 0.35); fill.position.set(-6, 6, 16); scene.add(fill);
+
+  // 深／淺切換（即時，不重載）
+  let isLight = false;
+  function setLight(on) {
+    isLight = !!on; const e = isLight ? ENV.light : ENV.dark;
+    scene.background.setHex(e.bg); scene.fog.color.setHex(e.bg); scene.fog.density = e.fog;
+    M.floor.color.setHex(e.floor);
+    M.pad.color.setHex(isLight ? 0xd3d7de : 0x15181c); M.bund.color.setHex(isLight ? 0xc4c9d1 : 0x0f1216);
+    gridDark.visible = !isLight; gridLight.visible = isLight;
+    hemi.color.setHex(e.hemi[0]); hemi.groundColor.setHex(e.hemi[1]); hemi.intensity = e.hemi[2];
+    key.intensity = e.key; rim.intensity = e.rim; fill.intensity = e.fill;
+    renderer.toneMappingExposure = e.exposure;
+    fireLight.intensity = isLight ? 3 : 6;
+  }
+  if (opts.light) setLight(true);
 
   // ---------- 標註層 ----------
   const anno = document.createElement('div'); anno.className = 'anno'; container.appendChild(anno);
@@ -243,5 +266,5 @@ export function mountHero(container, opts = {}) {
   }
   place(0); renderer.render(scene, camera); updateAnno();
   requestAnimationFrame(frame);
-  return { renderer, scene, camera };
+  return { renderer, scene, camera, setLight };
 }

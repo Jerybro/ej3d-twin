@@ -164,6 +164,31 @@
     .theme-sw button.on { background: #fff; color: #000; }
     .theme-sw button:not(.on):hover { color: var(--text); }
     @media (max-width: 640px) { .theme-sw button span { display: none; } .theme-sw button { padding: 0 8px; } }
+    /* ---- 淺色模式：整頁（導覽＋首屏 3D＋下段）---- */
+    [data-theme="light"] { --text: #0B1220; --text2: #4F5A6B; --text3: #8A93A3; --line: #E4E7EC; --line-2: #CFD4DC; --accent-text: #046AFB; }
+    [data-theme="light"] body { background: #FFFFFF; }
+    [data-theme="light"] nav.top { background: rgba(255,255,255,0.86); }
+    [data-theme="light"] .brand .mark { background: #052E22; }
+    [data-theme="light"] .tm-btn .av { background: #0B1220; color: #fff; }
+    [data-theme="light"] .tm-btn:hover { border-color: #9AA3AF; }
+    [data-theme="light"] .theme-sw button.on { background: #0B1220; color: #fff; }
+    [data-theme="light"] .hero { background: #F4F5F7; }
+    [data-theme="light"] .hero .media { background: #F4F5F7; }
+    [data-theme="light"] .hero .media::after { background: linear-gradient(90deg, rgba(244,245,247,0.96) 0%, rgba(244,245,247,0.82) 28%, rgba(244,245,247,0.12) 58%, rgba(244,245,247,0) 100%), linear-gradient(180deg, rgba(244,245,247,0.35) 0%, transparent 25%, transparent 78%, #FFFFFF 100%); }
+    [data-theme="light"] h1, [data-theme="light"] .lead, [data-theme="light"] .kicker { text-shadow: none; }
+    [data-theme="light"] .btn-outline { border-color: rgba(11,18,32,0.35); color: #0B1220; }
+    [data-theme="light"] .btn-outline:hover { border-color: #0B1220; background: rgba(11,18,32,0.05); }
+    [data-theme="light"] .ai-row { background: rgba(255,255,255,0.9); border-color: #CFD4DC; }
+    [data-theme="light"] .ai-row input { color: #0B1220; }
+    [data-theme="light"] .ai-go { background: #0B1220; color: #fff; }
+    [data-theme="light"] .ai-go:hover { background: #000; }
+    [data-theme="light"] .ai-chip { border-color: #CFD4DC; color: #4F5A6B; }
+    [data-theme="light"] .ai-chip:hover { border-color: #0B1220; color: #0B1220; }
+    [data-theme="light"] .ai-result { color: #4F5A6B; }
+    [data-theme="light"] .hero .anno .bx { border-color: rgba(11,18,32,0.5); }
+    [data-theme="light"] .hero .anno .bx::before, [data-theme="light"] .hero .anno .bx::after { border-color: #0B1220; }
+    [data-theme="light"] .hero .anno .lb { color: #0B1220; background: rgba(255,255,255,0.9); border-color: rgba(11,18,32,0.25); }
+    [data-theme="light"] .demo-tag { color: #6b7280; background: rgba(255,255,255,0.8); border-color: #d5d9e0; }
     /* ---- 下段配色主題（?theme=charcoal|navy|light；首屏一律黑） ---- */
     main { background: var(--bg); color: var(--text); }
     main section.alt { background: var(--bg-2); }
@@ -320,7 +345,7 @@
     (function () {
       var sw = document.getElementById('theme-sw'); if (!sw) return;
       function paint() { var t = document.documentElement.dataset.theme || 'charcoal'; sw.querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', b.dataset.t === t); }); }
-      sw.addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; document.documentElement.dataset.theme = b.dataset.t; localStorage.setItem('pi-home-theme', b.dataset.t); paint(); });
+      sw.addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; document.documentElement.dataset.theme = b.dataset.t; localStorage.setItem('pi-home-theme', b.dataset.t); paint(); if (window.__hero) window.__hero.setLight(b.dataset.t === 'light'); });
       paint();
     })();
     const ROUTES = [
@@ -344,7 +369,7 @@
   </script>
   <script type="module">
     import { mountHero } from '/static/js/hero3d.js';
-    try { mountHero(document.getElementById('hero3d'), { targetX: -7.5, labels: { tanks: 'Storage tanks', column: 'Distillation column', reactor: 'Reactor', drum: 'Horizontal drum', furnace: 'Fired heater', stack: 'Stack', pipes: 'Process piping · pipe rack' } }); } catch (e) { console.warn('hero3d', e); }
+    try { window.__hero = mountHero(document.getElementById('hero3d'), { light: document.documentElement.dataset.theme === 'light', targetX: -7.5, labels: { tanks: 'Storage tanks', column: 'Distillation column', reactor: 'Reactor', drum: 'Horizontal drum', furnace: 'Fired heater', stack: 'Stack', pipes: 'Process piping · pipe rack' } }); } catch (e) { console.warn('hero3d', e); }
   </script>
 </body>
 </html>

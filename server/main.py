@@ -598,7 +598,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # ------------------------------------------------------------------ 頁面路由
 PAGES = {
-    "/": "home.html",          # 平台首頁（產品導航）
+    "/": "home_v4.html",       # 平台首頁：3D 主視覺純白版（2026-08-18 取代舊版；舊版仍在 /static/home.html）
     "/twin": "index.html",     # 產品3：3D 數位孿生檢視
     "/studio": "editor.html",  # 產品3：J.S_3D Studio 設計工作室（獨立入口）
     "/e3d": "editor.html",     # 舊路徑別名（既有連結相容）

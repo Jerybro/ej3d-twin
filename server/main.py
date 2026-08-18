@@ -450,11 +450,6 @@ from .pid_notes import router as pid_notes_router  # noqa: E402
 
 app.include_router(pid_notes_router)
 
-# ------------------------------------ P&ID 情境流量傳遞（資產模型掛數據第一塊）
-from .pid_scenario import router as pid_scenario_router  # noqa: E402
-
-app.include_router(pid_scenario_router)
-
 # --------------------------------------------------------- 登入與權限（Google OAuth）
 from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
 

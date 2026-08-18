@@ -281,7 +281,6 @@ async function openDoc(name) {
   $('flow-btn').style.display = '';
   $('rebuild-img').dataset.for = '';        // 換圖要重抓重建圖
   flowEdges = null;                          // 流向命中線也是圖的一部分
-  scnOn = false; scnMeta = null;
 }
 
 // 開掃之前先告訴使用者這張圖是什麼體系、將套用哪份規範、信心多少。
@@ -339,7 +338,7 @@ function setCompare(mode) {
     img.src = rbMode === 'annot'
       ? `/api/pid/model/${encodeURIComponent(curFile)}/annotated.jpg?t=${Date.now()}`
       : `/api/pid/model/${encodeURIComponent(curFile)}/rebuild.svg` +
-        `?mode=${rbMode}&scenario=${scnOn ? 1 : 0}&t=${Date.now()}`;
+        `?mode=${rbMode}&t=${Date.now()}`;
   }
   // 流向邊命中線：模型側一開就載（點箭頭改方向要用）
   if (mode !== 'off' && curFile) {
@@ -392,105 +391,6 @@ function bindRebuildPan() {
     addEventListener('pointerup', up);
   });
 }
-
-// ------------------------------------------------------------ 情境流量
-// 資產模型掛數據的第一塊：起點設入料量 → 靜態沿流向圖傳遞 → 畫在盲重建圖上。
-// 面板只做三件事：列起點填數字、列分流點填比例、按一下跑；顯示交給
-// rebuild.svg?scenario=1（後端已把數字與來源籤畫進圖）。
-let scnMeta = null;          // GET scenario 的回傳（starts / split_points / scenarios / active）
-let scnOn = false;           // 圖上要不要疊數字（跑過一次就開；清除就關）
-
-async function loadScenario() {
-  if (!curFile) return;
-  const feeds = $('scn-feeds'), splits = $('scn-splits'), pick = $('scn-pick');
-  try {
-    scnMeta = await getJSON(`/api/pid/model/${encodeURIComponent(curFile)}/scenario`);
-  } catch (e) {
-    scnMeta = null;
-    feeds.innerHTML = '<span class="hint">' + esc(e.message || '尚無流向圖') + '</span>';
-    splits.innerHTML = '';
-    return;
-  }
-  const names = Object.keys(scnMeta.scenarios || {});
-  pick.innerHTML = names.length
-    ? names.map(n => `<option value="${esc(n)}"${n === scnMeta.active ? ' selected' : ''}>${esc(n)}</option>`).join('')
-    : '<option value="">（尚無已存情境）</option>';
-  const cur = scnMeta.scenarios[scnMeta.active] || { feeds: {}, splits: {} };
-  if (scnMeta.active) $('scn-name').value = scnMeta.active;
-  const cap = scnMeta.capacity || {};
-  // 起點：入料量＋單位。有清冊產能的順手顯示（填了超過會在圖上變琥珀）
-  feeds.innerHTML = (scnMeta.starts || []).length ? scnMeta.starts.map(s => {
-    const f = cur.feeds[s.tag] || {};
-    return `<div class="scn-feed">
-      <div><b>${esc(s.tag)}</b><span class="n">${esc(s.name || '')}${cap[s.tag] ? `・產能 ${cap[s.tag]}` : ''}</span></div>
-      <input type="number" step="any" data-feed="${esc(s.tag)}" placeholder="—" value="${f.value ?? ''}" />
-      <select data-unit="${esc(s.tag)}">
-        ${['t/h', 'kg/h', 'm³/h', 'L/h', 'kg/批'].map(u => `<option${(f.unit || 't/h') === u ? ' selected' : ''}>${u}</option>`).join('')}
-      </select></div>`;
-  }).join('') : '<span class="hint">流向圖裡沒有起點（每台設備都有上游）。</span>';
-  // 分流點：每個下游一格比例；空＝均分
-  splits.innerHTML = (scnMeta.split_points || []).length ? scnMeta.split_points.map(sp => {
-    const r = cur.splits[sp.tag] || {};
-    return `<div class="scn-split"><div class="h">${esc(sp.tag)} <span class="hint">${esc(sp.name || '')}</span> → </div>
-      <div class="r">${sp.to.map(t => `<label>${esc(t)}
-        <input type="number" step="any" min="0" max="1" data-split="${esc(sp.tag)}" data-to="${esc(t)}"
-               placeholder="${(1 / sp.to.length).toFixed(2)}" value="${r[t] ?? ''}" /></label>`).join('')}</div></div>`;
-  }).join('') : '<span class="hint">尚無分流點。</span>';
-  $('scn-sum').textContent = scnMeta.active
-    ? `使用中：${scnMeta.active}（${Object.keys(cur.feeds).length} 個起點有數字）`
-    : '設起點入料量，看數字在圖上流';
-}
-
-async function runScenario() {
-  if (!curFile || !scnMeta) return;
-  const feeds = {}, splits = {};
-  document.querySelectorAll('#scn-feeds [data-feed]').forEach(inp => {
-    const v = inp.value.trim();
-    if (v === '') return;
-    const unit = document.querySelector(`#scn-feeds [data-unit="${CSS.escape(inp.dataset.feed)}"]`)?.value || 't/h';
-    feeds[inp.dataset.feed] = { value: parseFloat(v), unit, source: 'manual' };
-  });
-  document.querySelectorAll('#scn-splits [data-split]').forEach(inp => {
-    const v = inp.value.trim();
-    if (v === '') return;
-    (splits[inp.dataset.split] ||= {})[inp.dataset.to] = parseFloat(v);
-  });
-  const name = $('scn-name').value.trim() || '設計流量';
-  const out = $('scn-out');
-  out.innerHTML = '<span class="spin"></span> 傳遞中…';
-  try {
-    await getJSON(`/api/pid/model/${encodeURIComponent(curFile)}/scenario`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, feeds, splits, units: {} }),
-    });
-    const r = await getJSON(`/api/pid/model/${encodeURIComponent(curFile)}/scenario/run`, { method: 'POST' });
-    const st = r.stats || {};
-    out.innerHTML = `流到 <b>${st.fed}</b>／${st.nodes} 台設備｜分流推定 ${st.assumed_splits} 處`
-      + (r.issues && r.issues.length ? `<div class="scn-issue">${r.issues.map(i => esc(i.msg)).join('<br>')}</div>` : '')
-      + (st.fed < st.nodes ? '<div class="hint">數字沒流到的設備＝流向圖沒接到它——去「製程順序圖」或在資產模型上點箭頭補方向。</div>' : '');
-    scnOn = true;
-    // 沒開比對就自動切「僅資產模型」——數字畫在那張圖上，人要看得到才有意義
-    if (cmpMode === 'off') setCompare('only');
-    else refreshRebuild();
-    loadScenario();
-  } catch (e) {
-    out.textContent = '失敗：' + (e.message || '');
-  }
-}
-
-$('scn-run').addEventListener('click', runScenario);
-$('scn-clear').addEventListener('click', () => { scnOn = false; refreshRebuild(); $('scn-out').textContent = ''; });
-$('scn-pick').addEventListener('change', async e => {
-  const n = e.target.value;
-  if (!n || !scnMeta || !scnMeta.scenarios[n]) return;
-  // 切換情境＝把那組設為使用中（PUT 同內容），再重載面板與圖
-  const sc = scnMeta.scenarios[n];
-  await getJSON(`/api/pid/model/${encodeURIComponent(curFile)}/scenario`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: n, feeds: sc.feeds || {}, splits: sc.splits || {}, units: sc.units || {} }),
-  }).catch(() => {});
-  scnOn = true; loadScenario(); refreshRebuild();
-});
 
 // ---------------------------------------------------- 流向邊的人工修正
 // 資產模型上的箭頭是拓撲結論，畫在 SVG 圖片裡點不到——這裡在模型側疊一層
@@ -1019,7 +919,7 @@ function refreshRebuild() {
   img.src = rbMode === 'annot'
     ? `/api/pid/model/${encodeURIComponent(curFile)}/annotated.jpg?t=${Date.now()}`
     : `/api/pid/model/${encodeURIComponent(curFile)}/rebuild.svg` +
-      `?mode=${rbMode}&scenario=${scnOn ? 1 : 0}&t=${Date.now()}`;
+      `?mode=${rbMode}&t=${Date.now()}`;
 }
 
 // ------------------------------------------------------ 批次確認候選
@@ -2002,7 +1902,6 @@ async function loadModel(silent) {
     renderModel();
     $('as-state').textContent = '上次建模：' +
       (assetModel.built_at || '').replace('T', ' ').slice(0, 16);
-    loadScenario();            // 情境面板：起點／分流點來自流向圖
     // 已經建過模＝定位候選早就算好了，開圖就該看得到。
     // 原本只在「重新辨識整張圖面」之後才補進佇列，等於逼人為了看候選去跑
     // 一次全圖 VLM 掃描（慢又花錢），而那 85 台候選其實已經躺在模型裡。

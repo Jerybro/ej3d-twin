@@ -70,7 +70,38 @@ def _load(sid: str, domain: str) -> dict:
     d.setdefault("drawings", [])
     d.setdefault("points", {})
     d.setdefault("ignored", [])
+    d.setdefault("audit", [])
     return d
+
+
+# 綁定也要簽名（Jery 2026-08-19）：每個點位記「最後動的人」（by/at）與
+# 「簽名的人」（signed_by/signed_at——只有按確認才寫、解除確認就清掉），
+# 另外整份對照檔留一條只增不刪的 audit 流水，誰什麼時候把哪一欄綁到哪台、
+# 確認、解綁、忽略，全部可追；跟台帳的稽核同一套精神。
+AUDIT_KEEP = 3000
+
+
+def _audit(d: dict, who: str, now: str, action: str, col: str, **detail) -> None:
+    d["audit"].append({"at": now, "by": who, "action": action, "col": col, **detail})
+    if len(d["audit"]) > AUDIT_KEEP:
+        d["audit"] = d["audit"][-AUDIT_KEEP:]
+
+
+def _sign(rec: dict, who: str, now: str, prev: dict | None) -> dict:
+    """確認＝簽名：confirmed 且（之前沒簽、或內容變了）就用現在的人重簽；
+    取消確認就把簽名拿掉。簽名欄位不讓前端傳，只由伺服器寫。"""
+    rec.pop("signed_by", None)
+    rec.pop("signed_at", None)
+    if not rec.get("confirmed"):
+        return rec
+    keys = ("tag", "sub", "measure", "unit", "stat", "lo", "hi", "drawing")
+    same = prev is not None and prev.get("confirmed") and prev.get("signed_at") \
+        and all(prev.get(k) == rec.get(k) for k in keys)
+    if same:
+        rec["signed_by"], rec["signed_at"] = prev["signed_by"], prev["signed_at"]
+    else:
+        rec["signed_by"], rec["signed_at"] = who, now
+    return rec
 
 
 def _save(sid: str, domain: str, d: dict) -> None:
@@ -279,6 +310,7 @@ def mapping_get(sid: str, request: Request) -> dict:
                 cover[t]["guessed"] += 1
     return {
         "meta": meta, "drawings": d["drawings"], "points": rows,
+        "audit": d.get("audit", [])[-60:][::-1],     # 最近 60 筆，新的在前
         "equipment": sorted(cover.values(), key=lambda x: _num_key(x["tag"])),
         "summary": {
             "columns": len(rows),
@@ -315,16 +347,27 @@ def mapping_put_point(sid: str, req: PointReq, request: Request) -> dict:
     from .auth import current_actor, current_domain
 
     dom = current_domain(request)
+    who = current_actor(request)
+    now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
     rec = req.model_dump()
-    rec["by"] = current_actor(request)
-    rec["at"] = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    rec["by"], rec["at"] = who, now
     with _LOCK:
         d = _load(sid, dom)
+        prev = d["points"].get(req.col)
+        rec = _sign(rec, who, now, prev)
         d["points"][req.col] = rec
         if req.col in d["ignored"]:
             d["ignored"].remove(req.col)
+        if prev is None or prev.get("tag") != rec.get("tag"):
+            _audit(d, who, now, "assign", req.col, tag=rec.get("tag", ""), sub=rec.get("sub", ""))
+        if rec.get("confirmed") and not (prev and prev.get("confirmed")):
+            _audit(d, who, now, "confirm", req.col, tag=rec.get("tag", ""), measure=rec.get("measure", ""),
+                   unit=rec.get("unit", ""), lo=rec.get("lo"), hi=rec.get("hi"))
+        elif rec.get("confirmed") and rec.get("signed_at") == now:
+            _audit(d, who, now, "update", req.col, tag=rec.get("tag", ""), measure=rec.get("measure", ""),
+                   unit=rec.get("unit", ""), lo=rec.get("lo"), hi=rec.get("hi"))
         _save(sid, dom, d)
-    return {"ok": True}
+    return {"ok": True, "signed_by": rec.get("signed_by"), "signed_at": rec.get("signed_at")}
 
 
 class BulkReq(BaseModel):
@@ -355,9 +398,11 @@ def mapping_bulk(sid: str, req: BulkReq, request: Request) -> dict:
             stat_of = {c["col"]: c for c in cols}
             for col in req.cols:
                 if col in d["points"]:
-                    d["points"][col]["confirmed"] = True
-                    d["points"][col]["by"] = who
-                    d["points"][col]["at"] = now
+                    prev = d["points"][col]
+                    rec = {**prev, "confirmed": True, "by": who, "at": now}
+                    d["points"][col] = _sign(rec, who, now, prev)
+                    if not prev.get("confirmed"):
+                        _audit(d, who, now, "confirm", col, tag=rec.get("tag", ""), bulk=True)
                     n += 1
                     continue
                 if col not in stat_of:
@@ -370,19 +415,26 @@ def mapping_bulk(sid: str, req: BulkReq, request: Request) -> dict:
                                     "drawing": names.get(tag, {}).get("drawing", ""),
                                     "lo": c.get("p1"), "hi": c.get("p99"),
                                     "range_by": "system", "note": "",
-                                    "confirmed": True, "by": who, "at": now}
+                                    "confirmed": True, "by": who, "at": now,
+                                    "signed_by": who, "signed_at": now}
+                _audit(d, who, now, "confirm", col, tag=tag, bulk=True, guessed=True)
                 n += 1
         elif req.action == "ignore":
             for col in req.cols:
                 if col not in d["ignored"]:
                     d["ignored"].append(col)
+                    _audit(d, who, now, "ignore", col)
                     n += 1
         elif req.action == "unignore":
+            for col in req.cols:
+                if col in d["ignored"]:
+                    _audit(d, who, now, "unignore", col)
             d["ignored"] = [c for c in d["ignored"] if c not in req.cols]
             n = len(req.cols)
         elif req.action == "clear":
             for col in req.cols:
                 if col in d["points"]:
+                    _audit(d, who, now, "unassign", col, tag=d["points"][col].get("tag", ""))
                     del d["points"][col]
                     n += 1
         else:

@@ -65,10 +65,38 @@
     /* 設備方塊：顏色＝數據狀態 */
     .eqb { position: absolute; border: 2px solid #B8BFC8; border-radius: 3px; cursor: pointer;
       background: rgba(184,191,200,0.06); transition: box-shadow .12s; }
-    .eqb.some { border-color: var(--mid); background: rgba(224,164,21,0.10); }
-    .eqb.done { border-color: var(--hi); background: rgba(18,161,80,0.10); }
-    .eqb.cur { box-shadow: 0 0 0 3px rgba(4,106,251,0.35); border-color: var(--accent); }
-    .eqb.drop { box-shadow: 0 0 0 4px rgba(4,106,251,0.5); background: rgba(4,106,251,0.16); }
+    /* 有綁數據的要一眼看出來：標示模式底圖本來就一堆綠框綠字，淡淡一層會被吃掉——
+       所以加粗、填色拉高、外圈再描一圈白邊把它從底圖抬起來 */
+    .eqb.some { border: 3px solid var(--mid); background: rgba(224,164,21,0.28);
+      box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(224,164,21,0.55); }
+    .eqb.done { border: 3px solid var(--hi); background: rgba(18,161,80,0.30);
+      box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(18,161,80,0.6); }
+    .eqb.cur { box-shadow: 0 0 0 2px #fff, 0 0 0 5px rgba(4,106,251,0.55); border-color: var(--accent); }
+    .eqb.drop { box-shadow: 0 0 0 2px #fff, 0 0 0 6px rgba(4,106,251,0.6); background: rgba(4,106,251,0.22); }
+    .eqb.some .lb { color: #7A5400; background: rgba(255,246,220,.95); font-weight: 600; }
+    .eqb.done .lb { color: #0B5A2E; background: rgba(222,245,230,.95); font-weight: 600; }
+    /* 數據狀態欄：貼在方塊右側，列出已綁點位的平均值——右上「數據狀態」開關控制 */
+    .eqs { position: absolute; left: calc(100% + 6px); top: 0; min-width: 92px; max-width: 190px; padding: 3px 6px;
+      border-radius: 4px; background: rgba(255,255,255,.96); border: 1px solid #CFD6DE; font-size: 10px; line-height: 1.35;
+      color: var(--text); pointer-events: none; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,.08); z-index: 2; }
+    .eqs .r { display: flex; justify-content: space-between; gap: 8px; }
+    .eqs .r .k { color: var(--dim); overflow: hidden; text-overflow: ellipsis; max-width: 110px; }
+    .eqs .r .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+    .eqs .r.ok .v { color: #0B5A2E; }
+    .eqs .r.g .v { color: #7A5400; }
+    .eqs .more { color: var(--dim); font-size: 9.5px; }
+    #ov.nostat .eqs { display: none; }
+    .eqb.cur .eqs { border-color: var(--accent); }
+    .cbar .tg { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--bdr); background: var(--panel2); font-size: 11.5px; cursor: pointer; color: var(--dim); }
+    .cbar .tg.on { background: var(--accent-deep); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+    /* 簽名 */
+    .pt .sig { font-size: 10.5px; color: var(--dim); }
+    .pt .sig b { color: #0B5A2E; font-weight: 600; }
+    .pt .sig.un b { color: #7A5400; }
+    .audit { font-size: 10.5px; color: var(--dim); line-height: 1.5; max-height: 160px; overflow: auto; border: 1px solid var(--bdr); border-radius: 6px; padding: 6px 8px; background: var(--panel2); }
+    .audit .a { display: flex; gap: 6px; }
+    .audit .a .t { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+    .audit .a .w { color: var(--text); font-weight: 600; }
     .eqb .cnt { position: absolute; top: -9px; right: -9px; min-width: 18px; height: 18px; border-radius: 9px;
       background: var(--hi); color: #fff; font-size: 10.5px; font-weight: 700; display: grid; place-items: center;
       padding: 0 5px; border: 2px solid #fff; }
@@ -146,7 +174,7 @@
     <span class="arrow">›</span>
     <div class="step" data-step="3"><span class="n">3</span><b>綁點位</b><span class="v" id="s3v">把欄位對到設備</span></div>
     <span class="sp"></span>
-    <a class="goto" id="goto-label" href="/twin/pid/label" title="圖上沒框到／框不準？到判讀工作台補框、重框，改完回來點位就掛得上">改框選 → 判讀工作台</a>
+    <a class="goto" id="goto-label" href="/twin/pid/label" title="圖上沒框到／框不準？到判讀工作台補框、重框，改完回來點位就掛得上">回到 P&ID 判讀工作台</a>
     <span class="hint">對清楚才綁定孿生</span>
   </div>
 
@@ -160,10 +188,11 @@
         </span>
         <span class="seg"><button id="zo">−</button><button id="zf">全圖</button><button id="zi">＋</button></span>
         <span class="sp"></span>
-        <span class="lg"><i style="border-color:var(--hi);background:rgba(18,161,80,.15)"></i>已確認點位</span>
-        <span class="lg"><i style="border-color:var(--mid);background:rgba(224,164,21,.15)"></i>只有猜的</span>
+        <span class="lg"><i style="border-color:var(--hi);background:rgba(18,161,80,.3)"></i>已確認點位</span>
+        <span class="lg"><i style="border-color:var(--mid);background:rgba(224,164,21,.28)"></i>只有猜的</span>
         <span class="lg"><i style="border-color:#B8BFC8"></i>沒數據</span>
         <span class="hint">點方塊看它的點位；把右邊欄位拖到方塊上就是綁定</span>
+        <button class="tg on" id="stat-tg" title="在每台已綁數據的設備旁邊顯示各點位的平均值">數據狀態</button>
       </div>
       <div id="stage" class="empty"><span>先在右邊選一張圖</span></div>
     </div>
@@ -310,9 +339,25 @@ function coverOf(tag) {
   const e = (map && map.equipment || []).find(x => x.tag === tag);
   return e ? { n: e.points, c: e.confirmed, g: e.guessed } : { n: 0, c: 0, g: 0 };
 }
+// 數據狀態欄：這台設備底下每個點位的平均值（已確認綠、猜的琥珀）。最多列 4 行，其餘摺成「+N」
+function statusPanel(tag) {
+  if (!map) return '';
+  const pts = map.points.filter(p => p.tag === tag && !p.ignored);
+  if (!pts.length) return '';
+  const row = p => `<div class="r ${p.confirmed ? 'ok' : 'g'}" title="${esc(p.col)}"><span class="k">${esc(p.measure || p.col)}${p.sub ? '·' + esc(p.sub) : ''}</span><span class="v">${fmt(p.stats && p.stats.mean)}${p.unit ? ' ' + esc(p.unit) : ''}</span></div>`;
+  return `<div class="eqs">${pts.slice(0, 4).map(row).join('')}${pts.length > 4 ? `<div class="more">＋${pts.length - 4} 個點位</div>` : ''}</div>`;
+}
+const STAT_KEY = 'pid.mapping.status';
+let showStat = localStorage.getItem(STAT_KEY) !== '0';
+function applyStat() {
+  const ov = $('ov'); if (ov) ov.classList.toggle('nostat', !showStat);
+  $('stat-tg').classList.toggle('on', showStat);
+}
+$('stat-tg').onclick = () => { showStat = !showStat; localStorage.setItem(STAT_KEY, showStat ? '1' : '0'); applyStat(); };
 function drawBoxes() {
   const ov = $('ov'); if (!ov || !model) return;
   ov.innerHTML = '';
+  applyStat();
   for (const e of model.equipment || []) {
     const b = e.bbox || e.candidate_bbox; if (!b) continue;
     const cv = coverOf(e.tag);
@@ -321,7 +366,7 @@ function drawBoxes() {
     d.style.cssText = `left:${b[0]*100}%;top:${b[1]*100}%;width:${(b[2]-b[0])*100}%;height:${(b[3]-b[1])*100}%`;
     d.dataset.tag = e.tag;
     d.title = `${e.tag} ${e.name || ''}｜點位 ${cv.n}（確認 ${cv.c}）`;
-    d.innerHTML = `<span class="lb">${esc(e.tag)}</span>` + (cv.n ? `<span class="cnt">${cv.n}</span>` : '');
+    d.innerHTML = `<span class="lb">${esc(e.tag)}</span>` + (cv.n ? `<span class="cnt">${cv.n}</span>` : '') + statusPanel(e.tag);
     d.addEventListener('click', ev => { ev.stopPropagation(); selectTag(e.tag); });
     // 拖放目標：欄位 chip 拖到方塊上＝綁定
     d.addEventListener('dragover', ev => { ev.preventDefault(); d.classList.add('drop'); });
@@ -382,9 +427,10 @@ function renderPanel() {
     <div class="section-title">未歸戶欄位（${pool.length}）<span class="hint" style="font-weight:400;letter-spacing:0">　拖到左圖方塊上綁定；全廠狀態欄可忽略</span></div>
     <div class="pool">${pool.length ? pool.map(p => `<span class="chip" draggable="true" data-col="${esc(p.col)}" title="平均 ${fmt(p.stats.mean)}｜${fmt(p.stats.min)}～${fmt(p.stats.max)}">${esc(p.col)}<span class="m">${fmt(p.stats.mean)}</span><span class="x" data-ign="${esc(p.col)}" title="忽略">×</span></span>`).join('') : '<span class="hint">全部欄位都歸戶了。</span>'}</div>
     ${guessedAll.length ? `<div class="section-title">系統猜的（${guessedAll.length}）</div>
-      <button class="mini-btn primary" id="confirm-all" style="width:100%">把 ${guessedAll.length} 個高信心猜測全部確認</button>
+      <button class="mini-btn primary" id="confirm-all" style="width:100%">把 ${guessedAll.length} 個高信心猜測全部確認並簽名</button>
       <div class="hint" style="margin-top:4px">${[...new Set(guessedAll.map(p => p.tag))].map(t => `${esc(t)}×${guessedAll.filter(p => p.tag === t).length}`).join('、')}</div>` : ''}
-    <div class="hint" style="margin-top:12px">左圖顏色：綠＝有已確認點位、琥珀＝只有猜的、灰＝沒數據。</div>`;
+    <div class="hint" style="margin-top:12px">左圖顏色：綠＝有已確認點位、琥珀＝只有猜的、灰＝沒數據。方塊旁的小表＝各點位平均值（右上「數據狀態」可關）。</div>
+    ${auditList()}`;
   bindPanel();
 }
 function spark(h) { if (!h || !h.length) return ''; const mx = Math.max(...h, 1); return `<span class="spark">${h.map(v => `<i style="height:${Math.max(2, v / mx * 16)}px"></i>`).join('')}</span>`; }
@@ -403,9 +449,25 @@ function ptCard(p) {
       <div style="grid-column:span 2"><label>合理範圍 <span class="g ${p.range_by === 'manual' ? 'man' : 'guess'}">${p.range_by === 'manual' ? '人工設定' : '系統推定 p1～p99'}</span></label>
         <div class="rng"><input data-f="lo" value="${p.lo == null ? '' : fmt(p.lo)}"/> ～ <input data-f="hi" value="${p.hi == null ? '' : fmt(p.hi)}"/></div></div>
     </div>
-    <div class="act"><span class="g">${p.by ? '由 ' + esc(p.by.split('@')[0]) + ' 確認' : ''}</span>
-      <button class="mini-btn primary" data-ok="${esc(p.col)}">${p.confirmed ? '更新' : '確認 ✓'}</button></div>
+    <div class="act">${sigLine(p)}
+      <button class="mini-btn primary" data-ok="${esc(p.col)}">${p.confirmed ? '重新簽名' : '確認並簽名 ✓'}</button></div>
   </div>`;
+}
+const who = s => (s || '').split('@')[0] || '（免登入）';
+const when = s => s ? s.replace('T', ' ').slice(5, 16) : '';
+// 簽名：確認過的點位顯示「誰、什麼時候」簽的；只綁還沒確認的提醒尚未簽名
+function sigLine(p) {
+  if (p.confirmed && p.signed_by !== undefined) return `<span class="sig">簽名 <b>${esc(who(p.signed_by))}</b> · ${esc(when(p.signed_at))}</span>`;
+  if (p.confirmed) return `<span class="sig">已確認 · ${esc(when(p.at))}</span>`;
+  if (p.by !== undefined && !p.guess) return `<span class="sig un"><b>${esc(who(p.by))}</b> 綁定 · ${esc(when(p.at))}，尚未簽名</span>`;
+  return '<span class="sig">尚未簽名</span>';
+}
+const ACT = { assign: '綁到', confirm: '確認簽名', update: '改後重簽', unassign: '解除綁定', ignore: '忽略', unignore: '取消忽略' };
+function auditList() {
+  const a = (map && map.audit) || [];
+  if (!a.length) return '';
+  return `<details style="margin-top:12px"><summary class="hint" style="cursor:pointer">紀錄（最近 ${a.length} 筆）</summary>
+    <div class="audit">${a.map(x => `<div class="a"><span class="t">${esc(when(x.at))}</span><span class="w">${esc(who(x.by))}</span><span>${ACT[x.action] || esc(x.action)} ${esc(x.col)}${x.tag ? ' → ' + esc(x.tag) : ''}${x.bulk ? '（批次）' : ''}</span></div>`).join('')}</div></details>`;
 }
 function bindPanel() {
   const P = $('panel');
@@ -421,7 +483,7 @@ function bindPanel() {
   P.querySelectorAll('.pt').forEach(card => card.addEventListener('click', e => { if (e.target.closest('input,select,button,.x')) return; showSeries(card.dataset.col); }));
   const ca = $('confirm-all'); if (ca) ca.onclick = async () => {
     const cols = map.points.filter(p => p.guess && p.tag && !p.ignored && (p.guess_conf || 0) >= 0.85).map(p => p.col);
-    if (!confirm(`把 ${cols.length} 個系統猜測直接標為已確認？之後仍可逐個改。`)) return;
+    if (!confirm(`把 ${cols.length} 個系統猜測直接確認並以你的名義簽名？之後仍可逐個改。`)) return;
     await bulk(cols, 'confirm'); await reloadMap();
   };
 }

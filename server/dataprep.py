@@ -174,9 +174,45 @@ def _summary(df: pd.DataFrame, hidden: list | None = None) -> dict:
 
 
 # ---------------------------------------------------------------- 上傳
-FORMAT_SPEC = ("上傳格式規定：CSV（UTF-8）或 Excel，第一列為欄位名稱，至少一個數值欄。"
-               "製程歷史資料建議含時間欄（名為 time，ISO 格式如 2025-06-01 00:00:00）；"
+FORMAT_SPEC = ("上傳格式規定：CSV（UTF-8／Big5 皆可）或 Excel，第一列為欄位名稱，至少一個數值欄，"
+               "單檔 200MB 以內。製程歷史資料建議含時間欄（名為 time，ISO 格式如 2025-06-01 00:00:00；"
+               "「日期」＋「時間」分兩欄也認得，會自動合併）；"
                "模擬／DOE 資料集（如 ASPEN 參數掃描）可無時間欄，以流水序為索引。")
+MAX_UPLOAD = 200 * 1024 * 1024
+
+# SCADA／DCS 匯出的 CSV 常是 Big5（cp950）——潤泰的 23/25/26/28.csv 就是，
+# 只吃 UTF-8 會直接 UnicodeDecodeError 擋在門口。依序試；gb18030 幾乎什麼都吞，放最後。
+_CSV_ENCODINGS = ("utf-8-sig", "cp950", "gb18030")
+
+
+def _read_csv_any(raw: bytes):
+    last = None
+    for enc in _CSV_ENCODINGS:
+        try:
+            return pd.read_csv(io.BytesIO(raw), encoding=enc)
+        except UnicodeDecodeError as e:
+            last = e
+    raise last  # type: ignore[misc]
+
+
+def _merge_date_time(df):
+    """「日期」＋「時間」兩欄 → 一欄 time（潤泰 DCS 匯出：2026/04/30,23:59:58）。
+    不合併的話時間偵測會只抓到「日期」，整天的資料都變同一個時間戳。"""
+    from .data_inventory import DATE_PAT, TIME_PAT, _roc_to_ad
+    cols = list(df.columns)
+    if any(str(c).lower() == "time" for c in cols):
+        return df
+    dcol = next((c for c in cols if DATE_PAT.match(str(c).strip())), None)
+    tcol = next((c for c in cols if TIME_PAT.match(str(c).strip())), None)
+    if dcol is None or tcol is None:
+        return df
+    joined = df[dcol].astype(str).str.strip() + " " + df[tcol].astype(str).str.strip()
+    ts = pd.to_datetime(_roc_to_ad(joined), errors="coerce")
+    if ts.notna().mean() < 0.9:
+        return df
+    df = df.drop(columns=[dcol, tcol])
+    df.insert(0, "time", ts)
+    return df
 
 
 @router.post("/upload")
@@ -187,17 +223,18 @@ async def upload(request: Request, file: UploadFile = File(...),
     適用 DCS／最佳化工具匯出的多段報表版面。兩者處理後都做數值修復。"""
     name = (file.filename or "").lower()
     raw = await file.read()
-    if len(raw) > 50 * 1024 * 1024:
-        raise HTTPException(422, f"檔案超過 50MB 上限。{FORMAT_SPEC}")
+    if len(raw) > MAX_UPLOAD:
+        raise HTTPException(422, f"檔案超過 200MB 上限（這份 {len(raw) / 1048576:.0f}MB）。{FORMAT_SPEC}")
     try:
         if name.endswith((".xlsx", ".xls", ".xlsm")):
             df = pd.read_excel(io.BytesIO(raw))
         else:
-            df = pd.read_csv(io.BytesIO(raw), encoding="utf-8-sig")
+            df = _read_csv_any(raw)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(422, f"解析失敗（{type(e).__name__}）。{FORMAT_SPEC}") from None
     if df.empty:
         raise HTTPException(422, f"檔案無資料。{FORMAT_SPEC}")
+    df = _merge_date_time(df)
     if skiprows and skiprows > 0:
         df = df.iloc[int(skiprows):].reset_index(drop=True)
         if df.empty:

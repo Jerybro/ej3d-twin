@@ -2218,12 +2218,28 @@ function setSel(box, label) {
   $('sel-hint').innerHTML = `作用區域：<b>${esc(label)}</b>`;
   ['ask-btn', 'cmp-btn'].forEach(i => { $(i).disabled = false; });
 }
+// 點空白處＝取消目前的選取：聚光燈、藍框、作用區域、框選開的表單全部收掉
+function clearSelection() {
+  clearRing();
+  if (selEl) { selEl.remove(); selEl = null; }
+  sel = null;
+  $('sel-hint').textContent = '在圖上拖曳框選一塊區域，或點上方分區。';
+  ['ask-btn', 'cmp-btn'].forEach(i => { const b = $(i); if (b) b.disabled = true; });
+  if (noteTarget && !noteTarget.tag) {           // 框選開的評註／加入資產庫表單
+    noteTarget = null; $('note-new').style.display = 'none';
+    $('note-text').value = ''; $('note-label').value = '';
+  }
+  manBox = null; $('man-form').style.display = 'none';
+  if (reboxIdx >= 0) return;                     // 重框中不動目前項目
+  if (curIdx >= 0) { curIdx = -1; render(); }
+}
 function bindSelection() {
-  let sx = 0, sy = 0, drag = false;
+  let sx = 0, sy = 0, drag = false, onBlank = false;
   overlay.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
     const r = overlay.getBoundingClientRect();
     sx = e.clientX - r.left; sy = e.clientY - r.top; drag = true;
+    onBlank = e.target === overlay;              // 不是點在某個框或標記上
     overlay.setPointerCapture(e.pointerId);
     if (selEl) selEl.remove();
     selEl = document.createElement('div');
@@ -2245,7 +2261,11 @@ function bindSelection() {
     const cx = e.clientX - r.left, cy = e.clientY - r.top;
     const x0 = Math.min(sx, cx) / r.width, x1 = Math.max(sx, cx) / r.width;
     const y0 = Math.min(sy, cy) / r.height, y1 = Math.max(sy, cy) / r.height;
-    if ((x1 - x0) < 0.004 || (y1 - y0) < 0.004) { if (selEl) { selEl.remove(); selEl = null; } return; }
+    if ((x1 - x0) < 0.004 || (y1 - y0) < 0.004) {
+      if (selEl) { selEl.remove(); selEl = null; }
+      if (onBlank) clearSelection();             // 單點空白＝取消框選
+      return;
+    }
     const box = [x0, y0, x1, y1];
     // 重框中的話，這一拖是要修某一項的框，不是要新增元件或選作用區域
     if (reboxIdx >= 0) { applyRebox(box); return; }

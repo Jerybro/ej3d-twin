@@ -93,6 +93,31 @@ def _ensure_base(filename: str) -> tuple[Path, dict]:
     return img_p, meta
 
 
+# ----------------------------------------------------------------- 衍生結果快取
+# 開圖時會自動跑的兩個本機計算——全頁 OCR（圖面體系判讀用）與向量錨點——
+# 各要 1~5 秒，結果只跟 PDF 內容有關，不該每次開圖重算。以 PDF 的 mtime＋大小
+# 當版本鍵：同名重傳新檔自動失效。
+def _derived_cache(filename: str, name: str, build):
+    pdf = _safe_pdf(filename)
+    slug = _slug(pdf.stem)
+    VLM_DIR.mkdir(parents=True, exist_ok=True)
+    st = pdf.stat()
+    key = f"{int(st.st_mtime)}:{st.st_size}"
+    p = VLM_DIR / f"{slug}.{name}.json"
+    if p.exists():
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            if d.get("key") == key:
+                return d["data"]
+        except (json.JSONDecodeError, OSError, KeyError):
+            pass
+    data = build()
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"key": key, "data": data}, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(p)
+    return data
+
+
 def _crop_b64(filename: str, bbox: list) -> tuple[str, dict]:
     """依正規化 bbox（0-1，左上原點）裁切底圖 → base64 JPEG。
 
@@ -503,7 +528,17 @@ def _rules_prompt() -> str:
 
 
 def _ocr_region(filename: str, bbox: list) -> tuple[list, tuple]:
-    """對指定區域跑 OCR → 完整位號命中（座標為底圖像素）。"""
+    """對指定區域跑 OCR → 完整位號命中（座標為底圖像素）。
+    全頁（bbox=[0,0,1,1]）的結果落盤快取——圖面體系判讀、跨圖串接都要它，
+    每次開圖重跑一次全頁 OCR 是白等。"""
+    if [round(float(v), 3) for v in bbox] == [0.0, 0.0, 1.0, 1.0]:
+        d = _derived_cache(filename, "ocr-full", lambda: _ocr_region_raw(filename, bbox))
+        return [tuple(h) for h in d["hits"]], tuple(d["size"])
+    hits, size = _ocr_region_raw(filename, bbox)
+    return hits, size
+
+
+def _ocr_region_raw(filename: str, bbox: list):
     from PIL import Image
 
     from .pid_parse import _merge_fragments, _ocr, _rescue_orphans
@@ -532,6 +567,8 @@ def _ocr_region(filename: str, bbox: list) -> tuple[list, tuple]:
     hits += _rescue_orphans(crop, raw, used)
     # 座標換回底圖像素
     out = [(px0 + cx / k, py0 + cy / k, t, c, h / k) for cx, cy, t, c, h in hits]
+    if [round(float(v), 3) for v in bbox] == [0.0, 0.0, 1.0, 1.0]:
+        return {"hits": [list(h) for h in out], "size": [W, H]}
     return out, (W, H)
 
 
@@ -1693,7 +1730,11 @@ def gap_scan(req: GapScanReq) -> dict:
 # 「它是什麼」。模型答語意、不答座標——各用各的強項。
 @router.get("/anchors/{filename}")
 def anchors(filename: str) -> dict:
-    """全圖候選錨點：儀錶氣泡＋閥件＋設備本體（向量層）。"""
+    """全圖候選錨點：儀錶氣泡＋閥件＋設備本體（向量層）。結果落盤快取（只跟 PDF 有關）。"""
+    return _derived_cache(filename, "anchors", lambda: _anchors_raw(filename))
+
+
+def _anchors_raw(filename: str) -> dict:
     from .pid_parse import detect_bodies, detect_valves, pdf_to_norm
 
     _, meta = _ensure_base(filename)

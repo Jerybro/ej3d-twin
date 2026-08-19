@@ -98,7 +98,8 @@ def rag_block(notes: list) -> str:
         else:
             where = "全圖"
         who = (n.get("by") or "").split("@")[0] or "工程師"
-        lines.append(f"[{n['id']}]（{where}｜{who}）{n['text']}")
+        body = n.get("text") or f"現場標示此處為「{n.get('label', '')}」"
+        lines.append(f"[{n['id']}]（{where}｜{who}）{body}")
     return ("【現場工程師評註｜必須引用並標註出處】\n"
             "以下是實際走過現場的人所留，**可信度高於任何從圖面推論出來的結論**；"
             "與圖面判讀衝突時一律以評註為準。\n"
@@ -127,14 +128,16 @@ def add_note(filename: str, req: NoteReq, request: Request) -> dict:
 
     _safe_pdf(filename)
     text = (req.text or "").strip()
-    if not text:
-        raise HTTPException(422, "評註內容不可空白")
+    label = (req.label or "").strip()[:40]
+    # 只取名不留言也可以——框起來說「這是 211.4」本身就是資訊，不必硬逼人寫一句話
+    if not text and not label:
+        raise HTTPException(422, "至少填「這是什麼」或評註內容其中一項")
     dom = current_domain(request)
     d = _load(filename, dom)
     nid = f"N{len(d['notes']) + 1}"
     while any(x["id"] == nid for x in d["notes"]):        # 刪過再新增不撞號
         nid = f"N{int(nid[1:]) + 1}"
-    n = {"id": nid, "text": text[:600], "tag": req.tag.strip(), "label": (req.label or "").strip()[:40],
+    n = {"id": nid, "text": text[:600], "tag": req.tag.strip(), "label": label,
          "tags": [str(t).strip() for t in (req.tags or []) if str(t).strip()][:20],
          "bbox": [round(float(v), 4) for v in req.bbox[:4]] if req.bbox else [],
          "kind": "element" if req.tag.strip() else "region",
@@ -160,11 +163,11 @@ def edit_note(filename: str, nid: str, req: NotePatch, request: Request) -> dict
             (current_user(request) or {}).get("role") != "admin":
         raise HTTPException(403, "只有作者或管理員能修改這則評註")
     if req.text is not None:
-        if not req.text.strip():
-            raise HTTPException(422, "評註內容不可空白")
         n["text"] = req.text.strip()[:600]
     if req.label is not None:
         n["label"] = req.label.strip()[:40]
+    if not n.get("text") and not n.get("label"):
+        raise HTTPException(422, "至少要留「這是什麼」或評註內容其中一項")
     n["edited_at"] = _now()
     _save(filename, dom, d)
     return n

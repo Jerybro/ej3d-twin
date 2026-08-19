@@ -1724,7 +1724,7 @@ function renderNotes() {
       <span class="nt-lab" data-lab="${esc(n.id)}" title="點一下改名（資產模型上顯示的名字）">${esc(noteWhere(n))}</span>
       <span class="nt-by">${esc((n.by || '').split('@')[0] || '—')}</span>
       <span class="x" data-del="${esc(n.id)}" title="刪除">×</span></div>
-    <div class="nt-t">${esc(n.text)}</div>
+    ${n.text ? `<div class="nt-t">${esc(n.text)}</div>` : ''}
     <div class="nt-a">${esc((n.at || '').replace('T', ' ').slice(0, 16))}
       ${n.edited_at ? '（已編輯）' : ''}</div>
   </div>`).join('');
@@ -1890,10 +1890,11 @@ $('note-cancel').addEventListener('click', () => {
   noteTarget = null; $('note-new').style.display = 'none'; $('note-text').value = ''; $('note-label').value = '';
 });
 $('note-save').addEventListener('click', async () => {
-  const t = $('note-text').value.trim();
-  if (!t) { alert('請先寫下評註內容'); return; }
+  const t = $('note-text').value.trim(), lab = $('note-label').value.trim();
+  // 只取名不留言也可以——「這是 211.4」本身就是資訊
+  if (!t && !lab) { alert('至少填「這是什麼」或評註內容其中一項'); return; }
   if (!noteTarget) { alert('請先框選區域或選一個元件'); return; }
-  await addNote(t, { ...noteTarget, label: $('note-label').value.trim() });
+  await addNote(t, { ...noteTarget, label: lab });
   $('note-text').value = ''; $('note-label').value = ''; $('note-new').style.display = 'none'; noteTarget = null;
 });
 $('man-cancel').addEventListener('click', () => {

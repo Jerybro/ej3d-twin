@@ -44,6 +44,9 @@
     .step span.v { color: var(--dim); font-weight: 400; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .arrow { color: #C3CAD2; padding: 0 4px; }
     .steps .sp { flex: 1; }
+    .steps .goto { padding: 5px 11px; border-radius: 6px; font-size: 12px; text-decoration: none;
+      color: var(--accent); border: 1px solid var(--bdr); background: var(--panel2); margin-right: 12px; white-space: nowrap; }
+    .steps .goto:hover { border-color: var(--accent); background: var(--accent-deep); }
 
     /* ------------------------------------------------ 主區 */
     .main { display: flex; height: calc(100vh - 52px); }
@@ -143,6 +146,7 @@
     <span class="arrow">›</span>
     <div class="step" data-step="3"><span class="n">3</span><b>綁點位</b><span class="v" id="s3v">把欄位對到設備</span></div>
     <span class="sp"></span>
+    <a class="goto" id="goto-label" href="/twin/pid/label" title="圖上沒框到／框不準？到判讀工作台補框、重框，改完回來點位就掛得上">改框選 → 判讀工作台</a>
     <span class="hint">對清楚才綁定孿生</span>
   </div>
 
@@ -203,6 +207,7 @@ async function init() {
   if (p.get('drawing')) await pickDrawing(p.get('drawing'), true);
   if (p.get('sid')) await pickDataset(p.get('sid'), true);
   setStep(sid && drawing ? 3 : drawing ? 2 : 1);
+  syncUrl();
 }
 async function pickDrawing(name, silent) {
   drawing = name;
@@ -264,6 +269,12 @@ async function reloadMap() {
 function syncUrl() {
   const p = new URLSearchParams(); if (drawing) p.set('drawing', drawing); if (sid) p.set('sid', sid);
   history.replaceState(null, '', '?' + p.toString());
+  // 「改框選」帶著目前這張圖過去（直接開同一張、切到並排看資產模型），
+  // 並把回程（同一張圖＋同一份數據）一起帶上——改完框不用重選
+  const back = '/twin/mapping?' + p.toString();
+  const q = new URLSearchParams({ back });
+  if (drawing) { q.set('file', drawing); q.set('cmp', 'side'); }
+  $('goto-label').href = '/twin/pid/label?' + q.toString();
 }
 
 // ------------------------------------------------------------ 圖

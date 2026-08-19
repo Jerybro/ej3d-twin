@@ -2208,5 +2208,23 @@ document.addEventListener('keydown', e => {
   });
 }
 
-loadFiles();
+// 從別的模塊（點位對照）帶參數進來：?file= 直接開那張圖、?cmp=side|overlay|only
+// 直接切到資產模型比對、?back= 顯示回程鈕（只收同站路徑，不當跳板）
+{
+  const p = new URLSearchParams(location.search);
+  const back = p.get('back') || '';
+  if (/^\/[^/\\]/.test(back)) {
+    const b = $('back-btn');
+    b.href = back;
+    b.style.display = '';
+    b.textContent = back.startsWith('/twin/mapping') ? '← 回點位對照' : '← 返回';
+  }
+  const file = p.get('file');
+  loadFiles().then(async () => {
+    if (!file || !document.querySelector(`.file-item[data-name="${CSS.escape(file)}"]`)) return;
+    await openDoc(file);
+    const cmp = p.get('cmp');
+    if (['side', 'overlay', 'only'].includes(cmp)) setCompare(cmp);
+  });
+}
 loadGroups();

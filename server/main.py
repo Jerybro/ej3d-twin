@@ -463,7 +463,10 @@ app.include_router(pid_notes_router)
 # ------------------------------------ 點位對照（歷史數據欄位 ↔ P&ID 資產）
 from .pid_mapping import router as pid_mapping_router  # noqa: E402
 
+from .data_inventory import router as data_inventory_router  # noqa: E402
+
 app.include_router(pid_mapping_router)
+app.include_router(data_inventory_router)
 
 # --------------------------------------------------------- 登入與權限（Google OAuth）
 from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
@@ -622,6 +625,7 @@ PAGES = {
     "/twin/pid/label": "pid-label.html",  # 產品3：P&ID 標示化協作工作台
     "/twin/pid/rebuild": "pid-rebuild.html",  # 產品3：盲測重建（模型 JSON → 重畫）
     "/twin/mapping": "pid-mapping.html",       # 點位對照：歷史數據欄位 ↔ P&ID 資產
+    "/data/inventory": "data-inventory.html",  # 資料盤點：收到的資料在時間上長什麼樣
     "/data": "data.html",      # 產品2：資料前處理
     "/docs": "docs.html",      # 操作說明（雙語）
     "/admin": "admin.html",    # 權限管理（admin）

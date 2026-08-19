@@ -35,7 +35,7 @@ function setStage(n, opt) {
   }
   $('tb-hint').textContent = n === 4 ? '框選＝留評註' : (n === 1 ? '' : '框選空白處＝新增元件；選中框可拖把手改大小');
   if (n === 3) renderInspector();
-  if (n === 4) { renderNotes(); renderStage4Focus(); }
+  if (n === 4) { renderNotes(); renderStage4Focus(); renderStage4Desc(); }
   updateSteps();
   if (!(opt && opt.silent)) localStorage.setItem('pid.stage.' + (curFile || ''), String(n));
 }
@@ -74,12 +74,13 @@ const $$ = sel => document.querySelector(sel);
     loadPointsForFile();
   };
 }
-// render：每次重畫更新步驟列；① 有候選進來就自動到 ②
+// render：每次重畫更新步驟列；① 有候選進來就自動到 ②；順便（去抖）刷新上一動／上次儲存
 {
   const _render = render;
   render = function () {
     _render();
     updateSteps();
+    scheduleHist();
     if (curStage === 1 && items.length) setStage(2);
     if (curStage === 3) renderInspector();
   };
@@ -391,4 +392,126 @@ function jumpToSentence(sent) {
     const k = items.findIndex(i => i.tag === s.dataset.tag && i.state !== 'rejected');
     if (k >= 0) focusItem(k);
   });
+}
+
+
+// --------------------------------------------------------------- 上一動／重做／上次儲存
+// 游標式：上一動＝游標在快照鏈上往前一格、重做＝往後一格，都不新增快照；
+// 退了幾步又有新寫入＝放棄那幾個未來（後端搬到 _abandoned）。只管資產庫（審核紀錄）。
+let histState = null, histTimer = null;
+function scheduleHist() { clearTimeout(histTimer); histTimer = setTimeout(refreshHist, 700); }
+async function refreshHist() {
+  if (!curFile) { paintHist(null); return; }
+  try { histState = await getJSON(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}/histstate`); }
+  catch { histState = null; }
+  paintHist(histState);
+}
+const ACTION_TXT = { accept: '確認', reject: '否決', rebox: '重框', delete: '刪除', undo: '上一動', zone: '分區', manual: '手動標註' };
+function actionTxt(a) { if (!a) return ''; const k = String(a).split(':')[0]; return (ACTION_TXT[k] || k) + (String(a).includes(':') ? ' ' + String(a).split(':').slice(1).join(':') : ''); }
+function paintHist(h) {
+  const u = $('undo-btn'), r = $('redo-btn'), sa = $('saved-at');
+  if (!h) { u.disabled = r.disabled = true; u.textContent = '上一動'; r.textContent = '重做'; sa.textContent = ''; return; }
+  u.disabled = !(h.undo_left > 0); r.disabled = !(h.redo_left > 0);
+  u.innerHTML = '上一動' + (h.undo_left ? `<b>${h.undo_left}</b>` : '');
+  r.innerHTML = '重做' + (h.redo_left ? `<b>${h.redo_left}</b>` : '');
+  u.title = h.undo_left ? `回到上一動（還可退 ${h.undo_left} 步）。最近一動：${actionTxt(h.last_action) || '—'}` : '沒有可退的上一動';
+  r.title = h.redo_left ? `重做（可前進 ${h.redo_left} 步）` : '沒有可重做的';
+  if (h.saved_at) {
+    const d = new Date(h.saved_at); const ago = (Date.now() - d.getTime()) / 1000;
+    const hm = d.toTimeString().slice(0, 8);
+    const day = d.toDateString() === new Date().toDateString() ? '' : `${d.getMonth() + 1}/${d.getDate()} `;
+    sa.textContent = `上次儲存 ${day}${hm}` + (ago < 90 ? '（剛剛）' : '');
+    sa.classList.toggle('fresh', ago < 90);
+    sa.title = `資產庫（審核紀錄）最後寫入時間：${h.saved_at}｜共 ${h.versions} 個版本`;
+  } else { sa.textContent = ''; }
+}
+async function histMove(dir) {
+  if (!curFile) return;
+  const b = dir < 0 ? $('undo-btn') : $('redo-btn');
+  if (b.disabled) return;
+  try {
+    const j = await getJSON(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}/${dir < 0 ? 'undo' : 'redo'}`, { method: 'POST' });
+    // 資產庫是真相：整份重讀；掃描中還沒審的候選（不在資產庫）留著
+    const pend = items.filter(i => i.state === 'pending');
+    await loadAnnots();
+    const have = new Set(items.map(i => `${i.kind}|${i.tag}`));
+    for (const p of pend) if (!have.has(`${p.kind}|${p.tag}`)) items.push(p);
+    render();
+    loadNotes();
+    toast(`${dir < 0 ? '已回到上一動' : '已重做'}${j.action ? `（${actionTxt(j.action)}）` : ''}，資產庫 ${j.items} 筆`
+      + (assetModel ? '；資產模型要按「建立／更新」才會跟著變' : ''));
+    histState = j; paintHist(j);
+  } catch (e) { toast(e.message || '失敗'); }
+}
+$('undo-btn').addEventListener('click', () => histMove(-1));
+$('redo-btn').addEventListener('click', () => histMove(+1));
+document.addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  if (e.key.toLowerCase() === 'z') { e.preventDefault(); histMove(e.shiftKey ? +1 : -1); }
+  else if (e.key.toLowerCase() === 'y') { e.preventDefault(); histMove(+1); }
+});
+let toastTimer = null;
+function toast(msg) {
+  const t = $('toast'); if (!t) return;
+  t.textContent = msg; t.classList.add('on');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('on'), 3200);
+}
+// 「上次儲存 …（剛剛）」每 30 秒刷新相對時間
+setInterval(() => { if (histState) paintHist(histState); }, 30000);
+
+
+// --------------------------------------------------------------- ④ 製程說明卡：AI 預設稿 → 人確認
+// AI 依全部已確認元件＋整張圖寫的是「預設稿」；人看過、提過意見、同意了才按「確認這版」。
+// 重新產生／修訂＝新的一版，確認歸零。
+let descMeta = null;
+async function loadDescMeta() {
+  if (!curFile) { descMeta = null; return; }
+  try { descMeta = await getJSON(`/api/pid/vlm/describe/${encodeURIComponent(curFile)}`); } catch { descMeta = null; }
+}
+async function renderStage4Desc(refetch) {
+  const host = $('st4-desc'); if (!host) return;
+  if (refetch || !descMeta) await loadDescMeta();
+  const acc = items.filter(i => i.state === 'accepted').length;
+  const has = !!(descText && descText.trim());
+  const m = descMeta || {};
+  const when = s => s ? String(s).replace('T', ' ').slice(5, 16) : '';
+  const who = s => (s || '').split('@')[0] || '（免登入）';
+  host.className = 'insp' + (has && m.confirmed_at ? ' sel' : '');
+  host.innerHTML = `
+    <div class="insp-top"><span class="insp-tag" style="font-size:14px">製程說明</span>
+      <span class="insp-k">${has ? (m.confirmed_at ? `已確認 · ${esc(who(m.confirmed_by))} · ${esc(when(m.confirmed_at))}` : 'AI 預設稿，尚未確認') : '尚未產生'}</span></div>
+    <div class="insp-sub">${has
+      ? `產生於 ${esc(when(m.at))}${m.revised ? '（已依意見修訂）' : ''}｜依 ${m.based_on || acc} 項已確認元件${m.with_image ? '＋整張圖' : ''}｜${(descText || '').length} 字`
+      : acc < 3 ? `再確認 ${3 - acc} 項元件就能產生（至少 3 項）` : `依全部 ${acc} 項已確認元件＋整張圖面，AI 先寫一版預設稿，你再看、再改、再確認`}</div>
+    <div class="insp-act">
+      ${has
+        ? `<button class="mini-btn" id="d4-regen">重新產生</button>
+           <button class="mini-btn" id="d4-fb">提修正意見</button>
+           ${m.confirmed_at
+             ? `<button class="mini-btn" id="d4-unconfirm" title="撤銷確認（內容不變）">撤銷確認</button>`
+             : `<button class="mini-btn primary" id="d4-confirm" title="你看過也同意這一版——記下你的名字與時間">確認這版說明</button>`}`
+        : `<button class="mini-btn primary" id="d4-gen" ${acc < 3 ? 'disabled' : ''}>AI 產生預設製程說明</button>`}
+    </div>
+    ${has && !m.confirmed_at ? '<div class="hint" style="margin-top:6px">看過下方說明、該改的提意見修訂後，再按「確認這版」。確認後仍可重新產生（會變成新的一版）。</div>' : ''}`;
+  const gen = $('d4-gen'); if (gen) gen.onclick = () => { $('desc-panel').classList.remove('collapsed'); $('desc-btn').click(); };
+  const rg = $('d4-regen'); if (rg) rg.onclick = () => { if (!confirm('重新產生會得到新的一版（既有確認會歸零）。繼續？')) return; $('desc-panel').classList.remove('collapsed'); $('desc-btn').click(); };
+  const fb = $('d4-fb'); if (fb) fb.onclick = () => { $('desc-panel').classList.remove('collapsed'); $('fb-box').style.display = ''; $('fb-text').focus(); $('fb-text').scrollIntoView({ block: 'center', behavior: 'smooth' }); };
+  const cf = $('d4-confirm'); if (cf) cf.onclick = () => setDescConfirm(true);
+  const uc = $('d4-unconfirm'); if (uc) uc.onclick = () => setDescConfirm(false);
+}
+async function setDescConfirm(v) {
+  try {
+    await getJSON(`/api/pid/vlm/describe/${encodeURIComponent(curFile)}/confirm`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmed: v }) });
+    toast(v ? '已確認這版製程說明' : '已撤銷確認');
+    await renderStage4Desc(true);
+  } catch (e) { alert(e.message || '失敗'); }
+}
+// 產生／修訂／載入既有說明之後，卡片要跟著變
+{
+  const _gen = genDesc;
+  genDesc = async function (f) { await _gen(f); await renderStage4Desc(true); renderStage4Focus(); };
+  const _ls = loadSavedDesc;
+  loadSavedDesc = async function () { await _ls(); if (curStage === 4) { await renderStage4Desc(true); renderStage4Focus(); } };
 }

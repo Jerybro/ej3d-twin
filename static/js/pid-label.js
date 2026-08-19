@@ -1563,19 +1563,20 @@ async function loadHistory() {
     el.innerHTML = `<div class="hint" style="margin-bottom:6px">網域
         <b>${esc(d.domain)}</b>｜目前 ${d.current.items} 筆｜共 ${vs.length} 個版本
         <button class="mini-btn" id="undo-b" style="float:right;padding:3px 9px">回到上一動</button></div>`
-      + vs.slice(0, 12).map(v => `<div class="hv" data-v="${esc(v.version)}">
+      + vs.slice(0, 12).map(v => `<div class="hv${v.current ? ' cur' : ''}" data-v="${esc(v.version)}" ${v.current ? 'title="目前資產庫＝這一版"' : ''}>
           <span class="hv-t">${esc((v.at || v.version).replace('T', ' ').slice(0, 16))}</span>
           <span class="hv-a">${esc(v.action || '—')}</span>
           <span class="hv-n">${v.items} 筆</span>
           ${v.by ? `<span class="hv-b">${esc(v.by.split('@')[0])}</span>` : ''}
         </div>`).join('');
     $('undo-b').onclick = async () => {
-      if (!confirm('回到上一動？目前的資產庫內容會被前一版取代（仍可再往回還原）。')) return;
+      if (!confirm('回到上一動？目前的資產庫內容會被前一版取代（可再退、也可重做）。')) return;
       const r = await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}/undo`,
                             { method: 'POST' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { alert(j.detail || '無法回復'); return; }
-      alert(`已回到上一動，資產庫現有 ${j.items} 筆`);
+      alert(`已回到上一動，資產庫現有 ${j.items} 筆（還可退 ${j.undo_left} 步、重做 ${j.redo_left} 步）`);
+      await loadAnnots(); render();
       loadHistory();
     };
     el.querySelectorAll('.hv').forEach(h => h.addEventListener('click', async () => {

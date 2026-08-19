@@ -467,6 +467,17 @@
     .arrow { color: #C3CAD2; padding: 0 2px; }
     .top .sp { flex: 1; }
     .top .meta { font-size: 11px; color: var(--dim); white-space: nowrap; margin-left: 8px; }
+    .top .hist { display: inline-flex; align-items: center; gap: 8px; margin-right: 6px; }
+    .top .hist .seg button { padding: 5px 10px; }
+    .top .hist .seg button:disabled { opacity: .4; cursor: default; }
+    .top .hist .seg button b { font-weight: 700; color: var(--accent); margin-left: 3px; }
+    .top .saved { font-size: 11px; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .top .saved.fresh { color: var(--hi); }
+    /* 短暫提示（上一動／重做後） */
+    #toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: #061027; color: #fff;
+      padding: 9px 14px; border-radius: 8px; font-size: 12.5px; box-shadow: 0 6px 20px rgba(6,16,39,.25); z-index: 99;
+      opacity: 0; pointer-events: none; transition: opacity .15s; max-width: 70vw; }
+    #toast.on { opacity: 1; }
     .top .mini-btn { white-space: nowrap; }
     /* 進階彈窗 */
     #adv-pop { display: none; position: absolute; top: calc(100% + 6px); right: 14px; width: 360px; max-height: 72vh;
@@ -577,6 +588,14 @@
       </div>
 
       <span class="sp"></span>
+      <!-- 審核紀錄的上一動／重做＋上次儲存：每次寫入後刷新。只管資產庫（審核紀錄），評註／點位各有自己的紀錄 -->
+      <span class="hist" id="hist-ui" title="資產庫（審核紀錄）的上一動／重做。Ctrl+Z／Ctrl+Shift+Z">
+        <span class="seg">
+          <button id="undo-btn" disabled>上一動</button>
+          <button id="redo-btn" disabled>重做</button>
+        </span>
+        <span class="saved" id="saved-at"></span>
+      </span>
       <button class="mini-btn" id="adv-btn" title="分區檢視、區域問答、雙引擎比對、引擎選擇">進階 ▾</button>
       <a class="mini-btn" id="old-ui" href="/twin/pid/label" title="舊版面會保留一週">切回舊版</a>
       <span class="meta" id="top-meta"></span>
@@ -776,6 +795,7 @@
         <div class="stg" id="st4">
           <div class="stg-h">評註與說明 <span>現場知識進來，說明才寫得對</span></div>
           <div class="stg-sub">點圖上既有的框＝對那個元件留評註；拖曳框選空白處＝對一塊區域留評註。製程說明在畫布下方：選中元件會列出說明裡提到它的句子，可直接對那句提修正意見；說明裡的位號點了會跳回圖上。</div>
+          <div id="st4-desc" class="insp"></div>
           <div id="st4-focus" class="insp"><div class="insp-empty">點左圖任一元件：看製程說明怎麼寫它、對它留評註或提修正意見。</div></div>
           <div class="section-title">現場評註 <span id="note-count" style="color:var(--dim);font-weight:400"></span></div>
           <div id="note-list"><span class="hint">尚無評註。</span></div>
@@ -788,7 +808,8 @@
     </div>
   </div>
 
+  <div id="toast"></div>
   <script src="/static/js/pid-label.js?v=20260820f"></script>
-  <script src="/static/js/pid-stages.js?v=20260820c"></script>
+  <script src="/static/js/pid-stages.js?v=20260820e"></script>
 </body>
 </html>

@@ -1007,17 +1007,95 @@ def _save_annots(filename: str, d: dict, domain: str = "",
     try:
         from datetime import datetime, timezone
 
+        hd = _hist_dir(filename, domain)
+        # 上一動／重做是游標在快照鏈上移動，不新增快照。退了幾步之後又有新寫入
+        # ＝放棄那幾個「未來」：把它們搬到 _abandoned/（稽核留著），鏈才保持線性，
+        # 否則之後的「上一動」會退進被放棄的狀態裡。
+        cur = _hist_cursor(hd)
+        vs = sorted(hd.glob("*.json"))
+        if cur and vs and vs[-1].stem != cur:
+            names = [v.stem for v in vs]
+            if cur in names:
+                ab = hd / "_abandoned"
+                ab.mkdir(exist_ok=True)
+                for v in vs[names.index(cur) + 1:]:
+                    v.replace(ab / v.name)
         ts = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d-%H%M%S-%f")
-        (_hist_dir(filename, domain) / f"{ts}.json").write_text(
+        (hd / f"{ts}.json").write_text(
             json.dumps({"at": ts, "action": snapshot, "items": d.get("items", []),
                         "audit": d.get("audit", []), "zones": d.get("zones", {})},
                        ensure_ascii=False), encoding="utf-8")
+        _set_hist_cursor(hd, ts)
         # 只留最近 60 版，舊的滾掉（一張圖審一輪約 50~70 次寫入）
-        vs = sorted(_hist_dir(filename, domain).glob("*.json"))
+        vs = sorted(hd.glob("*.json"))
         for old in vs[:-60]:
             old.unlink(missing_ok=True)
     except Exception:  # noqa: BLE001
         pass            # 快照失敗不能影響主寫入
+
+
+def _hist_cursor(hd: Path) -> str:
+    """目前資產庫內容對應哪一個快照（空＝最新）。"""
+    f = hd / "_cursor"
+    try:
+        return f.read_text(encoding="utf-8").strip() if f.exists() else ""
+    except OSError:
+        return ""
+
+
+def _set_hist_cursor(hd: Path, stem: str) -> None:
+    try:
+        (hd / "_cursor").write_text(stem, encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _hist_state(filename: str, domain: str) -> dict:
+    """給前端畫「↶ 上一動 ×n／↷ 重做 ×m／上次儲存 時間」用。"""
+    from datetime import datetime
+
+    hd = _hist_dir(filename, domain)
+    vs = sorted(hd.glob("*.json"))
+    names = [v.stem for v in vs]
+    cur = _hist_cursor(hd) or (names[-1] if names else "")
+    idx = names.index(cur) if cur in names else (len(names) - 1)
+    p = _annot_path(filename, domain)
+    saved_at = ""
+    if p.exists():
+        saved_at = datetime.fromtimestamp(p.stat().st_mtime).astimezone().isoformat(timespec="seconds")
+    last_action = ""
+    if 0 <= idx < len(vs):
+        try:
+            last_action = json.loads(vs[idx].read_text(encoding="utf-8")).get("action", "")
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"cursor": cur, "undo_left": max(0, idx), "redo_left": max(0, len(names) - 1 - idx),
+            "saved_at": saved_at, "last_action": last_action, "versions": len(names)}
+
+
+def _hist_move(filename: str, domain: str, step: int) -> dict:
+    """游標往前（-1＝上一動）或往後（+1＝重做）一格，把那一版寫回資產庫（不新增快照）。"""
+    hd = _hist_dir(filename, domain)
+    vs = sorted(hd.glob("*.json"))
+    names = [v.stem for v in vs]
+    if not names:
+        raise HTTPException(409, "本網域尚無建檔紀錄")
+    cur = _hist_cursor(hd) or names[-1]
+    idx = names.index(cur) if cur in names else len(names) - 1
+    j = idx + step
+    if j < 0:
+        raise HTTPException(409, "已經是最早的一版，沒有更早的上一動")
+    if j >= len(names):
+        raise HTTPException(409, "已經是最新的一版，沒有可重做的")
+    v = json.loads(vs[j].read_text(encoding="utf-8"))
+    d = {"items": v.get("items", []), "audit": v.get("audit", []), "zones": v.get("zones", {})}
+    p = _annot_path(filename, domain)
+    tmp = p.with_name(p.stem + ".tmp")
+    tmp.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, p)
+    _set_hist_cursor(hd, names[j])
+    return {"ok": True, "restored": names[j], "action": v.get("action", ""),
+            "items": len(d["items"]), **_hist_state(filename, domain)}
 
 
 class ZoneReq(BaseModel):
@@ -1080,9 +1158,12 @@ def annot_history(filename: str, request: Request) -> dict:
                     "audit": len(au), "by": last.get("by", ""),
                     "tag": last.get("tag", "")})
     cur = _load_annots(filename, dom)
+    st = _hist_state(filename, dom)
+    for o in out:
+        o["current"] = (o["version"] == st["cursor"])
     return {"domain": dom, "current": {"items": len(cur["items"]),
                                        "audit": len(cur["audit"])},
-            "versions": out}
+            "versions": out, **st}
 
 
 @router.post("/annot/{filename}/undo")
@@ -1093,14 +1174,27 @@ def annot_undo(filename: str, request: Request) -> dict:
     _safe_pdf(filename)
     dom = current_domain(request)
     with ANNOT_LOCK:
-        vs = sorted(_hist_dir(filename, dom).glob("*.json"))
-        if len(vs) < 2:
-            raise HTTPException(409, "沒有可回復的上一動（本網域尚無足夠版本）")
-        prev = json.loads(vs[-2].read_text(encoding="utf-8"))
-        d = {"items": prev.get("items", []), "audit": prev.get("audit", []),
-             "zones": prev.get("zones", {})}
-        _save_annots(filename, d, dom, "undo")
-    return {"ok": True, "restored": vs[-2].stem, "items": len(d["items"])}
+        return _hist_move(filename, dom, -1)
+
+
+@router.post("/annot/{filename}/redo")
+def annot_redo(filename: str, request: Request) -> dict:
+    """重做——上一動之後反悔，往前一格。有新寫入之後那些「未來」就放棄了，重做不到。"""
+    from .auth import current_domain
+
+    _safe_pdf(filename)
+    dom = current_domain(request)
+    with ANNOT_LOCK:
+        return _hist_move(filename, dom, +1)
+
+
+@router.get("/annot/{filename}/histstate")
+def annot_histstate(filename: str, request: Request) -> dict:
+    """只回上一動／重做步數與上次儲存時間——頂列每次改動後都會問，要便宜。"""
+    from .auth import current_domain
+
+    _safe_pdf(filename)
+    return _hist_state(filename, current_domain(request))
 
 
 @router.post("/annot/{filename}/restore/{version}")
@@ -1985,6 +2079,33 @@ def describe_get(filename: str, request: Request) -> dict:
     _safe_pdf(filename)
     d = _load_desc(filename, current_domain(request))
     return d or {"text": "", "notes": [], "empty": True}
+
+
+class DescConfirmReq(BaseModel):
+    confirmed: bool = True
+
+
+@router.post("/describe/{filename}/confirm")
+def describe_confirm(filename: str, req: DescConfirmReq, request: Request) -> dict:
+    """AI 寫的說明是預設稿，人看過同意了才算數——記誰、何時確認這一版。
+    重新產生或修訂會寫出新檔，確認自然歸零（那是新的一版，要再看一次）。"""
+    from datetime import datetime, timezone
+
+    from .auth import current_actor, current_domain
+
+    _safe_pdf(filename)
+    dom = current_domain(request)
+    d = _load_desc(filename, dom)
+    if not d or not d.get("text"):
+        raise HTTPException(409, "還沒有製程說明可確認")
+    if req.confirmed:
+        d["confirmed_by"] = current_actor(request)
+        d["confirmed_at"] = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    else:
+        d.pop("confirmed_by", None)
+        d.pop("confirmed_at", None)
+    _desc_path(filename, dom).write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"ok": True, "confirmed_by": d.get("confirmed_by"), "confirmed_at": d.get("confirmed_at")}
 
 
 DESCRIBE_SYS = (

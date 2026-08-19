@@ -1299,7 +1299,7 @@ function drawBoxes() {
     const d = document.createElement('div');
     d.className = 'nt-box';
     d.dataset.n = n.id;
-    d.title = `${n.id}｜${(n.by || '').split('@')[0] || ''}\n${n.text}`;
+    d.title = `${n.id}｜${noteWhere(n)}｜${(n.by || '').split('@')[0] || ''}\n${n.text}`;
     d.style.cssText = `left:${b[0] * 100}%;top:${b[1] * 100}%;`
       + `width:${(b[2] - b[0]) * 100}%;height:${(b[3] - b[1]) * 100}%`;
     overlay.appendChild(d);
@@ -1602,7 +1602,7 @@ function renderDesc(t) {
     .replace(/⟦(N\d+)⟧/g, (_, id) => {
       const n = notes.find(x => x.id === id);
       const who = ((n && n.by) || '').split('@')[0];
-      const where = n ? (n.tag || '框選區') : '';
+      const where = n ? noteWhere(n) : '';
       return `<a class="cite" data-note="${id}" title="${esc((n && n.text) || '')}">`
         + `${id}${where ? '·' + esc(where) : ''}${who ? '·' + esc(who) : ''}</a>`;
     });
@@ -1683,6 +1683,32 @@ async function loadNotes() {
   drawBoxes();
 }
 
+// 框選區裡有哪些元件：位號框的中心落在區域內、或與區域重疊過半。
+// 使用者框住 211.4 留評註，卡片只寫「框選區」等於沒說在哪——要把位號帶出來。
+function tagsInBox(bbox) {
+  if (!bbox || bbox.length !== 4) return [];
+  const [X0, Y0, X1, Y1] = bbox;
+  const out = [];
+  for (const it of items) {
+    if (it.state === 'rejected' || !it.tag || !Array.isArray(it.bbox)) continue;
+    const [x0, y0, x1, y1] = it.bbox;
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    const inCenter = cx >= X0 && cx <= X1 && cy >= Y0 && cy <= Y1;
+    const ow = Math.max(0, Math.min(x1, X1) - Math.max(x0, X0));
+    const oh = Math.max(0, Math.min(y1, Y1) - Math.max(y0, Y0));
+    const area = Math.max(1e-9, (x1 - x0) * (y1 - y0));
+    if (inCenter || (ow * oh) / area >= 0.5) out.push(it.tag);
+  }
+  return [...new Set(out)];
+}
+// 評註在哪：元件評註＝位號；框選區＝「框選區 · 211.4」（存檔時記的位號優先，沒有就照現在的台帳算）
+function noteWhere(n) {
+  if (n.tag) return n.tag;
+  const tags = (n.tags && n.tags.length) ? n.tags : tagsInBox(n.bbox);
+  if (!tags.length) return '框選區';
+  return '框選區 · ' + (tags.length <= 3 ? tags.join('、') : tags.slice(0, 3).join('、') + ` +${tags.length - 3}`);
+}
+
 function renderNotes() {
   const el = $('note-list');
   if (!el) return;
@@ -1694,7 +1720,7 @@ function renderNotes() {
   }
   el.innerHTML = notes.map(n => `<div class="nt" data-n="${esc(n.id)}">
     <div class="nt-h"><b>${esc(n.id)}</b>
-      <span>${esc(n.tag || '框選區')}</span>
+      <span>${esc(noteWhere(n))}</span>
       <span class="nt-by">${esc((n.by || '').split('@')[0] || '—')}</span>
       <span class="x" data-del="${esc(n.id)}" title="刪除">×</span></div>
     <div class="nt-t">${esc(n.text)}</div>
@@ -1723,7 +1749,7 @@ function renderNotes() {
 async function addNote(text, opt) {
   const r = await fetch(`/api/pid/notes/${encodeURIComponent(curFile)}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, bbox: opt.bbox || [], tag: opt.tag || '' }),
+    body: JSON.stringify({ text, bbox: opt.bbox || [], tag: opt.tag || '', tags: opt.tags || [] }),
   });
   if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.detail || '新增失敗'); return; }
   await loadNotes();
@@ -1741,7 +1767,7 @@ function bindCites(root) {
     if (!n) return;
     const b = (n.bbox && n.bbox.length === 4) ? n.bbox
       : (items.find(i => i.tag === n.tag) || {}).bbox;
-    if (b) showRing(b, n.id + '｜' + (n.tag || '框選區'));
+    if (b) showRing(b, n.id + '｜' + noteWhere(n));
   }));
 }
 
@@ -1824,9 +1850,11 @@ function openManual(box) {
   $('man-form').style.display = '';
   $('man-hint').innerHTML = `已框選區域，填入位號後即可加入。`;
   // 框選同時開評註——同一個框，使用者可能是要補標元件，也可能是要留一句話
-  noteTarget = { bbox: box, tag: '' };
+  const inTags = tagsInBox(box);
+  noteTarget = { bbox: box, tag: '', tags: inTags };
   $('note-new').style.display = '';
-  $('note-target').innerHTML = '評註對象：<b>此框選區域</b>';
+  $('note-target').innerHTML = '評註對象：<b>此框選區域</b>'
+    + (inTags.length ? `（含 ${esc(inTags.join('、'))}）` : '');
   $('note-text').focus();
 }
 

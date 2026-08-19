@@ -61,6 +61,7 @@ class NoteReq(BaseModel):
     text: str
     bbox: list = Field(default_factory=list)     # 框選區域（正規化），可空
     tag: str = ""                                # 綁定的元件位號，可空
+    tags: list = Field(default_factory=list)     # 框選區裡的元件位號（前端照當下台帳算出來）
     kind: str = "region"                         # region | element
 
 
@@ -84,9 +85,14 @@ def rag_block(notes: list) -> str:
         return ""
     lines = []
     for n in notes:
-        where = (f"元件 {n['tag']}" if n.get("tag")
-                 else (f"圖面座標 ({n['bbox'][0]:.2f}, {n['bbox'][1]:.2f})"
-                       if n.get("bbox") else "全圖"))
+        if n.get("tag"):
+            where = f"元件 {n['tag']}"
+        elif n.get("tags"):
+            where = "框選區，含元件 " + "、".join(str(t) for t in n["tags"][:6])
+        elif n.get("bbox"):
+            where = f"圖面座標 ({n['bbox'][0]:.2f}, {n['bbox'][1]:.2f})"
+        else:
+            where = "全圖"
         who = (n.get("by") or "").split("@")[0] or "工程師"
         lines.append(f"[{n['id']}]（{where}｜{who}）{n['text']}")
     return ("【現場工程師評註｜必須引用並標註出處】\n"
@@ -125,6 +131,7 @@ def add_note(filename: str, req: NoteReq, request: Request) -> dict:
     while any(x["id"] == nid for x in d["notes"]):        # 刪過再新增不撞號
         nid = f"N{int(nid[1:]) + 1}"
     n = {"id": nid, "text": text[:600], "tag": req.tag.strip(),
+         "tags": [str(t).strip() for t in (req.tags or []) if str(t).strip()][:20],
          "bbox": [round(float(v), 4) for v in req.bbox[:4]] if req.bbox else [],
          "kind": "element" if req.tag.strip() else "region",
          "by": current_actor(request), "at": _now(), "edited_at": ""}

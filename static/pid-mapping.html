@@ -126,6 +126,11 @@
     .pick .item:hover, .pick .item.on { border-color: var(--accent); }
     .pick .item.on { background: var(--accent-deep); }
     .pick .item b { display: block; word-break: break-all; }
+    .drop { display: block; border: 1.5px dashed var(--bdr); border-radius: 9px; padding: 16px 12px; text-align: center;
+      cursor: pointer; margin-bottom: 6px; background: var(--panel); }
+    .drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-deep); }
+    .drop b { display: block; font-size: 12.5px; }
+    .drop .m { color: var(--dim); font-size: 11px; margin-top: 3px; }
     .pick .item .m { color: var(--dim); font-size: 11px; margin-top: 2px; }
   </style>
 </head>
@@ -208,6 +213,28 @@ async function pickDrawing(name, silent) {
   syncUrl();
   if (sid) await ensureDrawingInMapping();
   if (!silent) setStep(sid ? 3 : 2);
+}
+// 上傳走資料工作台同一個端點（同一份清單、同一套可見性），成功後直接選中
+function bindUpload() {
+  const drop = $('drop'), inp = $('file'), st = $('up-state');
+  if (!drop) return;
+  const send = async f => {
+    if (!f) return;
+    st.textContent = '上傳中：' + f.name;
+    const fd = new FormData(); fd.append('file', f);
+    try {
+      const r = await fetch('/api/data/upload', { method: 'POST', body: fd });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || r.status);
+      st.textContent = `已上傳 ${(j.n_rows || 0).toLocaleString()} 列`;
+      datasets = await getJSON('/api/pid/mapping/datasets').catch(() => datasets);
+      await pickDataset(j.sid);
+    } catch (e) { st.textContent = '失敗：' + e.message; }
+  };
+  inp.onchange = () => send(inp.files[0]);
+  ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => send(e.dataTransfer.files[0]));
 }
 async function pickDataset(s, silent) {
   sid = s;
@@ -309,9 +336,18 @@ function renderPanel() {
     return;
   }
   if (step === 2) {
-    S.innerHTML = '<h2>② 選歷史數據</h2><div class="sub">資料工作台裡的資料集；一份資料可對多張圖</div>';
-    P.innerHTML = `<div class="pick">${datasets.length ? datasets.map(d => `<div class="item ${d.sid === sid ? 'on' : ''}" data-s="${esc(d.sid)}"><b>${esc(d.filename || d.sid)}</b><div class="m">${(d.n_rows || 0).toLocaleString()} 列｜已對 ${d.mapped || 0}／確認 ${d.confirmed || 0}</div></div>`).join('') : '<div class="empty">資料工作台裡沒有資料集。先去 <a href="/data">上傳</a>。</div>'}</div>`;
+    S.innerHTML = '<h2>② 選歷史數據</h2><div class="sub">直接上傳 CSV／Excel，或挑資料工作台裡已有的；一份資料可對多張圖</div>';
+    P.innerHTML = `<div class="pick">
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept=".csv,.xlsx,.xls,.xlsm" style="display:none"/>
+        <b>點擊或拖放上傳歷史數據</b>
+        <div class="m">CSV／Excel，第一列欄名，一欄時間戳；上傳後自動算統計、自動猜設備</div>
+        <div class="m" id="up-state"></div>
+      </label>
+      <div class="section-title">已有的資料集</div>
+      ${datasets.length ? datasets.map(d => `<div class="item ${d.sid === sid ? 'on' : ''}" data-s="${esc(d.sid)}"><b>${esc(d.filename || d.sid)}</b><div class="m">${(d.n_rows || 0).toLocaleString()} 列｜已對 ${d.mapped || 0}／確認 ${d.confirmed || 0}</div></div>`).join('') : '<div class="hint">還沒有資料集，上傳第一份。</div>'}</div>`;
     P.querySelectorAll('.item').forEach(i => i.onclick = () => pickDataset(i.dataset.s));
+    bindUpload();
     return;
   }
   // step 3

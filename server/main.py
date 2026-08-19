@@ -356,16 +356,26 @@ def _read_version() -> str:
 
 
 def _git_short() -> str:
-    """目前部署的 commit 短碼——版號說「哪一版」，commit 說「精確到哪一刀」。"""
-    import subprocess
+    """**啟動當下**的 commit 短碼，程序活著就不變。
 
-    try:
-        return subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
-            cwd=Path(__file__).resolve().parent.parent, timeout=3,
-        ).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return ""
+    每次請求現查 HEAD 會說謊：桌機上剛 commit 還沒重啟時，工作樹是新的、
+    跑的是舊的——版號要回答「現在跑的是哪一刀」，不是「硬碟上是哪一刀」。
+    """
+    global _BOOT_COMMIT
+    if _BOOT_COMMIT is None:
+        import subprocess
+
+        try:
+            _BOOT_COMMIT = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
+                cwd=Path(__file__).resolve().parent.parent, timeout=3,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            _BOOT_COMMIT = ""
+    return _BOOT_COMMIT
+
+
+_BOOT_COMMIT: str | None = None
 
 
 @app.get("/api/version")

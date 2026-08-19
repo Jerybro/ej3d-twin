@@ -1724,6 +1724,8 @@ function renderNotes() {
       <span class="nt-lab" data-lab="${esc(n.id)}" title="點一下改名（資產模型上顯示的名字）">${esc(noteWhere(n))}</span>
       <span class="nt-by">${esc((n.by || '').split('@')[0] || '—')}</span>
       <span class="x" data-del="${esc(n.id)}" title="刪除">×</span></div>
+    ${(!n.tag && n.label && looksLikeTag(n.label) && !existsTag(n.label) && n.bbox && n.bbox.length === 4)
+      ? `<div class="nt-a" style="margin-top:3px"><button class="mini-btn" data-mk="${esc(n.id)}" title="資產庫裡還沒有 ${esc(n.label)}——把這個框當成它加入（已確認）">加入資產庫為 ${esc(n.label)}（設備）</button></div>` : ''}
     ${n.text ? `<div class="nt-t">${esc(n.text)}</div>` : ''}
     <div class="nt-a">${esc((n.at || '').replace('T', ' ').slice(0, 16))}
       ${n.edited_at ? '（已編輯）' : ''}</div>
@@ -1735,6 +1737,22 @@ function renderNotes() {
       const it = items.find(i => i.tag === n.tag);
       if (it) showRing(it.bbox, n.tag);
     }
+  }));
+  // 評註只取了位號、資產庫卻沒有它 → 一鍵把框升格成元件（使用者以為框了就建好了）
+  el.querySelectorAll('[data-mk]').forEach(b => b.addEventListener('click', async e => {
+    e.stopPropagation();
+    const n = notes.find(x => x.id === b.dataset.mk); if (!n) return;
+    try { await addManualItem(n.label.trim(), 'equipment', n.bbox, n.text || ''); }
+    catch (err) { alert('加入資產庫失敗：' + err.message); return; }
+    // 這則評註改掛在元件上（有留言就留著；沒留言的刪掉，框已經是元件了）
+    if (n.text) {
+      await fetch(`/api/pid/notes/${encodeURIComponent(curFile)}/${encodeURIComponent(n.id)}`,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tag: n.label.trim() }) });
+    } else {
+      await fetch(`/api/pid/notes/${encodeURIComponent(curFile)}/${encodeURIComponent(n.id)}`, { method: 'DELETE' });
+    }
+    await loadNotes();
+    if (cmpMode !== 'off') { $('rebuild-img').dataset.for = ''; setCompare(cmpMode); }
   }));
   // 改名：資產模型上寫 N3 沒人看得懂——讓使用者直接說這是什麼
   el.querySelectorAll('[data-lab]').forEach(d => d.addEventListener('click', async e => {
@@ -1861,9 +1879,10 @@ function checkStale() { scheduleDesc(); }
 let manBox = null;
 function openManual(box) {
   manBox = box;
-  $('man-form').style.display = '';
-  $('man-hint').innerHTML = `已框選區域，填入位號後即可加入。`;
-  // 框選同時開評註——同一個框，使用者可能是要補標元件，也可能是要留一句話
+  // 框選只開一張表：「這是什麼」＋（寫了位號就預設）加入資產庫＋評註可不填。
+  // 以前同時開「手動標註」和「評註」兩張表，使用者填了上面那張（評註）就以為
+  // 元件建好了——結果資產模型與點位對照裡都沒有它。
+  $('man-form').style.display = 'none';
   const inTags = tagsInBox(box);
   noteTarget = { bbox: box, tag: '', tags: inTags };
   $('note-new').style.display = '';
@@ -1871,7 +1890,49 @@ function openManual(box) {
     + (inTags.length ? `（含 ${esc(inTags.join('、'))}）` : '');
   // 「這是什麼」：框裡有位號就先帶位號，沒有就讓使用者自己取名——資產模型上顯示的就是這個
   $('note-label').value = inTags.join('、');
+  updateAssetRow();
   (inTags.length ? $('note-text') : $('note-label')).focus();
+  $('note-new').scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+// 看起來像位號（211.4、PI 65103、V-612）而且資產庫還沒有它 → 顯示「同時加入資產庫」
+const TAG_LIKE = /^[A-Za-z]{0,4}[\s-]?\d[\w.\-\/]*$/;
+const normTag = s => (s || '').replace(/\s+/g, '').toUpperCase();
+function looksLikeTag(s) { return TAG_LIKE.test((s || '').trim()); }
+function existsTag(s) { const t = normTag(s); return items.some(i => i.state !== 'rejected' && normTag(i.tag) === t); }
+function updateAssetRow() {
+  const row = $('note-asset-row'); if (!row) return;
+  const lab = $('note-label').value.trim();
+  const show = !!noteTarget && !noteTarget.tag && looksLikeTag(lab);
+  row.style.display = show ? 'flex' : 'none';
+  if (!show) return;
+  if (existsTag(lab)) {
+    $('note-asset').checked = false; $('note-asset').disabled = true;
+    $('note-asset-hint').textContent = `資產庫已有 ${lab}，這裡只會留評註`;
+  } else {
+    $('note-asset').disabled = false; $('note-asset').checked = true;
+    $('note-asset-hint').textContent = `資產庫還沒有 ${lab}：勾著存＝把這個框當成 ${lab} 加入資產庫（已確認），資產模型與點位對照才看得到它`;
+  }
+}
+$('note-label').addEventListener('input', updateAssetRow);
+
+// 從框＋位號建一筆人工標註（已確認）——與手動標註同一條路
+async function addManualItem(tag, kind, bbox, note) {
+  const it = {
+    tag, kind, symbol: '', mounting: '', mount_conf: 0,
+    note: note || '', confidence: 1.0, bbox,
+    source: 'manual', state: 'accepted',
+    evidence: [{ stage: '人工標註', ok: true, score: 1.0,
+                 detail: '由工程師手動框選並填寫，非模型輸出' }],
+  };
+  const r = await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(it) });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.detail || '儲存失敗'); }
+  const j = await r.json().catch(() => ({}));
+  if (j && j.id) it.id = j.id;
+  items.push(it);
+  render(); checkStale();
+  return it;
 }
 
 // 評註對象：框選區域或某個元件
@@ -1882,6 +1943,7 @@ function openNoteFor(it) {
   $('note-new').style.display = '';
   $('note-target').innerHTML = `評註對象：<b>${esc(it.tag || KIND_TXT[it.kind] || '此元件')}</b>`;
   $('note-label').value = it.tag || '';
+  updateAssetRow();
   $('note-text').focus();
   $('note-text').scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
@@ -1894,8 +1956,19 @@ $('note-save').addEventListener('click', async () => {
   // 只取名不留言也可以——「這是 211.4」本身就是資訊
   if (!t && !lab) { alert('至少填「這是什麼」或評註內容其中一項'); return; }
   if (!noteTarget) { alert('請先框選區域或選一個元件'); return; }
-  await addNote(t, { ...noteTarget, label: lab });
+  const asAsset = $('note-asset-row').style.display !== 'none' && $('note-asset').checked && !$('note-asset').disabled;
+  if (asAsset) {
+    // 寫了位號又勾了加入資產庫：這個框就是元件 211.4（已確認、人工標註）；
+    // 有留言才另外掛一則元件評註，沒有就不製造多餘的「框選區」評註
+    try { await addManualItem(lab, $('note-kind').value, noteTarget.bbox, ''); }
+    catch (e) { alert('加入資產庫失敗：' + e.message); return; }
+    if (t) await addNote(t, { bbox: noteTarget.bbox, tag: lab, label: lab });
+    else { await loadNotes(); if (cmpMode !== 'off') { $('rebuild-img').dataset.for = ''; setCompare(cmpMode); } }
+  } else {
+    await addNote(t, { ...noteTarget, label: lab });
+  }
   $('note-text').value = ''; $('note-label').value = ''; $('note-new').style.display = 'none'; noteTarget = null;
+  if (selEl) { selEl.remove(); selEl = null; }
 });
 $('man-cancel').addEventListener('click', () => {
   manBox = null; $('man-form').style.display = 'none';
@@ -1914,10 +1987,12 @@ $('man-add').addEventListener('click', async () => {
                  detail: '由工程師手動框選並填寫，非模型輸出' }],
   };
   try {
-    await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {
+    const r = await fetch(`/api/pid/vlm/annot/${encodeURIComponent(curFile)}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(it),
     });
+    const j = await r.json().catch(() => ({}));
+    if (j && j.id) it.id = j.id;
   } catch { alert('儲存失敗'); return; }
   items.push(it);
   $('man-tag').value = ''; $('man-note').value = '';

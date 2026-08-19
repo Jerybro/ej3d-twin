@@ -568,6 +568,19 @@
             <input id="note-label" maxlength="40" placeholder="這是什麼？例：211.4 收塵器、停用管段（資產模型上會顯示這個名字）"
               style="width:100%;padding:6px 9px;border-radius:7px;border:1px solid var(--bdr);
                      background:var(--panel2);font-family:inherit;font-size:12px;margin-bottom:5px" />
+            <!-- 框起來寫了位號＝多半是要補一個 AI 沒抓到的元件，不是只留一句話。
+                 這一列讓「加入資產庫」成為預設動作，否則評註存了、資產模型與點位對照裡還是沒有它 -->
+            <div id="note-asset-row" style="display:none;align-items:center;gap:6px;margin-bottom:5px;font-size:12px;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+                <input type="checkbox" id="note-asset" checked /> 同時加入資產庫為</label>
+              <select id="note-kind" style="padding:4px 7px;border-radius:6px;border:1px solid var(--bdr);
+                background:var(--panel2);font-family:inherit;font-size:12px">
+                <option value="equipment">設備</option><option value="instrument">儀錶</option>
+                <option value="valve">閥件</option><option value="pipe">管線</option>
+                <option value="other">其他</option>
+              </select>
+              <span class="hint" id="note-asset-hint" style="flex-basis:100%"></span>
+            </div>
             <textarea id="note-text" placeholder="（可不填）例：209 捏和擠出機 2025 年改過押出馬達，實際產能約 2.4T/hr"
               style="width:100%;min-height:52px;padding:7px 9px;border-radius:7px;
                      border:1px solid var(--bdr);background:var(--panel2);
@@ -655,6 +668,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260820c"></script>
+  <script src="/static/js/pid-label.js?v=20260820d"></script>
 </body>
 </html>

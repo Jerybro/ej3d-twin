@@ -69,6 +69,7 @@ class NoteReq(BaseModel):
 class NotePatch(BaseModel):
     text: str | None = None
     label: str | None = None
+    tag: str | None = None       # 把框選區評註改掛到某個元件（框升格成元件後）
 
 
 def list_notes(filename: str, domain: str) -> list:
@@ -166,6 +167,9 @@ def edit_note(filename: str, nid: str, req: NotePatch, request: Request) -> dict
         n["text"] = req.text.strip()[:600]
     if req.label is not None:
         n["label"] = req.label.strip()[:40]
+    if req.tag is not None:
+        n["tag"] = req.tag.strip()[:40]
+        n["kind"] = "element" if n["tag"] else "region"
     if not n.get("text") and not n.get("label"):
         raise HTTPException(422, "至少要留「這是什麼」或評註內容其中一項")
     n["edited_at"] = _now()

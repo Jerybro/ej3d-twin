@@ -35,7 +35,7 @@ function setStage(n, opt) {
   }
   $('tb-hint').textContent = n === 4 ? '框選＝留評註' : (n === 1 ? '' : '框選空白處＝新增元件；選中框可拖把手改大小');
   if (n === 3) renderInspector();
-  if (n === 4) { renderNotes(); }
+  if (n === 4) { renderNotes(); renderStage4Focus(); }
   updateSteps();
   if (!(opt && opt.silent)) localStorage.setItem('pid.stage.' + (curFile || ''), String(n));
 }
@@ -88,14 +88,21 @@ const $$ = sel => document.querySelector(sel);
 {
   const _focusItem = focusItem;
   focusItem = function (k) {
+    if (linkPick) { finishLinkPick((items[k] || {}).tag); return; }   // 正在指定上下游：點到誰就是誰
+    // ③④ 點元件只是看它／對它留評註，不要觸發審核卡用的雲端「情境判讀」與「安裝別判定」（那是 ② 的事、要錢）
+    const it = items[k];
+    const hold = curStage !== 2 && it && !it._ctx;
+    if (hold) { it._ctxBusy = true; if (!it._cls) { it._cls = true; it.__clsHold = true; } }
     _focusItem(k);
+    if (hold) { it._ctxBusy = false; if (it.__clsHold) { it._cls = false; delete it.__clsHold; } }
     if (curStage === 3) renderInspector();
+    if (curStage === 4) { const it = items[k]; if (it) openNoteFor(it); renderStage4Focus(); }
   };
 }
 // renderNotes / renderModel：計數與檢視器跟著更新
 {
   const _renderNotes = renderNotes;
-  renderNotes = function () { _renderNotes(); updateSteps(); if (curStage === 3) renderInspector(); };
+  renderNotes = function () { _renderNotes(); updateSteps(); if (curStage === 3) renderInspector(); if (curStage === 4) renderStage4Focus(); };
   const _renderModel = renderModel;
   renderModel = function () { _renderModel(); updateSteps(); if (curStage === 3) renderInspector(); };
 }
@@ -107,8 +114,14 @@ switchTab = function (name) {
 };
 // openManual：框選意義隨階段固定
 openManual = function (box) {
-  manBox = box;
   const inTags = tagsInBox(box);
+  if (linkPick) {            // 指定上下游時框選一塊＝用框裡的元件
+    if (selEl) { selEl.remove(); selEl = null; }
+    if (!inTags.length) { alert('框裡沒有已入庫的元件——先在 ② 把它框進資產庫，或直接點圖上的框'); return; }
+    finishLinkPick(inTags[0]);
+    return;
+  }
+  manBox = box;
   if (curStage === 4) {
     // ④：框選＝留評註（沿用 0.15 的表單：這是什麼／同時加入資產庫／內容）
     $('man-form').style.display = 'none';
@@ -234,19 +247,148 @@ function renderInspector() {
     <div class="insp-sec"><h4>點位 <i></i><span style="font-weight:400">${pts.length}</span></h4>
       ${pts.length ? pts.slice(0, 6).map(p => `<div class="insp-row"><span class="k" title="${esc(p.col)}">${esc(p.measure || p.col)}${p.sub ? '·' + esc(p.sub) : ''}${p.stat ? ' ' + esc(p.stat) : ''}</span><span class="v ${p.confirmed ? 'ok' : 'g'}">${p.stats && p.stats.mean != null ? fmtNum(p.stats.mean) : '—'}${p.unit ? ' ' + esc(p.unit) : ''}${p.confirmed ? '' : '（未簽名）'}</span></div>`).join('') + (pts.length > 6 ? `<div class="hint">＋${pts.length - 6} 個</div>` : '')
         : `<div class="insp-empty">還沒綁數據。<a href="${$('step-map').href}">到點位對照</a>把欄位拖到它身上。</div>`}</div>
-    <div class="insp-sec"><h4>上下游 <i></i></h4>
-      ${(up.length || down.length) ? `<div class="insp-row"><span class="k">上游</span><span class="v" style="font-weight:400">${up.map(t => `<span class="tagchip" data-t="${esc(t)}">${esc(t)}</span>`).join('') || '—'}</span></div>
-         <div class="insp-row"><span class="k">下游</span><span class="v" style="font-weight:400">${down.map(t => `<span class="tagchip" data-t="${esc(t)}">${esc(t)}</span>`).join('') || '—'}</span></div>`
-        : '<div class="insp-empty">順序圖還沒推導（工具列「製程順序圖」），或這台沒接上流向。</div>'}</div>`;
+    <div class="insp-sec"><h4>上下游 <i></i><span style="font-weight:400">${fn ? '' : '（尚未推導）'}</span></h4>
+      ${linkPick ? `<div class="insp-row" style="border:0;color:var(--accent);font-weight:600">點圖上要設為${linkPick.dir === 'up' ? '上游' : '下游'}的元件（或框選它）　<button class="mini-btn" id="lp-cancel">取消</button></div>` : ''}
+      <div class="insp-row"><span class="k">上游</span><span class="v" style="font-weight:400">${up.map(t => `<span class="tagchip" data-t="${esc(t)}">${esc(t)}<span class="lp-x" data-rm-up="${esc(t)}" title="刪除這條連線"> ×</span></span>`).join('')}<button class="mini-btn lp-add" data-dir="up" title="指定一台上游：點圖上的元件或框選它">＋ 上游</button></span></div>
+      <div class="insp-row"><span class="k">下游</span><span class="v" style="font-weight:400">${down.map(t => `<span class="tagchip" data-t="${esc(t)}">${esc(t)}<span class="lp-x" data-rm-down="${esc(t)}" title="刪除這條連線"> ×</span></span>`).join('')}<button class="mini-btn lp-add" data-dir="down" title="指定一台下游：點圖上的元件或框選它">＋ 下游</button></span></div>
+      <div class="hint" style="margin-top:4px">自動推導來自箭頭與項次號；線稿沒接到或跨圖的，用「＋」自己指定，重建圖與順序圖會跟著更新。</div></div>`;
   $('insp-rebox').onclick = () => startRebox(curIdx);
   $('insp-note').onclick = () => openNoteFor(it);
   $('insp-del').onclick = () => deleteCurrent();
-  host.querySelectorAll('.tagchip').forEach(c => c.addEventListener('click', () => {
+  host.querySelectorAll('.tagchip').forEach(c => c.addEventListener('click', e => {
+    if (e.target.classList.contains('lp-x')) return;
     const k = items.findIndex(i => i.tag === c.dataset.t && i.state !== 'rejected');
     if (k >= 0) focusItem(k);
   }));
+  host.querySelectorAll('.lp-add').forEach(b => b.addEventListener('click', () => startLinkPick(b.dataset.dir)));
+  const lc = $('lp-cancel'); if (lc) lc.onclick = () => { linkPick = null; $('tb-hint').textContent = ''; renderInspector(); };
+  host.querySelectorAll('[data-rm-up]').forEach(x => x.addEventListener('click', async e => {
+    e.stopPropagation(); if (!confirm(`刪除連線 ${x.dataset.rmUp} → ${tag}？`)) return;
+    await postFlow(x.dataset.rmUp, tag, 'remove'); await reloadFlow();
+  }));
+  host.querySelectorAll('[data-rm-down]').forEach(x => x.addEventListener('click', async e => {
+    e.stopPropagation(); if (!confirm(`刪除連線 ${tag} → ${x.dataset.rmDown}？`)) return;
+    await postFlow(tag, x.dataset.rmDown, 'remove'); await reloadFlow();
+  }));
 }
+
+// ---- 人工指定上下游：自動推導靠箭頭與項次號，線稿沒接到／跨圖的要人補 ----
+let linkPick = null;     // { dir: 'up'|'down', base: tag }
+function startLinkPick(dir) {
+  const it = items[curIdx]; if (!it || !it.tag) { alert('先選一個有位號的元件'); return; }
+  linkPick = { dir, base: it.tag };
+  $('tb-hint').textContent = `點圖上要設為 ${it.tag} 的${dir === 'up' ? '上游' : '下游'}的元件，或框選它；Esc 取消`;
+  renderInspector();
+}
+async function finishLinkPick(tag) {
+  if (!linkPick) return;
+  const { dir, base } = linkPick;
+  linkPick = null; $('tb-hint').textContent = '';
+  if (!tag) { alert('點到的元件沒有位號，無法接上下游'); renderInspector(); return; }
+  if (tag === base) { alert('不能接自己'); renderInspector(); return; }
+  const a = dir === 'up' ? tag : base, b = dir === 'up' ? base : tag;
+  try { await postFlow(a, b, 'add'); } catch (e) { alert('新增連線失敗：' + e.message); }
+  await reloadFlow();
+}
+async function postFlow(a, b, action) {
+  return getJSON(`/api/pid/model/flow/${encodeURIComponent(curFile)}/manual`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ a, b, action }) });
+}
+async function reloadFlow() {
+  flowEdges = null; flowData = null;
+  await loadFlowEdges(); if (flowEdges) flowEdges._for = curFile;
+  $('rebuild-img').dataset.for = '';                       // 重建圖上的箭頭要跟著換
+  if (cmpMode !== 'off') setCompare(cmpMode);
+  renderInspector();
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && linkPick) { linkPick = null; $('tb-hint').textContent = ''; renderInspector(); } });
 const fmtNum = v => v == null ? '—' : (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2));
 
 // --------------------------------------------------------------- 啟動
 setStage(1, { silent: true });
+
+
+// --------------------------------------------------------------- ④ 元件 ↔ 說明 ↔ 評註
+// 說明是長文，圖是空間——兩邊要互指：選中元件就列出說明裡講它的句子，
+// 句子可直接「寫錯了→提意見」；說明裡的位號點了跳回圖上；沒被提到的元件列出來，
+// 讓人知道說明漏了誰（留評註就是補給它的料）。
+function descSentences() {
+  return (descText || '').split(/(?<=[。！？；\n])/).map(x => x.trim()).filter(Boolean);
+}
+function tagInText(tag, t) {
+  if (!tag) return false;
+  const re = new RegExp('(^|[^0-9A-Za-z.])' + tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![0-9A-Za-z.])');
+  return re.test(t);
+}
+function renderStage4Focus() {
+  const host = $('st4-focus'); if (!host) return;
+  const it = items[curIdx];
+  const accTags = [...new Set(items.filter(i => i.state === 'accepted' && i.tag).map(i => i.tag))];
+  if (!it) {
+    if (!descText) { host.className = 'insp'; host.innerHTML = '<div class="insp-empty">點左圖任一元件：對它留評註。按下方「產生說明」之後，這裡會顯示說明提到了哪些元件、漏了哪些。</div>'; return; }
+    const mentioned = accTags.filter(t => tagInText(t, descText));
+    const missing = accTags.filter(t => !tagInText(t, descText));
+    host.className = 'insp';
+    host.innerHTML = `<div class="insp-sub">製程說明提到 <b>${mentioned.length}／${accTags.length}</b> 個已確認位號。點左圖任一元件看它在說明裡怎麼寫。</div>
+      ${missing.length ? `<div class="insp-sec"><h4>說明沒提到 <i></i><span style="font-weight:400">${missing.length}</span></h4>
+        <div>${missing.slice(0, 30).map(t => `<span class="tagchip" data-t="${esc(t)}">${esc(t)}</span>`).join('')}${missing.length > 30 ? `<span class="hint">＋${missing.length - 30}</span>` : ''}</div>
+        <div class="hint" style="margin-top:4px">點一個→在圖上選中；留一句評註（例如它的角色），重新產生說明就會補進去。</div></div>` : ''}`;
+    host.querySelectorAll('.tagchip').forEach(c => c.addEventListener('click', () => { const k = items.findIndex(i => i.tag === c.dataset.t && i.state !== 'rejected'); if (k >= 0) focusItem(k); }));
+    return;
+  }
+  const tag = it.tag || '';
+  const myNotes = notes.filter(n => n.tag === tag || (n.tags || []).includes(tag));
+  const sents = tag ? descSentences().filter(x => tagInText(tag, x)) : [];
+  host.className = 'insp sel';
+  host.innerHTML = `
+    <div class="insp-top"><span class="insp-tag">${esc(tag || '（無位號）')}</span><span class="insp-k">${esc((typeof KIND_TXT !== 'undefined' && KIND_TXT[it.kind]) || it.kind)}</span>
+      <span style="flex:1"></span><button class="mini-btn" id="f4-note">對它留評註</button></div>
+    <div class="insp-sub">${esc(it.symbol || (modelRowFor(it) || {}).name || '')}</div>
+    <div class="insp-sec"><h4>說明裡怎麼寫它 <i></i><span style="font-weight:400">${sents.length} 句</span></h4>
+      ${!descText ? '<div class="insp-empty">還沒有製程說明——按下方「產生說明」。</div>'
+        : sents.length ? sents.map((x, i) => `<div class="f4-s" data-i="${i}"><div class="f4-t">${esc(x)}</div>
+            <div class="insp-act" style="margin-top:4px"><button class="mini-btn" data-jump="${i}">跳到說明處</button><button class="mini-btn" data-wrong="${i}">這句寫錯 → 提意見</button></div></div>`).join('')
+        : `<div class="insp-empty">說明沒提到 ${esc(tag)}。對它留一句評註（它在製程裡做什麼、有什麼現場狀況），重新產生說明就會補進去。</div>`}</div>
+    <div class="insp-sec"><h4>它的評註 <i></i><span style="font-weight:400">${myNotes.length}</span></h4>
+      ${myNotes.length ? myNotes.map(n => `<div class="insp-row"><span class="k">${esc(n.id)} ${esc(n.label && n.label !== tag ? n.label + '：' : '')}${esc(n.text || '')}</span><span class="v" style="font-weight:400;color:var(--dim)">${esc((n.by || '').split('@')[0])}</span></div>`).join('') : '<div class="insp-empty">還沒有。</div>'}</div>`;
+  $('f4-note').onclick = () => openNoteFor(it);
+  host.querySelectorAll('[data-jump]').forEach(b => b.addEventListener('click', () => jumpToSentence(sents[+b.dataset.jump])));
+  host.querySelectorAll('[data-wrong]').forEach(b => b.addEventListener('click', () => {
+    const x = sents[+b.dataset.wrong];
+    $('fb-box').style.display = '';
+    $('desc-panel').classList.remove('collapsed');
+    $('fb-text').value = `「${x.length > 60 ? x.slice(0, 60) + '…' : x}」這句不對：`;
+    $('fb-text').focus();
+    $('fb-text').scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }));
+}
+// 把說明捲到那一句並選取反白——說明的 DOM 被位號籤切成很多節點，用字元偏移對回去
+function jumpToSentence(sent) {
+  const root = $('desc-out'); if (!root || !sent) return;
+  $('desc-panel').classList.remove('collapsed');
+  const probe = sent.replace(/⟦N\d+⟧/g, '').slice(0, 18);
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = []; let all = '';
+  for (let n; (n = walker.nextNode());) { nodes.push({ n, start: all.length }); all += n.nodeValue; }
+  const at = all.indexOf(probe);
+  if (at < 0) { root.scrollIntoView({ block: 'start', behavior: 'smooth' }); return; }
+  const hit = nodes.filter(x => x.start <= at).pop();
+  const end = Math.min(all.length, at + sent.length);
+  const hitEnd = nodes.filter(x => x.start <= end).pop();
+  try {
+    const r = document.createRange();
+    r.setStart(hit.n, at - hit.start);
+    r.setEnd(hitEnd.n, Math.min(hitEnd.n.nodeValue.length, end - hitEnd.start));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    (hit.n.parentElement || root).scrollIntoView({ block: 'center', behavior: 'smooth' });
+  } catch { root.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+}
+// 說明裡的位號點了→圖上選中（④ 同時開它的評註）
+{
+  const out = $('desc-out');
+  if (out) out.addEventListener('click', e => {
+    const s = e.target.closest('.src'); if (!s) return;
+    const k = items.findIndex(i => i.tag === s.dataset.tag && i.state !== 'rejected');
+    if (k >= 0) focusItem(k);
+  });
+}

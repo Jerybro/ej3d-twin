@@ -1502,10 +1502,13 @@ def model_flow(filename: str, request: Request) -> dict:
         _add(src["tag"], src.get("symbol", ""), src.get("bbox"))
     flow = build_flow(eq, g.get("pipes") or [], g.get("arrows") or [],
                       g.get("aspect") or 0.7)
-    return _apply_flow_overrides(flow, filename, current_domain_of(request))
+    xb = {e["tag"]: e.get("bbox") for e in eq if e.get("tag")}
+    xn = {e["tag"]: e.get("name", "") for e in eq if e.get("tag")}
+    return _apply_flow_overrides(flow, filename, current_domain_of(request), xb, xn)
 
 
-def _apply_flow_overrides(flow: dict, filename: str, domain: str) -> dict:
+def _apply_flow_overrides(flow: dict, filename: str, domain: str,
+                          extra_boxes: dict | None = None, extra_names: dict | None = None) -> dict:
     """套用 VLM／人工判過的方向，並重算分流匯流。
 
     覆寫層與自動推導分開存：自動推導會隨重建而變，但「判過的方向」是結論，
@@ -1523,7 +1526,7 @@ def _apply_flow_overrides(flow: dict, filename: str, domain: str) -> dict:
     if not ov:
         return flow
 
-    src = {"vlm": ("AI 看圖判定", 0.8), "manual": ("人工判定", 1.0)}
+    src = {"vlm": ("AI 看圖判定", 0.8), "manual": ("人工判定", 1.0), "manual-add": ("人工指定", 1.0)}
     n_applied = n_suspect = 0
     for e in flow["edges"]:
         k = f"{min(e['from'], e['to'])}|{max(e['from'], e['to'])}"
@@ -1547,19 +1550,39 @@ def _apply_flow_overrides(flow: dict, filename: str, domain: str) -> dict:
         n_applied += 1
         label, conf = src.get(o.get("by", "vlm"), ("判定", 0.8))
         e["from"], e["to"] = o["from"], o["to"]
-        e["dir_by"] = o.get("by", "vlm")
+        e["dir_by"] = "manual" if str(o.get("by", "vlm")).startswith("manual") else o.get("by", "vlm")
         e["confidence"] = conf
         e["evidence"] = (f"{label}：{o.get('detail', '') or '依圖面判定方向'}"
                          f"（{o['from']}→{o['to']}）")
 
     flow["edges"] = [e for e in flow["edges"] if not e.get("_drop")]
 
+    box = {n["tag"]: n["bbox"] for n in flow["nodes"]}
+    nm = {n["tag"]: n["name"] for n in flow["nodes"]}
+    # 人工新增的連線：自動推導裡沒有這條（線稿沒接到、或跨圖），人在檢視器裡指定的。
+    # 端點不在節點表（例如只在清冊沒框）就補一個沒座標的節點——上下游清單照樣算得出來，
+    # 只是重建圖上畫不出線。
+    have = {f"{min(e['from'], e['to'])}|{max(e['from'], e['to'])}" for e in flow["edges"]}
+    for k, o in ov.items():
+        if o.get("by") != "manual-add" or k in have:
+            continue
+        a, b = o.get("from"), o.get("to")
+        if not a or not b or a == b:
+            continue
+        for t in (a, b):
+            if t not in box:
+                box[t] = (extra_boxes or {}).get(t)
+                nm[t] = (extra_names or {}).get(t, "")
+                flow["nodes"].append({"tag": t, "name": nm[t], "bbox": box[t]})
+        flow["edges"].append({"from": a, "to": b, "dir_by": "manual", "confidence": 1.0,
+                              "evidence": f"人工新增連線：{o.get('detail', '') or '檢視器指定上下游'}（{a}→{b}）",
+                              "manual_add": True})
+        n_applied += 1
+
     # 方向改了，分流匯流要跟著重算——這兩個是圖論定義，不能沿用舊值
     import networkx as nx
 
     D = nx.DiGraph()
-    box = {n["tag"]: n["bbox"] for n in flow["nodes"]}
-    nm = {n["tag"]: n["name"] for n in flow["nodes"]}
     D.add_nodes_from(box)
     for e in flow["edges"]:
         D.add_edge(e["from"], e["to"])
@@ -1609,9 +1632,10 @@ class FlowVlmReq(BaseModel):
 
 
 class FlowManualReq(BaseModel):
-    a: str                       # 目前這條邊的 from
-    b: str                       # 目前這條邊的 to
-    action: str                  # confirm | reverse | remove
+    a: str                       # 目前這條邊的 from（add 時＝上游）
+    b: str                       # 目前這條邊的 to（add 時＝下游）
+    action: str                  # confirm | reverse | remove | add
+    detail: str = ""             # add 時的說明（選填）
 
 
 @router.post("/flow/{filename}/manual")
@@ -1625,8 +1649,10 @@ def model_flow_manual(filename: str, req: FlowManualReq, request: Request) -> di
     from .pid_vlm import _safe_pdf
 
     _safe_pdf(filename)
-    if req.action not in ("confirm", "reverse", "remove"):
-        raise HTTPException(422, "action 需為 confirm / reverse / remove")
+    if req.action not in ("confirm", "reverse", "remove", "add"):
+        raise HTTPException(422, "action 需為 confirm / reverse / remove / add")
+    if not req.a.strip() or not req.b.strip() or req.a.strip() == req.b.strip():
+        raise HTTPException(422, "上下游要是兩個不同的位號")
     p = _flow_override_path(filename, current_domain_of(request))
     cur = {}
     if p.exists():
@@ -1637,6 +1663,11 @@ def model_flow_manual(filename: str, req: FlowManualReq, request: Request) -> di
     k = f"{min(req.a, req.b)}|{max(req.a, req.b)}"
     if req.action == "remove":
         cur[k] = {"by": "manual-remove", "detail": "人工判定兩台之間無此連線"}
+    elif req.action == "add":
+        # 自動推導沒有這條 → 人工新增；若其實有（只是方向未定）也沒關係，
+        # 套用時已存在的邊會走 manual 方向覆寫，不會重複長一條
+        cur[k] = {"from": req.a.strip(), "to": req.b.strip(), "by": "manual-add",
+                  "detail": (req.detail or "").strip()[:80]}
     else:
         frm, to = (req.b, req.a) if req.action == "reverse" else (req.a, req.b)
         cur[k] = {"from": frm, "to": to, "by": "manual",

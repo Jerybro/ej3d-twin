@@ -511,6 +511,13 @@
     .tagchip { display: inline-block; border: 1px solid var(--bdr); border-radius: 6px; padding: 1px 7px; font-size: 11px;
       background: #fff; margin: 2px 3px 0 0; cursor: pointer; }
     .tagchip:hover { border-color: var(--accent); color: var(--accent); }
+    .tagchip .lp-x { color: var(--dim); } .tagchip .lp-x:hover { color: var(--lo); }
+    .insp .lp-add { padding: 1px 7px; font-size: 11px; margin-left: 2px; vertical-align: middle; }
+    .insp-row .v { white-space: normal; text-align: right; }
+    .f4-s { border-top: 1px dashed rgba(4,106,251,0.18); padding: 6px 0; }
+    .f4-s:first-of-type { border-top: 0; }
+    .f4-t { font-size: 12px; line-height: 1.7; }
+    .f4-s .insp-act .mini-btn { flex: 0 0 auto; padding: 3px 8px; font-size: 11px; }
     /* ④ 才有製程說明 */
     #desc-panel { display: none; }
     body.st-4 #desc-panel { display: flex; }
@@ -724,7 +731,8 @@
         <!-- ───────────── ① 辨識 -->
         <div class="stg on" id="st1">
           <div class="stg-h">辨識 <span>讓系統先把圖上的東西找出來</span></div>
-          <div class="stg-sub">OCR＋幾何＋雲端視覺模型，全頁一次掃完約 1～2 分鐘。結果是候選，不會自動入庫——下一步逐項審核才算數。</div>
+          <div class="stg-sub">OCR＋幾何＋雲端視覺模型，全頁一次掃完約 1～2 分鐘。結果只是<b>候選</b>，不會自動入庫——下一步逐項審核才算數。<br>
+            <b>沒全掃到沒關係</b>：辨識只是幫你省時間，漏掉的到 ② 在圖上框選直接補、標錯的審核時否決；「加強辨識框選區域」可針對某一塊再掃一次。</div>
           <div id="conv-box" class="conv" style="display:none"></div>
           <button class="mini-btn primary" id="scan-all-btn" disabled
                   style="width:100%;padding:10px;margin-bottom:6px">辨識整張圖面</button>
@@ -767,11 +775,12 @@
         <!-- ───────────── ④ 評註與說明 -->
         <div class="stg" id="st4">
           <div class="stg-h">評註與說明 <span>現場知識進來，說明才寫得對</span></div>
-          <div class="stg-sub">在圖上拖曳框選＝留評註（框裡有位號會自動帶出）。製程說明在畫布下方，引用評註的句子會標出處，點得回圖上位置。</div>
+          <div class="stg-sub">點圖上既有的框＝對那個元件留評註；拖曳框選空白處＝對一塊區域留評註。製程說明在畫布下方：選中元件會列出說明裡提到它的句子，可直接對那句提修正意見；說明裡的位號點了會跳回圖上。</div>
+          <div id="st4-focus" class="insp"><div class="insp-empty">點左圖任一元件：看製程說明怎麼寫它、對它留評註或提修正意見。</div></div>
           <div class="section-title">現場評註 <span id="note-count" style="color:var(--dim);font-weight:400"></span></div>
           <div id="note-list"><span class="hint">尚無評註。</span></div>
           <div class="section-title">匯出</div>
-          <a class="mini-btn" id="export-btn" href="#" style="width:100%;text-align:center;padding:8px;display:block">匯出設備台帳 CSV</a>
+          <a class="mini-btn" id="export-btn" href="#" style="width:100%;text-align:center;padding:8px;display:block">匯出設備清單 CSV</a>
           <div class="next-row"><button class="mini-btn" data-go="3">← 資產模型</button><a class="mini-btn primary" id="go-map" href="/twin/mapping" style="text-decoration:none">下一步：點位對照 →</a></div>
         </div>
       </div>
@@ -780,6 +789,6 @@
   </div>
 
   <script src="/static/js/pid-label.js?v=20260820f"></script>
-  <script src="/static/js/pid-stages.js?v=20260820a"></script>
+  <script src="/static/js/pid-stages.js?v=20260820c"></script>
 </body>
 </html>

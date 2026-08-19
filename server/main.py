@@ -562,7 +562,7 @@ async def pid_upload(file: "UploadFile" = FastAPIFile(...)) -> dict:
     return {"ok": True, "name": name, "size": dest.stat().st_size,
             "replaced": existed, "content_changed": existed and not same,
             "caches_cleared": cleared,
-            "note": ("同名檔已存在——既有的審核台帳、評註與製程說明都會沿用"
+            "note": ("同名檔已存在——既有的審核紀錄、評註與製程說明都會沿用"
                      if existed else "")}
 
 

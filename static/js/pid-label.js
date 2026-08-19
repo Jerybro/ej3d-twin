@@ -235,6 +235,7 @@ async function showGroupOverview(gid) {
 async function openDoc(name) {
   curFile = name; items = []; curIdx = -1; sel = null;
   $('doc-name').textContent = name;
+  if ($('new-ui')) $('new-ui').href = '/twin/pid/label2?file=' + encodeURIComponent(name);   // 舊版面 → 新版面帶同一張圖
   document.querySelectorAll('.file-item').forEach(d =>
     d.classList.toggle('active', d.dataset.name === name));
   stage.className = 'empty';
@@ -2331,7 +2332,7 @@ document.addEventListener('keydown', e => {
 
 // 左欄收合：筆電畫面窄，收起來把寬度讓給圖面。選擇記在 localStorage；
 // 沒選過的人在窄螢幕（≤1440px）預設收起。
-{
+if (document.querySelector('aside') && $('aside-toggle')) {   // 新版面（label2）沒有左欄
   const aside = document.querySelector('aside');
   const tg = $('aside-toggle');
   const KEY = 'pid.aside.collapsed';

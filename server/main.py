@@ -622,7 +622,8 @@ PAGES = {
     "/e3d": "editor.html",     # 舊路徑別名（既有連結相容）
     "/twin/editor": "editor.html",  # 舊路徑別名（既有連結相容）
     "/twin/pid": "pid.html",   # 產品3：P&ID 管理
-    "/twin/pid/label": "pid-label.html",  # 產品3：P&ID 標示化協作工作台
+    "/twin/pid/label": "pid-label.html",  # 產品3：P&ID 標示化協作工作台（舊版面，並存一週後下架）
+    "/twin/pid/label2": "pid-label2.html",  # 產品3：P&ID 判讀工作台 新版面（階段式：①辨識②審核③資產模型④評註與說明）
     "/twin/pid/rebuild": "pid-rebuild.html",  # 產品3：盲測重建（模型 JSON → 重畫）
     "/twin/mapping": "pid-mapping.html",       # 點位對照：歷史數據欄位 ↔ P&ID 資產
     "/data/inventory": "data-inventory.html",  # 資料盤點：收到的資料在時間上長什麼樣

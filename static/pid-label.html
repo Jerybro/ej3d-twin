@@ -299,6 +299,8 @@
       padding: 7px 9px; margin-bottom: 5px; cursor: pointer; }
     .nt:hover { border-color: var(--accent); }
     .nt-h { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+    .nt-h .nt-lab { cursor: text; border-bottom: 1px dashed transparent; }
+    .nt-h .nt-lab:hover { border-bottom-color: var(--accent); color: var(--accent); }
     .nt-h b { color: var(--accent); }
     .nt-h span { color: var(--dim); }
     .nt-h .nt-by { flex: 1; text-align: right; }
@@ -563,6 +565,9 @@
             點說明裡的來源籤就跳回圖上位置。</div>
           <div id="note-new" style="display:none;margin-bottom:8px">
             <div class="hint" id="note-target" style="margin-bottom:4px"></div>
+            <input id="note-label" maxlength="40" placeholder="這是什麼？例：211.4 收塵器、停用管段（資產模型上會顯示這個名字）"
+              style="width:100%;padding:6px 9px;border-radius:7px;border:1px solid var(--bdr);
+                     background:var(--panel2);font-family:inherit;font-size:12px;margin-bottom:5px" />
             <textarea id="note-text" placeholder="例：209 捏和擠出機 2025 年改過押出馬達，實際產能約 2.4T/hr"
               style="width:100%;min-height:52px;padding:7px 9px;border-radius:7px;
                      border:1px solid var(--bdr);background:var(--panel2);
@@ -650,6 +655,6 @@
     </div>
   </div>
 
-  <script src="/static/js/pid-label.js?v=20260820a"></script>
+  <script src="/static/js/pid-label.js?v=20260820b"></script>
 </body>
 </html>

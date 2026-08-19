@@ -799,6 +799,26 @@ def _x(s: str) -> str:
             .replace(">", "&gt;"))
 
 
+# 評註在重建圖上的標籤：使用者取的名字優先（「這是什麼」），沒有才退回 N3 這種流水號——
+# 資產模型是交付物，上面寫 N3 對看圖的人毫無意義。
+def _note_label(n: dict) -> str:
+    lab = (n.get("label") or "").strip()
+    if lab:
+        return lab[:24]
+    tags = n.get("tags") or []
+    if tags:
+        return "、".join(str(t) for t in tags[:2]) + ("…" if len(tags) > 2 else "")
+    return str(n.get("id") or "")
+
+
+def _tw(s: str, size: float = 10) -> float:
+    """標籤底色寬度：CJK 一個字 ≈ 1 em、ASCII ≈ 0.6 em，再加左右各 3px。"""
+    w = 0.0
+    for ch in s:
+        w += size if ord(ch) > 0x2E80 else size * 0.6
+    return max(w + 6, 22)
+
+
 def _svg_of(m: dict, flow: dict | None = None, notes: list | None = None) -> str:
     """只讀模型 JSON 把圖重畫回來——不碰 PDF、不碰底圖。
 
@@ -1063,10 +1083,11 @@ def _svg_of(m: dict, flow: dict | None = None, notes: list | None = None) -> str
             p.append(f'<rect x="{x0:.0f}" y="{y0:.0f}" width="{w:.0f}" height="{h:.0f}" '
                      'fill="rgba(4,106,251,0.06)" stroke="#046AFB" stroke-width="1.4" '
                      'stroke-dasharray="4 3" rx="3"/>')
-            p.append(f'<rect x="{x0 - 1:.0f}" y="{y0 - 13:.0f}" width="{max(len(n["id"]) * 8, 22):.0f}" '
+            lab = _note_label(n)
+            p.append(f'<rect x="{x0 - 1:.0f}" y="{y0 - 13:.0f}" width="{_tw(lab):.0f}" '
                      'height="13" fill="#046AFB" rx="3"/>')
             p.append(f'<text x="{x0 + 3:.0f}" y="{y0 - 3:.0f}" font-size="10" '
-                     f'fill="#fff" font-weight="700">{_x(n["id"])}</text>')
+                     f'fill="#fff" font-weight="700">{_x(lab)}</text>')
         p.append("</g>")
 
     p.append("</svg>")
@@ -1283,11 +1304,12 @@ def _svg_blind(m: dict, flow: dict | None = None, notes: list | None = None) -> 
             p.append(f'<rect x="{x0:.0f}" y="{y0:.0f}" width="{w:.0f}" height="{h:.0f}" '
                      'fill="rgba(4,106,251,0.06)" stroke="#046AFB" stroke-width="1.4" '
                      'stroke-dasharray="4 3" rx="3"/>')
+            lab = _note_label(n)
             p.append(f'<rect x="{x0 - 1:.0f}" y="{y0 - 13:.0f}" '
-                     f'width="{max(len(n["id"]) * 8, 22):.0f}" height="13" '
+                     f'width="{_tw(lab):.0f}" height="13" '
                      'fill="#046AFB" rx="3"/>')
             p.append(f'<text x="{x0 + 3:.0f}" y="{y0 - 3:.0f}" font-size="10" '
-                     f'fill="#fff" font-weight="700">{_x(n["id"])}</text>')
+                     f'fill="#fff" font-weight="700">{_x(lab)}</text>')
         p.append("</g>")
 
     # 10) 圖例（右上角）：這張圖畫了什麼、沒畫的去哪了

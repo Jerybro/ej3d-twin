@@ -62,11 +62,13 @@ class NoteReq(BaseModel):
     bbox: list = Field(default_factory=list)     # 框選區域（正規化），可空
     tag: str = ""                                # 綁定的元件位號，可空
     tags: list = Field(default_factory=list)     # 框選區裡的元件位號（前端照當下台帳算出來）
+    label: str = ""                              # 這是什麼——使用者自己取的名字，資產模型上顯示它而不是 N3
     kind: str = "region"                         # region | element
 
 
 class NotePatch(BaseModel):
-    text: str
+    text: str | None = None
+    label: str | None = None
 
 
 def list_notes(filename: str, domain: str) -> list:
@@ -85,7 +87,9 @@ def rag_block(notes: list) -> str:
         return ""
     lines = []
     for n in notes:
-        if n.get("tag"):
+        if n.get("label"):
+            where = n["label"]
+        elif n.get("tag"):
             where = f"元件 {n['tag']}"
         elif n.get("tags"):
             where = "框選區，含元件 " + "、".join(str(t) for t in n["tags"][:6])
@@ -130,7 +134,7 @@ def add_note(filename: str, req: NoteReq, request: Request) -> dict:
     nid = f"N{len(d['notes']) + 1}"
     while any(x["id"] == nid for x in d["notes"]):        # 刪過再新增不撞號
         nid = f"N{int(nid[1:]) + 1}"
-    n = {"id": nid, "text": text[:600], "tag": req.tag.strip(),
+    n = {"id": nid, "text": text[:600], "tag": req.tag.strip(), "label": (req.label or "").strip()[:40],
          "tags": [str(t).strip() for t in (req.tags or []) if str(t).strip()][:20],
          "bbox": [round(float(v), 4) for v in req.bbox[:4]] if req.bbox else [],
          "kind": "element" if req.tag.strip() else "region",
@@ -155,7 +159,12 @@ def edit_note(filename: str, nid: str, req: NotePatch, request: Request) -> dict
     if n.get("by") and me and n["by"] != me and \
             (current_user(request) or {}).get("role") != "admin":
         raise HTTPException(403, "只有作者或管理員能修改這則評註")
-    n["text"] = (req.text or "").strip()[:600]
+    if req.text is not None:
+        if not req.text.strip():
+            raise HTTPException(422, "評註內容不可空白")
+        n["text"] = req.text.strip()[:600]
+    if req.label is not None:
+        n["label"] = req.label.strip()[:40]
     n["edited_at"] = _now()
     _save(filename, dom, d)
     return n

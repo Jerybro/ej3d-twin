@@ -1703,6 +1703,7 @@ function tagsInBox(bbox) {
 }
 // 評註在哪：元件評註＝位號；框選區＝「框選區 · 211.4」（存檔時記的位號優先，沒有就照現在的台帳算）
 function noteWhere(n) {
+  if (n.label) return n.label;
   if (n.tag) return n.tag;
   const tags = (n.tags && n.tags.length) ? n.tags : tagsInBox(n.bbox);
   if (!tags.length) return '框選區';
@@ -1720,7 +1721,7 @@ function renderNotes() {
   }
   el.innerHTML = notes.map(n => `<div class="nt" data-n="${esc(n.id)}">
     <div class="nt-h"><b>${esc(n.id)}</b>
-      <span>${esc(noteWhere(n))}</span>
+      <span class="nt-lab" data-lab="${esc(n.id)}" title="點一下改名（資產模型上顯示的名字）">${esc(noteWhere(n))}</span>
       <span class="nt-by">${esc((n.by || '').split('@')[0] || '—')}</span>
       <span class="x" data-del="${esc(n.id)}" title="刪除">×</span></div>
     <div class="nt-t">${esc(n.text)}</div>
@@ -1734,6 +1735,18 @@ function renderNotes() {
       const it = items.find(i => i.tag === n.tag);
       if (it) showRing(it.bbox, n.tag);
     }
+  }));
+  // 改名：資產模型上寫 N3 沒人看得懂——讓使用者直接說這是什麼
+  el.querySelectorAll('[data-lab]').forEach(d => d.addEventListener('click', async e => {
+    e.stopPropagation();
+    const n = notes.find(x => x.id === d.dataset.lab); if (!n) return;
+    const v = prompt('這是什麼？（資產模型上會顯示這個名字）', n.label || noteWhere(n));
+    if (v === null) return;
+    const r = await fetch(`/api/pid/notes/${encodeURIComponent(curFile)}/${encodeURIComponent(n.id)}`,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: v.trim() }) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.detail || '改名失敗'); return; }
+    await loadNotes();
+    if (cmpMode !== 'off') { $('rebuild-img').dataset.for = ''; setCompare(cmpMode); }   // 模型側標籤要跟著換
   }));
   el.querySelectorAll('[data-del]').forEach(d => d.addEventListener('click', async e => {
     e.stopPropagation();
@@ -1749,10 +1762,11 @@ function renderNotes() {
 async function addNote(text, opt) {
   const r = await fetch(`/api/pid/notes/${encodeURIComponent(curFile)}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, bbox: opt.bbox || [], tag: opt.tag || '', tags: opt.tags || [] }),
+    body: JSON.stringify({ text, bbox: opt.bbox || [], tag: opt.tag || '', tags: opt.tags || [], label: opt.label || '' }),
   });
   if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.detail || '新增失敗'); return; }
   await loadNotes();
+  if (cmpMode !== 'off') { $('rebuild-img').dataset.for = ''; setCompare(cmpMode); }   // 模型側要畫出新評註
   // 評註會改變製程說明的內容 → 標記為待重生成
   descBaseline = '';
   scheduleDesc();
@@ -1855,7 +1869,9 @@ function openManual(box) {
   $('note-new').style.display = '';
   $('note-target').innerHTML = '評註對象：<b>此框選區域</b>'
     + (inTags.length ? `（含 ${esc(inTags.join('、'))}）` : '');
-  $('note-text').focus();
+  // 「這是什麼」：框裡有位號就先帶位號，沒有就讓使用者自己取名——資產模型上顯示的就是這個
+  $('note-label').value = inTags.join('、');
+  (inTags.length ? $('note-text') : $('note-label')).focus();
 }
 
 // 評註對象：框選區域或某個元件
@@ -1865,19 +1881,20 @@ function openNoteFor(it) {
   noteTarget = { bbox: it.bbox, tag: it.tag || '' };
   $('note-new').style.display = '';
   $('note-target').innerHTML = `評註對象：<b>${esc(it.tag || KIND_TXT[it.kind] || '此元件')}</b>`;
+  $('note-label').value = it.tag || '';
   $('note-text').focus();
   $('note-text').scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
 $('note-cancel').addEventListener('click', () => {
-  noteTarget = null; $('note-new').style.display = 'none'; $('note-text').value = '';
+  noteTarget = null; $('note-new').style.display = 'none'; $('note-text').value = ''; $('note-label').value = '';
 });
 $('note-save').addEventListener('click', async () => {
   const t = $('note-text').value.trim();
   if (!t) { alert('請先寫下評註內容'); return; }
   if (!noteTarget) { alert('請先框選區域或選一個元件'); return; }
-  await addNote(t, noteTarget);
-  $('note-text').value = ''; $('note-new').style.display = 'none'; noteTarget = null;
+  await addNote(t, { ...noteTarget, label: $('note-label').value.trim() });
+  $('note-text').value = ''; $('note-label').value = ''; $('note-new').style.display = 'none'; noteTarget = null;
 });
 $('man-cancel').addEventListener('click', () => {
   manBox = null; $('man-form').style.display = 'none';

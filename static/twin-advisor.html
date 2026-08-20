@@ -133,7 +133,7 @@
           <button data-m="annot">標示</button>
           <button data-m="trace">描圖</button>
         </span>
-        <span class="seg"><button id="zo">−</button><button id="zf">全圖</button><button id="zi">＋</button></span>
+        <span class="seg"><button id="zo">−</button><button id="zc" class="on">聚焦這三台</button><button id="zf">全圖</button><button id="zi">＋</button></span>
         <span class="sp"></span>
         <span class="hint" id="cap"></span>
       </div>
@@ -182,15 +182,37 @@ function loadImage() {
   st.innerHTML = `<div id="wrap"><img id="img" src="${esc(imgUrl())}" draggable="false"/>
     <svg id="links" preserveAspectRatio="none"></svg><div id="ov"></div></div>`;
   const img = $('img');
-  img.onload = () => { baseW = img.naturalWidth || 1600; baseH = img.naturalHeight || Math.round(baseW * (state.aspect || .707)); fit(); draw(); };
+  img.onload = () => { baseW = img.naturalWidth || 1600; baseH = img.naturalHeight || Math.round(baseW * (state.aspect || .707)); fitChain(); draw(); };
   img.onerror = () => { st.className = 'empty'; st.innerHTML = '<span>資產模型圖載入失敗</span>'; };
   bindPan();
 }
 function applyZoom() { const i = $('img'); if (i) i.style.width = Math.round(baseW * zoom) + 'px'; }
-function fit() { zoom = Math.min(1, ($('stage').clientWidth - 24) / baseW); applyZoom(); }
-$('zi').onclick = () => { zoom = Math.min(zoom * 1.4, 6); applyZoom(); };
-$('zo').onclick = () => { zoom = Math.max(zoom / 1.4, .05); applyZoom(); };
+function fit() { zoom = Math.min(1, ($('stage').clientWidth - 24) / baseW); applyZoom(); setZmode('zf'); }
+// 全圖縮放下這三台只有幾十像素，看不清楚——預設放大到剛好裝下這條鏈
+function chainRegion() {
+  const bs = state.chain.map(e => e.bbox).filter(Boolean);
+  if (!bs.length) return null;
+  const pad = 0.05;
+  return [Math.max(0, Math.min(...bs.map(b => b[0])) - pad), Math.max(0, Math.min(...bs.map(b => b[1])) - pad),
+          Math.min(1, Math.max(...bs.map(b => b[2])) + pad), Math.min(1, Math.max(...bs.map(b => b[3])) + pad)];
+}
+function fitChain() {
+  const st = $('stage'), r = chainRegion();
+  if (!r) return fit();
+  zoom = Math.min(3, Math.max(.05, Math.min((st.clientWidth - 24) / (baseW * (r[2] - r[0])),
+                                            (st.clientHeight - 24) / (baseH * (r[3] - r[1])))));
+  applyZoom();
+  requestAnimationFrame(() => {
+    st.scrollLeft = r[0] * baseW * zoom - 12;
+    st.scrollTop = r[1] * baseH * zoom - 12;
+  });
+  setZmode('zc');
+}
+function setZmode(id) { ['zc', 'zf'].forEach(k => $(k).classList.toggle('on', k === id)); }
+$('zi').onclick = () => { zoom = Math.min(zoom * 1.4, 6); applyZoom(); setZmode(''); };
+$('zo').onclick = () => { zoom = Math.max(zoom / 1.4, .05); applyZoom(); setZmode(''); };
 $('zf').onclick = fit;
+$('zc').onclick = fitChain;
 document.querySelectorAll('#mode button').forEach(b => b.onclick = () => {
   mode = b.dataset.m;
   document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b));
@@ -303,7 +325,7 @@ $('reset').addEventListener('click', async () => {
   results = []; render(); $('st').textContent = '已重置';
 });
 fetch('/api/version').then(r => r.json()).then(v => { $('ver').textContent = `v${v.version}`; }).catch(() => {});
-addEventListener('resize', () => { if (state && state.model_ok && $('img')) fit(); });
+addEventListener('resize', () => { if (state && state.model_ok && $('img')) ($('zc').classList.contains('on') ? fitChain : fit)(); });
 load();
 </script>
 </body>

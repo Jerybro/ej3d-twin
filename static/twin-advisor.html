@@ -299,7 +299,20 @@ function drawStage() {
   const done = byAsset();
   ov.innerHTML = '';
   if (view === 'nav') {
-    const eq = state.chain[step]; if (!eq || !eq.bbox) return;
+    const eq = state.chain[step];
+    if (!eq) return;
+    if (!eq.bbox) {          // 這台在圖上還沒框（資產庫只有清冊列）→ 退回顯示整條鏈，不要開天窗
+      state.chain.forEach((x, i) => {
+        if (!x.bbox) return;
+        const b = x.bbox, dm = document.createElement('div');
+        dm.className = 'mark' + (done[x.tag] ? ' done' : '');
+        dm.style.cssText = `left:${b[0]*100}%;top:${b[1]*100}%;width:${(b[2]-b[0])*100}%;height:${(b[3]-b[1])*100}%;opacity:.45`;
+        dm.innerHTML = `<span class="no">${i + 1}</span>`;
+        ov.appendChild(dm);
+      });
+      const bb2 = allBox(); if (bb2) zoomTo(bb2, .82);
+      return;
+    }
     const r = done[eq.tag], b = eq.bbox;
     const d = document.createElement('div');
     d.className = 'spot' + (r ? ' done' : '');
@@ -348,6 +361,12 @@ function cardHTML(eq, r, i) {
   const up = i > 0 ? state.chain[i - 1] : null;
   const head = `
   ${up && r && r.based_on ? `<div class="carry">↓ 承接 ${esc(up.tag)} ${esc(up.name)} 的建議條件</div>` : ''}
+  ${eq.bbox ? '' : `<div class="blk" style="border-color:var(--mid);background:rgba(224,164,21,.09)">
+    <b>${esc(eq.tag)} 在圖上還沒有框</b>
+    <div class="hint" style="margin-top:4px">資產庫裡這台只有清冊列（未定位），所以左圖亮不起來。到判讀工作台把它框一下就會回來——框完這裡自動接上，不必重設。</div>
+    <a class="mini-btn" style="display:inline-block;margin-top:7px" target="_blank"
+       href="/twin/pid/label2?file=${encodeURIComponent(state.drawing)}">去判讀工作台框 ${esc(eq.tag)} →</a>
+  </div>`}
   <div class="blk head">
     <div class="eqline"><b>${esc(eq.tag)}</b><span>${esc(eq.name)}</span>
       <span class="ttag ${esc(eq.task)}">${esc(eq.task_txt)}</span>${q(TASK_TIP[eq.task] || '')}</div>

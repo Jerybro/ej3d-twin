@@ -21,7 +21,7 @@ from pathlib import Path
 # 而不是深層 traceback 或更糟的「啟動正常、點下去才壞」。
 from . import depcheck  # noqa: F401
 
-from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi import File as FastAPIFile
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -567,11 +567,15 @@ async def pid_upload(file: "UploadFile" = FastAPIFile(...)) -> dict:
 
 
 @app.get("/api/pid/list")
-def pid_list() -> list:
+def pid_list(request: Request) -> list:
     from .scenes import SCENES_DIR
+    from .auth import restricted_files
 
+    allow = restricted_files(request)
     out = []
     for p in sorted(PID_DIR.glob("*.pdf")):
+        if allow is not None and p.name not in allow:
+            continue
         slug = "pid-" + re.sub(r"[^a-z0-9]+", "-", p.stem.lower()).strip("-")
         out.append({"name": p.name, "size": p.stat().st_size,
                     "scene_id": slug if (SCENES_DIR / f"{slug}.json").exists() else None})

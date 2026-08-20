@@ -750,8 +750,7 @@
         <!-- ───────────── ① 辨識 -->
         <div class="stg on" id="st1">
           <div class="stg-h">辨識 <span>讓系統先把圖上的東西找出來</span></div>
-          <div class="stg-sub">OCR＋幾何＋雲端視覺模型，全頁一次掃完約 1～2 分鐘。結果只是<b>候選</b>，不會自動入庫——下一步逐項審核才算數。<br>
-            <b>沒全掃到沒關係</b>：辨識只是幫你省時間，漏掉的到 ② 在圖上框選直接補、標錯的審核時否決；「加強辨識框選區域」可針對某一塊再掃一次。</div>
+          <div class="stg-sub">全頁掃描約 1～2 分鐘，結果是候選、審核後才入庫。沒全掃到沒關係——漏的在 ② 框選補上，錯的否決。</div>
           <div id="conv-box" class="conv" style="display:none"></div>
           <button class="mini-btn primary" id="scan-all-btn" disabled
                   style="width:100%;padding:10px;margin-bottom:6px">辨識整張圖面</button>
@@ -770,7 +769,7 @@
         <!-- ───────────── ② 審核 -->
         <div class="stg" id="st2">
           <div class="stg-h">審核 <span>逐項判「框對不對、是不是它」</span></div>
-          <div class="stg-sub">Enter 確認、E 重框、N 有誤、Delete 刪除。在圖上拖曳框選空白處＝新增 AI 沒抓到的元件；審核卡上可順手加評註。</div>
+          <div class="stg-sub">Enter 確認、E 重框、N 有誤、Delete 刪除；框選空白處＝新增元件。</div>
           <div id="rev-host"></div>
           <div class="section-title">全部項目 <span id="li-count" style="color:var(--dim);font-weight:400"></span></div>
           <div id="li-list"><span class="hint">先到 ① 辨識整張圖面。</span></div>
@@ -782,7 +781,7 @@
         <!-- ───────────── ③ 資產模型 -->
         <div class="stg" id="st3">
           <div class="stg-h">資產模型 <span>審核結果編譯成帶屬性的資產物件</span></div>
-          <div class="stg-sub">左圖點任一元件看它的全部：框、證據、評註、點位、上下游。框可拖把手改大小，箭頭可點選改方向。</div>
+          <div class="stg-sub">點元件看框、證據、評註、點位、上下游；框可拖拉、箭頭可改向。</div>
           <div id="insp" class="insp"><div class="insp-empty">尚未建立資產模型。</div></div>
           <button class="mini-btn primary" id="as-build" style="width:100%;padding:9px;margin-bottom:6px">建立／更新資產模型</button>
           <div class="hint" id="as-state" style="margin-bottom:8px"></div>
@@ -794,9 +793,9 @@
         <!-- ───────────── ④ 評註與說明 -->
         <div class="stg" id="st4">
           <div class="stg-h">評註與說明 <span>現場知識進來，說明才寫得對</span></div>
-          <div class="stg-sub">點圖上既有的框＝對那個元件留評註；拖曳框選空白處＝對一塊區域留評註。製程說明在畫布下方：選中元件會列出說明裡提到它的句子，可直接對那句提修正意見；說明裡的位號點了會跳回圖上。</div>
+          <div class="stg-sub">點框＝元件評註、框選空白＝區域評註；選中元件可逐句核對說明。</div>
           <div id="st4-desc" class="insp"></div>
-          <div id="st4-focus" class="insp"><div class="insp-empty">點左圖任一元件：看製程說明怎麼寫它、對它留評註或提修正意見。</div></div>
+          <div id="st4-focus" class="insp"><div class="insp-empty">點左圖任一元件。</div></div>
           <div class="section-title">現場評註 <span id="note-count" style="color:var(--dim);font-weight:400"></span></div>
           <div id="note-list"><span class="hint">尚無評註。</span></div>
           <div class="section-title">匯出</div>
@@ -810,6 +809,6 @@
 
   <div id="toast"></div>
   <script src="/static/js/pid-label.js?v=20260820f"></script>
-  <script src="/static/js/pid-stages.js?v=20260820e"></script>
+  <script src="/static/js/pid-stages.js?v=20260820f"></script>
 </body>
 </html>

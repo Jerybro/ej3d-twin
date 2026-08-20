@@ -326,14 +326,14 @@ function renderStage4Focus() {
   const it = items[curIdx];
   const accTags = [...new Set(items.filter(i => i.state === 'accepted' && i.tag).map(i => i.tag))];
   if (!it) {
-    if (!descText) { host.className = 'insp'; host.innerHTML = '<div class="insp-empty">點左圖任一元件：對它留評註。按下方「產生說明」之後，這裡會顯示說明提到了哪些元件、漏了哪些。</div>'; return; }
+    if (!descText) { host.className = 'insp'; host.innerHTML = '<div class="insp-empty">點左圖元件＝留評註。</div>'; return; }
     const mentioned = accTags.filter(t => tagInText(t, descText));
     const missing = accTags.filter(t => !tagInText(t, descText));
     host.className = 'insp';
-    host.innerHTML = `<div class="insp-sub">製程說明提到 <b>${mentioned.length}／${accTags.length}</b> 個已確認位號。點左圖任一元件看它在說明裡怎麼寫。</div>
+    host.innerHTML = `<div class="insp-sub">說明提到 <b>${mentioned.length}／${accTags.length}</b> 個已確認位號</div>
       ${missing.length ? `<div class="insp-sec"><h4>說明沒提到 <i></i><span style="font-weight:400">${missing.length}</span></h4>
         <div>${missing.slice(0, 30).map(t => `<span class="tagchip" data-t="${esc(t)}">${esc(t)}</span>`).join('')}${missing.length > 30 ? `<span class="hint">＋${missing.length - 30}</span>` : ''}</div>
-        <div class="hint" style="margin-top:4px">點一個→在圖上選中；留一句評註（例如它的角色），重新產生說明就會補進去。</div></div>` : ''}`;
+        <div class="hint" style="margin-top:4px">留評註後按重新產生會補進去</div></div>` : ''}`;
     host.querySelectorAll('.tagchip').forEach(c => c.addEventListener('click', () => { const k = items.findIndex(i => i.tag === c.dataset.t && i.state !== 'rejected'); if (k >= 0) focusItem(k); }));
     return;
   }
@@ -349,7 +349,7 @@ function renderStage4Focus() {
       ${!descText ? '<div class="insp-empty">還沒有製程說明——按下方「產生說明」。</div>'
         : sents.length ? sents.map((x, i) => `<div class="f4-s" data-i="${i}"><div class="f4-t">${esc(x)}</div>
             <div class="insp-act" style="margin-top:4px"><button class="mini-btn" data-jump="${i}">跳到說明處</button><button class="mini-btn" data-wrong="${i}">這句寫錯 → 提意見</button></div></div>`).join('')
-        : `<div class="insp-empty">說明沒提到 ${esc(tag)}。對它留一句評註（它在製程裡做什麼、有什麼現場狀況），重新產生說明就會補進去。</div>`}</div>
+        : `<div class="insp-empty">說明沒提到 ${esc(tag)}——留評註後按重新產生會補進去。</div>`}</div>
     <div class="insp-sec"><h4>它的評註 <i></i><span style="font-weight:400">${myNotes.length}</span></h4>
       ${myNotes.length ? myNotes.map(n => `<div class="insp-row"><span class="k">${esc(n.id)} ${esc(n.label && n.label !== tag ? n.label + '：' : '')}${esc(n.text || '')}</span><span class="v" style="font-weight:400;color:var(--dim)">${esc((n.by || '').split('@')[0])}</span></div>`).join('') : '<div class="insp-empty">還沒有。</div>'}</div>`;
   $('f4-note').onclick = () => openNoteFor(it);
@@ -480,20 +480,19 @@ async function renderStage4Desc(refetch) {
   host.className = 'insp' + (has && m.confirmed_at ? ' sel' : '');
   host.innerHTML = `
     <div class="insp-top"><span class="insp-tag" style="font-size:14px">製程說明</span>
-      <span class="insp-k">${has ? (m.confirmed_at ? `已確認 · ${esc(who(m.confirmed_by))} · ${esc(when(m.confirmed_at))}` : 'AI 預設稿，尚未確認') : '尚未產生'}</span></div>
+      <span class="insp-k">${has ? (m.confirmed_at ? `已確認 · ${esc(who(m.confirmed_by))} · ${esc(when(m.confirmed_at))}` : '預設稿・未確認') : ''}</span></div>
     <div class="insp-sub">${has
-      ? `產生於 ${esc(when(m.at))}${m.revised ? '（已依意見修訂）' : ''}｜依 ${m.based_on || acc} 項已確認元件${m.with_image ? '＋整張圖' : ''}｜${(descText || '').length} 字`
-      : acc < 3 ? `再確認 ${3 - acc} 項元件就能產生（至少 3 項）` : `依全部 ${acc} 項已確認元件＋整張圖面，AI 先寫一版預設稿，你再看、再改、再確認`}</div>
+      ? `${esc(when(m.at))}${m.revised ? ' 修訂版' : ''}｜${m.based_on || acc} 項元件${m.with_image ? '＋整張圖' : ''}｜${(descText || '').length} 字`
+      : acc < 3 ? `至少確認 3 項元件（還差 ${3 - acc}）` : `依 ${acc} 項已確認元件＋整張圖產生預設稿，看過再確認`}</div>
     <div class="insp-act">
       ${has
         ? `<button class="mini-btn" id="d4-regen">重新產生</button>
            <button class="mini-btn" id="d4-fb">提修正意見</button>
            ${m.confirmed_at
              ? `<button class="mini-btn" id="d4-unconfirm" title="撤銷確認（內容不變）">撤銷確認</button>`
-             : `<button class="mini-btn primary" id="d4-confirm" title="你看過也同意這一版——記下你的名字與時間">確認這版說明</button>`}`
+             : `<button class="mini-btn primary" id="d4-confirm" title="看過同意這一版——記名字與時間；重新產生＝新的一版，確認歸零">確認這版</button>`}`
         : `<button class="mini-btn primary" id="d4-gen" ${acc < 3 ? 'disabled' : ''}>AI 產生預設製程說明</button>`}
-    </div>
-    ${has && !m.confirmed_at ? '<div class="hint" style="margin-top:6px">看過下方說明、該改的提意見修訂後，再按「確認這版」。確認後仍可重新產生（會變成新的一版）。</div>' : ''}`;
+    </div>`;
   const gen = $('d4-gen'); if (gen) gen.onclick = () => { $('desc-panel').classList.remove('collapsed'); $('desc-btn').click(); };
   const rg = $('d4-regen'); if (rg) rg.onclick = () => { if (!confirm('重新產生會得到新的一版（既有確認會歸零）。繼續？')) return; $('desc-panel').classList.remove('collapsed'); $('desc-btn').click(); };
   const fb = $('d4-fb'); if (fb) fb.onclick = () => { $('desc-panel').classList.remove('collapsed'); $('fb-box').style.display = ''; $('fb-text').focus(); $('fb-text').scrollIntoView({ block: 'center', behavior: 'smooth' }); };

@@ -51,10 +51,13 @@ def _slug(stem: str) -> str:
 
 
 def _safe_pdf(filename: str) -> Path:
-    """只允許 uploads/pid 底下的 PDF（擋路徑穿越）。"""
+    """只允許 uploads/pid 底下的 PDF（擋路徑穿越）；受限帳號另擋清單外的圖。"""
     name = Path(filename).name
     if not name.lower().endswith(".pdf"):
         raise HTTPException(422, "僅接受 PDF 圖面")
+    from .auth import check_file_access
+
+    check_file_access(name)
     p = PID_DIR / name
     if not p.exists():
         raise HTTPException(404, f"圖面不存在：{name}")

@@ -7,9 +7,14 @@
 """
 from __future__ import annotations
 
+import contextvars
+import hashlib
+import hmac
 import json
 import os
+import re
 import secrets
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime
@@ -98,6 +103,42 @@ def current_actor(request: Request) -> str:
     return ((current_user(request) or {}).get("email") or "")
 
 
+# ------------------------------------------------------ 圖面白名單（受限帳號）
+# 使用者表的 "files" 欄＝這個帳號只能看的圖面清單（demo／外部協作帳號用）。
+# 站台在公網、放著多家客戶的圖，弱密碼測試帳號不能全看。
+# 兩層擋法：API 走 _safe_pdf → check_file_access（contextvar 拿 request，
+# 連 body 帶檔名的端點也擋得到）；靜態底圖（/uploads/pid/…）在 middleware 擋。
+_REQ: contextvars.ContextVar = contextvars.ContextVar("req", default=None)
+
+
+def _slug_of(stem: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")
+
+
+def restricted_files(request: Request) -> list | None:
+    """None＝不受限；list＝只能看這些圖面檔名。"""
+    u = current_user(request)
+    f = (u or {}).get("files")
+    return f if f else None
+
+
+def check_file_access(filename: str) -> None:
+    """給 _safe_pdf 呼叫：受限帳號摸到清單外的圖 → 403。拿不到 request 時放行
+    （內部批次、背景工作沒有 HTTP 情境，不該被擋）。"""
+    req = _REQ.get()
+    if req is None:
+        return
+    try:
+        allow = restricted_files(req)
+    except Exception:  # noqa: BLE001
+        return
+    if allow is None:
+        return
+    name = Path(filename).name
+    if name not in allow:
+        raise HTTPException(403, "此帳號僅能存取指定圖面")
+
+
 # ------------------------------------------------------ 守衛 middleware
 # 未登入可及的路徑前綴——只留登入流程本身與靜態資源。
 #
@@ -119,7 +160,28 @@ async def auth_guard(request: Request, call_next):
                 or request.url.path.startswith("/agatha")):
             return JSONResponse({"detail": "未登入"}, status_code=401)
         return RedirectResponse(f"/login?next={urllib.parse.quote(str(request.url.path))}", 302)
-    return await call_next(request)
+    # 受限帳號的靜態層防線：原始 PDF 與衍生快取（底圖 jpg／meta json）都以
+    # 檔名或 slug 出現在路徑上，比對就擋得掉。API 層由 check_file_access 負責。
+    allow = restricted_files(request)
+    if allow is not None:
+        path = urllib.parse.unquote(request.url.path)
+        low = path.lower()
+        if ".pdf" in low and not any(f.lower() in low for f in allow):
+            return JSONResponse({"detail": "此帳號僅能存取指定圖面"}, status_code=403)
+        if path.startswith("/uploads/pid/"):
+            base = Path(path).name.lower()
+            slugs = [_slug_of(Path(f).stem) for f in allow]
+            if not any(base.startswith(sl) for sl in slugs) and not base.endswith(".pdf"):
+                return JSONResponse({"detail": "此帳號僅能存取指定圖面"}, status_code=403)
+        # 受限帳號不能上傳／刪除圖面（清單是固定的）
+        if request.method in ("POST", "DELETE") and (
+                path.startswith("/api/pid/upload") or path.startswith("/api/pid/file/")):
+            return JSONResponse({"detail": "此帳號無法上傳或刪除圖面"}, status_code=403)
+    token = _REQ.set(request)
+    try:
+        return await call_next(request)
+    finally:
+        _REQ.reset(token)
 
 
 # ------------------------------------------------------ 登入流程
@@ -186,6 +248,34 @@ def google_callback(request: Request):
     request.session.clear()
     request.session["email"] = email
     return RedirectResponse(nxt, 302)
+
+
+# ------------------------------------------------------ 本機帳號（測試／外部協作）
+# 平時走 Google 白名單；這條是給「沒有 Google 帳號也要試平台」的人用的
+# （目前：test123 demo 帳號）。密碼存 PBKDF2-SHA256（20 萬次）雜湊，不存明碼。
+def _hash_pw(pw: str, salt_hex: str) -> str:
+    return hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt_hex), 200_000).hex()
+
+
+@router.post("/login/local")
+def local_login(request: Request, body: dict):
+    if AUTH_DISABLED:
+        raise HTTPException(403, "免登入模式下不需要帳號")
+    username = (body.get("username") or "").strip().lower()
+    password = body.get("password") or ""
+    users = _load_users()
+    email, u = next(((e, v) for e, v in users.items()
+                     if (v.get("local_username") or "").lower() == username), (None, None))
+    ok = bool(u and u.get("pw_hash") and u.get("pw_salt")
+              and hmac.compare_digest(_hash_pw(password, u["pw_salt"]), u["pw_hash"]))
+    if not ok:
+        time.sleep(0.8)         # 拖慢暴力嘗試；帳號存在與否給同一種錯
+        raise HTTPException(401, "帳號或密碼錯誤")
+    if not u.get("is_active", True):
+        raise HTTPException(403, "此帳號已被停用")
+    request.session.clear()
+    request.session["email"] = email
+    return {"ok": True, "next": "/"}
 
 
 @router.get("/logout")

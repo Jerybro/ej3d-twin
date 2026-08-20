@@ -33,6 +33,9 @@ router = APIRouter(prefix="/api/twin", tags=["twin-advisor"])
 _LOCK = threading.Lock()
 
 DEMO_SID = "demoplant"          # 示範資料集固定 sid（與 uuid8 不撞）
+# 伺服器重啟會殺掉 AutoML 的訓練執行緒，但落盤紀錄還寫著 status=training——
+# 那種「上一輩子留下的 training」永遠不會完成。記下本次啟動時間，比它早的視為死掉重訓。
+_BOOT = datetime.now()
 
 # ------------------------------------------------------------------ 承接結果存放
 def _now() -> str:
@@ -174,6 +177,14 @@ DEMO_MODELS = {
 }
 
 
+def _is_stale(rec: dict) -> bool:
+    """這筆 training 是不是上一個程序留下的（本次啟動之前建的）。"""
+    try:
+        return datetime.strptime(rec.get("created", ""), "%Y-%m-%d %H:%M:%S") < _BOOT
+    except (ValueError, TypeError):
+        return True
+
+
 def _scenario_path() -> Path:
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
     return RESULT_DIR / "demo_scenario.json"
@@ -257,6 +268,8 @@ def _ensure_models() -> dict:
     for key, spec in DEMO_MODELS.items():
         mid = mids.get(key)
         rec = existing.get(mid)
+        if rec is not None and rec.get("status") == "training" and _is_stale(rec):
+            rec = None                      # 前一個程序留下的殭屍訓練 → 重訓
         if rec is None or rec.get("status") == "failed":
             r = create_models(DEMO_SID, {"mode": "manual", "algo": "XGB",
                                          "name": f"demo_{key}", "target": spec["target"],

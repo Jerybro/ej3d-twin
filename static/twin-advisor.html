@@ -102,7 +102,11 @@
     .ttag { margin-left: auto; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 8px;
       background: var(--accent); color: #fff; white-space: nowrap; }
     .ttag.soft_sensor { background: #7C4DFF; }
-    .ttag.quality { background: var(--mid); color: #3d2a00; }
+    .ttag.quality { background: var(--mid); }
+    /* .eqline span / .ovcard .t span 的灰字會蓋掉 .ttag 的白字（選擇器優先權），
+       所以徽章的顏色與字級要用更明確的選擇器再寫一次 */
+    .eqline .ttag, .ovcard .t .ttag { color: #fff; font-size: 11px; }
+    .eqline .ttag.quality, .ovcard .t .ttag.quality { color: #3d2a00; }
     .obj { font-size: 12.5px; line-height: 1.7; margin-top: 6px; }
     .kv { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 4px 0;
       border-top: 1px dashed var(--bdr); }

@@ -681,11 +681,9 @@
           <button class="mini-btn" id="dp-collapse" title="收合">▾</button>
         </div>
         <div class="dp-body" id="dp-body">
-          <div id="desc-out"><span class="hint">按「產生說明」會依<b>已確認</b>的清單與<b>現場評註</b>寫出這張圖在做什麼製程。
-            <b>產生後會存檔，不會自動重跑</b>——重開圖面直接看到既有版本，要更新再按一次。
-            引用現場評註的句子會標出來源，點得回圖上位置。</span></div>
+          <div id="desc-out"><span class="hint">依已確認清單與現場評註產生；產生後存檔，不自動重跑。</span></div>
           <div id="fb-box" style="display:none;margin-top:10px">
-            <textarea id="fb-text" placeholder="指出哪裡寫錯或補充現場知識，例如：V613 不是儲槽，是氣液分離器。"></textarea>
+            <textarea id="fb-text" placeholder="指出哪裡寫錯，例：V613 不是儲槽，是氣液分離器"></textarea>
             <button class="mini-btn primary" id="fb-btn" style="margin-top:6px">依意見修訂</button>
           </div>
         </div>
@@ -698,7 +696,7 @@
         <div id="forms">
           <div id="man-form" class="fm" style="display:none">
             <div class="fm-t">新增元件</div>
-            <div class="hint" id="man-hint" style="margin-bottom:6px">填入位號後加入資產庫（已確認）。</div>
+            <div class="hint" id="man-hint" style="margin-bottom:6px">填位號加入資產庫。</div>
             <div style="display:flex;gap:6px;margin-bottom:6px">
               <input id="man-tag" placeholder="位號，如 211.4、PI 65103" style="flex:1;padding:6px 9px;
                 border-radius:6px;border:1px solid var(--bdr);background:#fff;
@@ -722,7 +720,7 @@
           <div id="note-new" class="fm" style="display:none">
             <div class="fm-t">留評註</div>
             <div class="hint" id="note-target" style="margin-bottom:4px"></div>
-            <input id="note-label" maxlength="40" placeholder="這是什麼？例：211.4 收塵器、停用管段（資產模型上會顯示這個名字）"
+            <input id="note-label" maxlength="40" placeholder="這是什麼？例：211.4 收塵器"
               style="width:100%;padding:6px 9px;border-radius:7px;border:1px solid var(--bdr);
                      background:#fff;font-family:inherit;font-size:12px;margin-bottom:5px" />
             <div id="note-asset-row" style="display:none;align-items:center;gap:6px;margin-bottom:5px;font-size:12px;flex-wrap:wrap">
@@ -736,7 +734,7 @@
               </select>
               <span class="hint" id="note-asset-hint" style="flex-basis:100%"></span>
             </div>
-            <textarea id="note-text" placeholder="（可不填）例：209 捏和擠出機 2025 年改過押出馬達，實際產能約 2.4T/hr"
+            <textarea id="note-text" placeholder="評註內容（可不填）"
               style="width:100%;min-height:52px;padding:7px 9px;border-radius:7px;
                      border:1px solid var(--bdr);background:#fff;
                      font-family:inherit;font-size:12px"></textarea>
@@ -749,7 +747,7 @@
 
         <!-- ───────────── ① 辨識 -->
         <div class="stg on" id="st1">
-          <div class="stg-h">辨識 <span>讓系統先把圖上的東西找出來</span></div>
+          <div class="stg-h">辨識</div>
           <div class="stg-sub">全頁掃描約 1～2 分鐘，結果是候選、審核後才入庫。沒全掃到沒關係——漏的在 ② 框選補上，錯的否決。</div>
           <div id="conv-box" class="conv" style="display:none"></div>
           <button class="mini-btn primary" id="scan-all-btn" disabled
@@ -768,7 +766,7 @@
 
         <!-- ───────────── ② 審核 -->
         <div class="stg" id="st2">
-          <div class="stg-h">審核 <span>逐項判「框對不對、是不是它」</span></div>
+          <div class="stg-h">審核</div>
           <div class="stg-sub">Enter 確認、E 重框、N 有誤、Delete 刪除；框選空白處＝新增元件。</div>
           <div id="rev-host"></div>
           <div class="section-title">全部項目 <span id="li-count" style="color:var(--dim);font-weight:400"></span></div>
@@ -780,7 +778,7 @@
 
         <!-- ───────────── ③ 資產模型 -->
         <div class="stg" id="st3">
-          <div class="stg-h">資產模型 <span>審核結果編譯成帶屬性的資產物件</span></div>
+          <div class="stg-h">資產模型</div>
           <div class="stg-sub">點元件看框、證據、評註、點位、上下游；框可拖拉、箭頭可改向。</div>
           <div id="insp" class="insp"><div class="insp-empty">尚未建立資產模型。</div></div>
           <button class="mini-btn primary" id="as-build" style="width:100%;padding:9px;margin-bottom:6px">建立／更新資產模型</button>
@@ -792,7 +790,7 @@
 
         <!-- ───────────── ④ 評註與說明 -->
         <div class="stg" id="st4">
-          <div class="stg-h">評註與說明 <span>現場知識進來，說明才寫得對</span></div>
+          <div class="stg-h">評註與說明</div>
           <div class="stg-sub">點框＝元件評註、框選空白＝區域評註；選中元件可逐句核對說明。</div>
           <div id="st4-desc" class="insp"></div>
           <div id="st4-focus" class="insp"><div class="insp-empty">點左圖任一元件。</div></div>
@@ -808,7 +806,7 @@
   </div>
 
   <div id="toast"></div>
-  <script src="/static/js/pid-label.js?v=20260820f"></script>
-  <script src="/static/js/pid-stages.js?v=20260820f"></script>
+  <script src="/static/js/pid-label.js?v=20260820g"></script>
+  <script src="/static/js/pid-stages.js?v=20260820g"></script>
 </body>
 </html>

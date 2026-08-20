@@ -813,7 +813,7 @@ function render() {
   $('desc-btn').disabled = acc < 3;
   if (!descText) {
     $('desc-state').textContent = acc < 3
-      ? `再確認 ${3 - acc} 項就會自動產生說明`
+      ? `至少確認 3 項（差 ${3 - acc}）`
       : '準備產生說明…';
   }
 }
@@ -971,7 +971,6 @@ function renderBatchCard(host) {
         <button class="mini-btn" id="bm-all">框都對，全部寫入（${rows.length} 台）</button>
         <button class="mini-btn" id="bm-off2">回一般審核</button>
       </div>
-      <div class="act-note">每一筆都會記上你的簽名與時間，可在「歷史」回到上一動。</div>
     </div>`;
   host.querySelectorAll('.bm').forEach(el =>
     el.addEventListener('click', () => focusItem(+el.dataset.i)));
@@ -1013,16 +1012,13 @@ function renderReviewCard() {
     host.innerHTML = `
       <div class="rev" style="border-color:var(--hi);background:rgba(18,161,80,0.08)">
         <div class="rev-top"><span class="rev-tag" style="color:#0b6b36">審核完成 ✓</span></div>
-        <div class="rev-sub">共 ${items.length} 項：確認 <b>${acc}</b>、否決 <b>${rej}</b>。
-          否決項已留稽核，不會入庫。</div>
+        <div class="rev-sub">確認 <b>${acc}</b>、否決 <b>${rej}</b>（留稽核）</div>
         <div class="rev-act">
           <button class="mini-btn primary" id="done-model">建立資產模型 →</button>
           <a class="mini-btn" id="done-export"
              href="/api/pid/vlm/export/${encodeURIComponent(curFile)}">匯出 CSV</a>
           <button class="mini-btn" id="done-recheck">回頭複查</button>
         </div>
-        <div class="rev-sub" style="margin-top:8px">下一步：把已確認的標註編譯成
-          帶屬性的資產物件（閥件尺寸／儀錶迴路／管線編號），並掛上管網拓撲。</div>
       </div>`;
     $('done-model').onclick = () => { switchTab('assets'); buildModel(); };
     $('done-recheck').onclick = () => focusItem(0);
@@ -1061,25 +1057,23 @@ function renderReviewCard() {
           ${esc(e.detail)}</span></div>`).join('')}</details>` : ''}
       <img class="rev-crop" alt="局部圖"
            src="/api/pid/vlm/crop/${encodeURIComponent(curFile)}?bbox=${it.bbox.join(',')}&z=7" />
-      <div class="crop-cap">↑ 圖上實際樣貌（框中央即此項）${
-        it.warn ? '<b style="color:#8a5b00">　請對照確認是否真有此位號</b>' : ''}</div>
+      <div class="crop-cap">圖上實際樣貌${
+        it.warn ? '<b style="color:#8a5b00">　請確認是否真有此位號</b>' : ''}</div>
       <div class="ctx${it.warn ? ' verify' : ''}" id="ctx-box">${it._ctx
         ? esc(it._ctx)
-        : '<span class="spin"></span> ' + (it.warn ? '查核這個判讀是否成立…' : '判讀這顆在圖上的角色與前後連接…')}</div>
+        : '<span class="spin"></span> ' + (it.warn ? '查核中…' : '判讀中…')}</div>
       ${regPickerHtml(it)}
-      <input class="rev-note" id="rev-note" placeholder="備註（選填）：寫下判斷理由或現場補充"
+      <input class="rev-note" id="rev-note" placeholder="備註（選填）"
              value="${esc(it.user_note || '')}" />
       <div class="ask">${askText(it)}</div>
       <div class="rev-sub" id="rebox-hint" style="display:none;color:var(--accent)"></div>
       <div class="rev-act">
-        <button class="mini-btn primary" id="acc-b">是，存入資產庫 <span style="opacity:.75">(Y)</span></button>
-        <button class="mini-btn" id="rej-b">不是，判讀有誤 <span style="opacity:.6">(N)</span></button>
-        <button class="mini-btn" id="rebox-b">框不準，重畫 <span style="opacity:.6">(E)</span></button>
+        <button class="mini-btn primary" id="acc-b">存入資產庫 <span style="opacity:.75">(Y)</span></button>
+        <button class="mini-btn" id="rej-b">判讀有誤 <span style="opacity:.6">(N)</span></button>
+        <button class="mini-btn" id="rebox-b">重畫框 <span style="opacity:.6">(E)</span></button>
       </div>
-      <button class="mini-btn" id="note-b" style="width:100%;margin-top:6px">
-        為這一項加現場評註</button>
-      <div class="act-note">存入資產庫＝這筆成為正式資產資料並記上你的簽名；
-        判讀有誤＝不入庫，但保留稽核紀錄（不會靜默消失）。</div>
+      <button class="mini-btn" id="note-b" style="width:100%;margin-top:6px"
+        title="存入＝記上你的簽名；判讀有誤＝不入庫、留稽核">加評註</button>
     </div>`;
   $('prev-b').onclick = () => focusItem(Math.max(0, curIdx - 1));
   $('next-b').onclick = () => focusItem(Math.min(items.length - 1, curIdx + 1));
@@ -1413,9 +1407,7 @@ async function loadAnnots() {
       || String(a.tag).localeCompare(String(b.tag)));
     curIdx = 0;
     btn.textContent = '重新辨識（補掃遺漏）';
-    $('cc-state').innerHTML = `已載入既有建檔 <b style="color:var(--hi)">${items.length}</b> 筆`
-      + (rej ? `｜曾否決 ${rej} 筆（留稽核）` : '')
-      + `。要補掃遺漏的元件再按上方按鈕；<b>重掃不會覆蓋已確認的資料</b>（同位號同位置會更新，不會重複）。`;
+    $('cc-state').innerHTML = `<span title="重掃不會覆蓋已確認的資料：同位號同位置會更新，不會重複">既有建檔 <b style="color:var(--hi)">${items.length}</b> 筆${rej ? `｜曾否決 ${rej}` : ''}</span>`;
     render();
   } catch { /* 沒有台帳就照常顯示辨識按鈕 */ }
   loadSavedDesc();
@@ -1427,7 +1419,7 @@ async function loadSavedDesc() {
   if (!curFile) return;
   try {
     const d = await getJSON(`/api/pid/vlm/describe/${encodeURIComponent(curFile)}`);
-    if (!d.text) { $('desc-state').textContent = '尚未產生；審核幾項後按「產生說明」'; return; }
+    if (!d.text) { $('desc-state').textContent = '尚未產生'; return; }
     descText = d.text;
     if (d.notes) notes = d.notes;
     descBaseline = annotSignature();          // 視為與目前清單同步
@@ -1717,8 +1709,7 @@ function renderNotes() {
   if (!el) return;
   $('note-count').textContent = notes.length ? `（${notes.length}）` : '';
   if (!notes.length) {
-    el.innerHTML = '<span class="hint">尚無評註。在圖上框選一塊區域，'
-      + '或在審核卡按「為這一項加評註」。</span>';
+    el.innerHTML = '<span class="hint">尚無評註——在圖上框選即可留。</span>';
     return;
   }
   el.innerHTML = notes.map(n => `<div class="nt" data-n="${esc(n.id)}">
@@ -1857,8 +1848,8 @@ function scheduleDesc() {
   clearTimeout(descTimer);
   st.className = 'dp-state live';
   st.innerHTML = descText
-    ? '標註已變更，目前說明可能過時——要更新請按「重新產生」'
-    : '已可產生說明——按「產生說明」開始（約 30 秒）';
+    ? '標註已變更——說明可能過時'
+    : '可產生說明（約 30 秒）';
 }
 
 $('desc-btn').addEventListener('click', () => { clearTimeout(descTimer); genDesc(''); });
@@ -1913,7 +1904,7 @@ function updateAssetRow() {
     $('note-asset-hint').textContent = `資產庫已有 ${lab}，這裡只會留評註`;
   } else {
     $('note-asset').disabled = false; $('note-asset').checked = true;
-    $('note-asset-hint').textContent = `資產庫還沒有 ${lab}：勾著存＝把這個框當成 ${lab} 加入資產庫（已確認），資產模型與點位對照才看得到它`;
+    $('note-asset-hint').textContent = `資產庫沒有 ${lab}——勾著存＝加入為已確認元件`;
   }
 }
 $('note-label').addEventListener('input', updateAssetRow);
@@ -1974,7 +1965,7 @@ $('note-save').addEventListener('click', async () => {
 });
 $('man-cancel').addEventListener('click', () => {
   manBox = null; $('man-form').style.display = 'none';
-  $('man-hint').textContent = '在圖面上直接拖曳框選一塊區域，即可補上 AI 沒抓到的元件。';
+  $('man-hint').textContent = '框選圖面可補元件。';
   if (selEl) { selEl.remove(); selEl = null; }
 });
 $('man-add').addEventListener('click', async () => {

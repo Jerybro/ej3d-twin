@@ -33,7 +33,7 @@ function setStage(n, opt) {
     if ($('man-form').style.display !== 'none') $('man-cancel').click();
     if (noteTarget && !noteTarget.tag) $('note-cancel').click();
   }
-  $('tb-hint').textContent = n === 4 ? '框選＝留評註' : (n === 1 ? '' : '框選空白處＝新增元件；選中框可拖把手改大小');
+  $('tb-hint').textContent = n === 4 ? '框選＝留評註' : (n === 1 ? '' : '框選＝新增元件');
   if (n === 3) renderInspector();
   if (n === 4) { renderNotes(); renderStage4Focus(); renderStage4Desc(); }
   updateSteps();
@@ -137,8 +137,8 @@ openManual = function (box) {
     if (noteTarget && !noteTarget.tag) { noteTarget = null; $('note-new').style.display = 'none'; }
     $('man-form').style.display = '';
     $('man-hint').textContent = inTags.length
-      ? `框裡已有 ${inTags.join('、')}（在資產庫）。要新增別的元件請填位號；只是想看它請點空白處取消。`
-      : '填入位號後加入資產庫（已確認、人工標註）。';
+      ? `框內已有 ${inTags.join('、')}；要新增請填位號。`
+      : '填位號加入資產庫。';
     $('man-tag').value = '';
     $('man-tag').focus();
   }
@@ -201,14 +201,14 @@ function renderInspector() {
   const it = items[curIdx];
   if (!assetModel && !it) {
     host.className = 'insp';
-    host.innerHTML = `<div class="insp-empty">尚未建立資產模型。審核完成後按下方「建立／更新資產模型」，之後點左圖任一元件就看得到它的全部。</div>`;
+    host.innerHTML = `<div class="insp-empty">尚未建模——按下方建立。</div>`;
     return;
   }
   if (!it) {
     const s = (assetModel && assetModel.stats) || {};
     const onDr = s.equipment_on_drawing != null ? s.equipment_on_drawing : (assetModel.equipment || []).filter(e => e.bbox).length;
     host.className = 'insp';
-    host.innerHTML = `<div class="insp-empty">點左圖任一元件，看它的框、證據、評註、點位與上下游。</div>
+    host.innerHTML = `<div class="insp-empty">點左圖任一元件。</div>
       <div class="insp-stats">
         <div class="as-stat"><b>${onDr}／${s.equipment || 0}</b><span>設備有框</span></div>
         <div class="as-stat"><b>${s.instruments || 0}</b><span>儀錶</span></div>
@@ -247,12 +247,12 @@ function renderInspector() {
       ${myNotes.length ? myNotes.map(n => `<div class="insp-row"><span class="k">${esc(n.id)} ${esc(n.label || n.text || '')}</span><span class="v" style="font-weight:400;color:var(--dim)">${esc((n.by || '').split('@')[0])}</span></div>`).join('') : '<div class="insp-empty">沒有評註。</div>'}</div>
     <div class="insp-sec"><h4>點位 <i></i><span style="font-weight:400">${pts.length}</span></h4>
       ${pts.length ? pts.slice(0, 6).map(p => `<div class="insp-row"><span class="k" title="${esc(p.col)}">${esc(p.measure || p.col)}${p.sub ? '·' + esc(p.sub) : ''}${p.stat ? ' ' + esc(p.stat) : ''}</span><span class="v ${p.confirmed ? 'ok' : 'g'}">${p.stats && p.stats.mean != null ? fmtNum(p.stats.mean) : '—'}${p.unit ? ' ' + esc(p.unit) : ''}${p.confirmed ? '' : '（未簽名）'}</span></div>`).join('') + (pts.length > 6 ? `<div class="hint">＋${pts.length - 6} 個</div>` : '')
-        : `<div class="insp-empty">還沒綁數據。<a href="${$('step-map').href}">到點位對照</a>把欄位拖到它身上。</div>`}</div>
+        : `<div class="insp-empty">未綁數據——<a href="${$('step-map').href}">點位對照</a></div>`}</div>
     <div class="insp-sec"><h4>上下游 <i></i><span style="font-weight:400">${fn ? '' : '（尚未推導）'}</span></h4>
       ${linkPick ? `<div class="insp-row" style="border:0;color:var(--accent);font-weight:600">點圖上要設為${linkPick.dir === 'up' ? '上游' : '下游'}的元件（或框選它）　<button class="mini-btn" id="lp-cancel">取消</button></div>` : ''}
       <div class="insp-row"><span class="k">上游</span><span class="v" style="font-weight:400">${up.map(t => `<span class="tagchip" data-t="${esc(t)}">${esc(t)}<span class="lp-x" data-rm-up="${esc(t)}" title="刪除這條連線"> ×</span></span>`).join('')}<button class="mini-btn lp-add" data-dir="up" title="指定一台上游：點圖上的元件或框選它">＋ 上游</button></span></div>
       <div class="insp-row"><span class="k">下游</span><span class="v" style="font-weight:400">${down.map(t => `<span class="tagchip" data-t="${esc(t)}">${esc(t)}<span class="lp-x" data-rm-down="${esc(t)}" title="刪除這條連線"> ×</span></span>`).join('')}<button class="mini-btn lp-add" data-dir="down" title="指定一台下游：點圖上的元件或框選它">＋ 下游</button></span></div>
-      <div class="hint" style="margin-top:4px">自動推導來自箭頭與項次號；線稿沒接到或跨圖的，用「＋」自己指定，重建圖與順序圖會跟著更新。</div></div>`;
+</div>`;
   $('insp-rebox').onclick = () => startRebox(curIdx);
   $('insp-note').onclick = () => openNoteFor(it);
   $('insp-del').onclick = () => deleteCurrent();
@@ -438,8 +438,7 @@ async function histMove(dir) {
     for (const p of pend) if (!have.has(`${p.kind}|${p.tag}`)) items.push(p);
     render();
     loadNotes();
-    toast(`${dir < 0 ? '已回到上一動' : '已重做'}${j.action ? `（${actionTxt(j.action)}）` : ''}，資產庫 ${j.items} 筆`
-      + (assetModel ? '；資產模型要按「建立／更新」才會跟著變' : ''));
+    toast(`${dir < 0 ? '已回到上一動' : '已重做'}${j.action ? `（${actionTxt(j.action)}）` : ''}，資產庫 ${j.items} 筆${assetModel ? '；模型需重新建立' : ''}`);
     histState = j; paintHist(j);
   } catch (e) { toast(e.message || '失敗'); }
 }

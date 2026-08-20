@@ -435,8 +435,11 @@ def _card(task: str, mid: str, y_col: str, pred: float, x_at_reco: dict,
         # 可調參數本身不是「偏移檢查」的對象——它就是我們要人去改的那個，
         # 只看「套用了沒」；其他 X（假設不變的那些）才是檢查點：偏離＝建議前提已變
         is_knob = (f == knob)
-        applied = bool(is_knob and at is not None and now is not None
-                       and abs(float(now) - float(at)) <= max(abs(float(at)) * 0.02, 1e-9))
+        # 「套用了沒」的門檻用該參數自己的分佈（帶寬 = ±2σ → σ = 帶寬/4），
+        # 不用相對百分比：爐溫 2% 是 3.8°C，那種尺度什麼都算「已套用」
+        sd = (hi - lo) / 4 if (lo is not None and hi is not None) else None
+        applied = bool(is_knob and at is not None and now is not None and sd
+                       and abs(float(now) - float(at)) <= max(0.5 * sd, 1e-9))
         checks.append({"col": f, **_p(f), "is_knob": is_knob, "applied": applied,
                        "at_reco": None if at is None else round(float(at), 3),
                        "now": None if now is None else round(float(now), 3),

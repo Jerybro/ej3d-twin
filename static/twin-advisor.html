@@ -207,6 +207,7 @@
           <button data-m="trace">描圖</button>
         </span>
         <span class="seg"><button id="zo">−</button><button id="zi">＋</button><button id="zf">全圖</button></span>
+        <span class="seg"><button id="arrows">流向箭頭</button></span>
         <span class="sp"></span>
         <span class="hint" id="cap"></span>
       </div>
@@ -251,13 +252,14 @@ const TASK_TIP = {
 };
 
 let state = null, results = [], mode = 'blind', view = 'nav', step = 0, zoom = 1, baseW = 1600, baseH = 1131;
+let arrows = localStorage.getItem('advisor.arrows') === '1';   // 預設關：這頁講的是三台設備，不是全廠流向
 const byAsset = () => Object.fromEntries(results.map(r => [r.asset, r]));
 
 /* ---------------- 左：資產模型＋聚光燈 ---------------- */
 function imgUrl() {
   const f = encodeURIComponent(state.drawing);
   return mode === 'annot' ? `/api/pid/model/${f}/annotated.jpg?t=${Date.now()}`
-                          : `/api/pid/model/${f}/rebuild.svg?mode=${mode}&notes=0&t=${Date.now()}`;
+                          : `/api/pid/model/${f}/rebuild.svg?mode=${mode}&notes=0&flow=${arrows ? 1 : 0}&t=${Date.now()}`;
 }
 function loadImage() {
   const st = $('stage');
@@ -274,9 +276,17 @@ function bindPan() {
   const st = $('stage'), ov = $('ov');
   ov.addEventListener('pointerdown', e => {
     if (e.target !== ov) return;
-    const sx = e.clientX, sy = e.clientY, l0 = st.scrollLeft, t0 = st.scrollTop; ov.style.cursor = 'grabbing';
-    const mv = ev => { st.scrollLeft = l0 - (ev.clientX - sx); st.scrollTop = t0 - (ev.clientY - sy); };
-    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); ov.style.cursor = ''; };
+    const sx = e.clientX, sy = e.clientY, l0 = st.scrollLeft, t0 = st.scrollTop;
+    let moved = 0;
+    ov.style.cursor = 'grabbing';
+    const mv = ev => {
+      moved = Math.max(moved, Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy));
+      st.scrollLeft = l0 - (ev.clientX - sx); st.scrollTop = t0 - (ev.clientY - sy);
+    };
+    const up = () => {
+      removeEventListener('pointermove', mv); removeEventListener('pointerup', up); ov.style.cursor = '';
+      if (moved < 5 && view === 'nav') setView('all');   // 點空白（沒拖動）＝取消選取
+    };
     addEventListener('pointermove', mv); addEventListener('pointerup', up);
   });
 }
@@ -339,8 +349,14 @@ function drawStage() {
 document.querySelectorAll('#mode button').forEach(b => b.onclick = () => {
   mode = b.dataset.m;
   document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b));
-  if (state && state.model_ok && $('img')) { const i = $('img'); i.onload = () => drawStage(); i.src = imgUrl(); }
+  reloadImg();
 });
+function reloadImg() { if (state && state.model_ok && $('img')) { const i = $('img'); i.onload = () => drawStage(); i.src = imgUrl(); } }
+$('arrows').classList.toggle('on', arrows);
+$('arrows').onclick = () => {
+  arrows = !arrows; localStorage.setItem('advisor.arrows', arrows ? '1' : '0');
+  $('arrows').classList.toggle('on', arrows); reloadImg();
+};
 $('zi').onclick = () => { zoom = Math.min(zoom * 1.3, 6); applyZoom(); };
 $('zo').onclick = () => { zoom = Math.max(zoom / 1.3, .05); applyZoom(); };
 $('zf').onclick = () => zoomTo([0, 0, 1, 1], 1);

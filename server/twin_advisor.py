@@ -252,8 +252,17 @@ def _make_demo_dataset() -> None:
 
 
 def _ensure_models() -> dict:
-    """確保五個示範模型存在（沒有就開訓練），回 {key: {mid, status}}。"""
-    from .automl import create_models, list_models
+    """確保五個示範模型存在（沒有就開訓練），回 {key: {mid, status}}。
+
+    整段上鎖：前端每 3 秒輪詢一次狀態，沒鎖的話兩個併發請求會各建一批
+    （實測跑出 10 個模型、5 個變孤兒）。
+    """
+    with _LOCK:
+        return _ensure_models_locked()
+
+
+def _ensure_models_locked() -> dict:
+    from .automl import AUTOML_DIR, create_models, list_models
 
     sc = {}
     if _scenario_path().exists():
@@ -283,6 +292,13 @@ def _ensure_models() -> dict:
     if changed:
         sc["models"] = mids
         _scenario_path().write_text(json.dumps(sc, ensure_ascii=False, indent=1), encoding="utf-8")
+    # 孤兒清理：沒被 mids 指到的示範模型（早期併發或改版留下的）直接刪，
+    # 免得清單越積越多、也省得它們繼續佔 CPU 訓練
+    keep = set(mids.values())
+    for m in existing.values():
+        if m["id"] not in keep:
+            for suf in (".json", ".joblib"):
+                (AUTOML_DIR / DEMO_SID / f"{m['id']}{suf}").unlink(missing_ok=True)
     return out
 
 

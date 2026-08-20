@@ -341,12 +341,13 @@ function cardHTML(eq, r, i) {
 
   <div class="blk"><h3>X 因子檢查點 <i></i></h3>
     <div class="chk">
-      <span class="hd">因子</span><span class="hd n">建議當下</span><span class="hd n">現在</span><span class="hd n">狀態</span>
-      ${(d.checks || []).map(c => `<span>${esc(c.label)}</span>
+      <span class="hd">因子</span><span class="hd n">建議 / 假設</span><span class="hd n">現在</span><span class="hd n">狀態</span>
+      ${(d.checks || []).map(c => `<span>${esc(c.label)}${c.is_knob ? '　<span class="hint">可調</span>' : ''}</span>
         <span class="n">${f2(c.at_reco)}</span><span class="n">${f2(c.now)}</span>
-        <span class="st ${c.ok ? 'ok' : 'no'}">${c.ok ? '在帶內' : '偏離'}</span>`).join('')}
+        <span class="st ${c.is_knob ? (c.applied ? 'ok' : '') : (c.ok ? 'ok' : 'no')}">${
+          c.is_knob ? (c.applied ? '已套用' : '待套用') : (c.ok ? '在帶內' : '偏離')}</span>`).join('')}
     </div>
-    <div class="hint" style="margin-top:6px">容許帶＝近 7 天 ±2σ。任一因子偏離＝建立這條建議的前提已變，該重算。</div>
+    <div class="hint" style="margin-top:6px">可調參數看的是「現場套用了沒」；其他 X 因子是**假設不變**的前提，容許帶＝近 7 天 ±2σ，偏離就代表這條建議的前提已變、該重算。</div>
   </div>
 
   <div class="blk"><h3>怎麼進到平台的 <i></i></h3>

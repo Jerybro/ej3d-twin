@@ -415,7 +415,7 @@ def _model_meta(mid: str) -> dict:
 
 
 def _card(task: str, mid: str, y_col: str, pred: float, x_at_reco: dict,
-          actual_src: str = "廠內 sensor") -> dict:
+          actual_src: str = "廠內 sensor", knob: str = "") -> dict:
     """一步的模型卡：Y 怎麼建的／預測±變動／實際 vs 回傳／X 因子檢查點。"""
     from .automl import whatif
 
@@ -432,11 +432,17 @@ def _card(task: str, mid: str, y_col: str, pred: float, x_at_reco: dict,
     for f in feats:
         lo, hi = bands.get(f, (None, None))
         at, now = x_at_reco.get(f), last.get(f)
-        checks.append({"col": f, **_p(f), "at_reco": None if at is None else round(float(at), 3),
+        # 可調參數本身不是「偏移檢查」的對象——它就是我們要人去改的那個，
+        # 只看「套用了沒」；其他 X（假設不變的那些）才是檢查點：偏離＝建議前提已變
+        is_knob = (f == knob)
+        applied = bool(is_knob and at is not None and now is not None
+                       and abs(float(now) - float(at)) <= max(abs(float(at)) * 0.02, 1e-9))
+        checks.append({"col": f, **_p(f), "is_knob": is_knob, "applied": applied,
+                       "at_reco": None if at is None else round(float(at), 3),
                        "now": None if now is None else round(float(now), 3),
                        "lo": None if lo is None else round(lo, 3),
                        "hi": None if hi is None else round(hi, 3),
-                       "ok": bool(now is not None and lo is not None and lo <= now <= hi)})
+                       "ok": True if is_knob else bool(now is not None and lo is not None and lo <= now <= hi)})
     return {
         "task": task, "task_txt": TASK_TXT.get(task, task),
         "y": {"col": y_col, **_p(y_col)},
@@ -505,7 +511,7 @@ def demo_run(request: Request) -> dict:
                                                         "209_10_hz_mean": hz_best}})["pred"]
     saving_a = _pct(amp_now, amp_best)
     card_a = _card("optimize", mid["amp"], "209_10_amp_mean", amp_best,
-                   {"209_10_feed_mean": feed, "209_10_hz_mean": hz_best})
+                   {"209_10_feed_mean": feed, "209_10_hz_mean": hz_best}, knob="209_10_hz_mean")
     card_a["objective"] = {"text": "電流最低（守粒徑合格率 ≥98%）", "knob": {"col": "209_10_hz_mean", **_p("209_10_hz_mean")},
                            "now": _fmt(hz_now, 1), "reco": _fmt(hz_best, 1),
                            "effect": f"電流 {_sgn(saving_a)}", "current_y": _fmt(amp_now)}
@@ -538,7 +544,7 @@ def demo_run(request: Request) -> dict:
     saving_b = _pct(gas_now, gas_best)
     card_b = _card("soft_sensor", mid["moist"], "210_10_moist_mean", ob["pred"],
                    {"210_10_temp_mean": temp_best, "209_10_feed_mean": feed},
-                   actual_src="離線化驗（每班一次）")
+                   actual_src="離線化驗（每班一次）", knob="210_10_temp_mean")
     card_b["objective"] = {"text": "出料含水推到 0.8%（規格上限），爐溫能降就降",
                            "knob": {"col": "210_10_temp_mean", **_p("210_10_temp_mean")},
                            "now": _fmt(temp_now, 1), "reco": _fmt(temp_best, 1),
@@ -567,7 +573,7 @@ def demo_run(request: Request) -> dict:
     chz_best = oc["best"]["212_10_hz_mean"]
     up = _pct(chz_now, chz_best)
     card_c = _card("quality", mid["fine"], "212_10_fine_frac", oc["pred"],
-                   {"210_10_moist_mean": 0.8, "212_10_hz_mean": chz_best})
+                   {"210_10_moist_mean": 0.8, "212_10_hz_mean": chz_best}, knob="212_10_hz_mean")
     card_c["objective"] = {"text": f"細粉率守規格 ≤{FINE_SPEC}%，在此前提下轉速能提就提",
                            "knob": {"col": "212_10_hz_mean", **_p("212_10_hz_mean")},
                            "now": _fmt(chz_now, 1), "reco": _fmt(chz_best, 1),

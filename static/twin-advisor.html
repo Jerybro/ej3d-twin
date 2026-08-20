@@ -14,100 +14,144 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; background: var(--bg); color: var(--text);
       font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", sans-serif; font-size: 13px; }
-    .top { height: 52px; background: var(--panel); border-bottom: 1px solid var(--bdr);
+    button, select, input { font: inherit; }
+
+    .top { height: 52px; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--bdr);
       display: flex; align-items: center; gap: 10px; padding: 0 16px; }
     .brand-home { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px;
       border-radius: 6px; background: rgba(4,106,251,0.08); border: 1px solid var(--bdr); color: var(--accent);
       font-size: 15px; font-weight: 700; text-decoration: none; }
     .top h1 { font-size: 14.5px; font-weight: 700; }
-    .badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 9px;
-      background: rgba(224,164,21,0.14); color: #7A5400; border: 1px solid rgba(224,164,21,0.45); }
+    .tag { font-size: 10.5px; padding: 2px 8px; border-radius: 9px; white-space: nowrap; }
+    .tag.real { background: rgba(18,161,80,.12); color: #0B5A2E; border: 1px solid rgba(18,161,80,.4); }
+    .tag.sim { background: rgba(224,164,21,.14); color: #7A5400; border: 1px solid rgba(224,164,21,.45); }
     .top .sp { flex: 1; }
     .top .meta { font-size: 11px; color: var(--dim); }
     .mini-btn { padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer;
-      background: var(--panel2); border: 1px solid var(--bdr); color: var(--text); font-family: inherit; }
+      background: var(--panel2); border: 1px solid var(--bdr); color: var(--text); text-decoration: none; }
     .mini-btn:hover { border-color: var(--accent); }
     .mini-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
     .mini-btn:disabled { opacity: .4; pointer-events: none; }
+    .seg { display: inline-flex; border: 1px solid var(--bdr); border-radius: 7px; overflow: hidden; }
+    .seg button { padding: 5px 11px; border: 0; border-left: 1px solid var(--bdr); background: transparent;
+      color: var(--dim); font-size: 12px; cursor: pointer; }
+    .seg button:first-child { border-left: 0; }
+    .seg button.on { background: var(--deep); color: var(--accent); font-weight: 600; }
     .hint { font-size: 11.5px; color: var(--dim); line-height: 1.6; }
 
-    .wrap { max-width: 1180px; margin: 0 auto; padding: 22px 20px 60px; }
-    .bar { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
-    .bar .st { font-size: 12px; color: var(--dim); }
-    .bar .st b { color: var(--accent); }
+    .main { display: flex; height: calc(100vh - 52px); }
+    /* 左：真資產模型 */
+    .canvas { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .cbar { height: 42px; flex-shrink: 0; border-bottom: 1px solid var(--bdr); background: var(--panel);
+      display: flex; align-items: center; gap: 10px; padding: 0 12px; font-size: 12px; }
+    .cbar .sp { flex: 1; }
+    #stage { flex: 1; overflow: auto; background: #E9EDF2; position: relative; }
+    #stage.empty { display: grid; place-items: center; color: var(--dim); }
+    #wrap { position: relative; display: inline-block; }
+    #img { display: block; user-select: none; -webkit-user-drag: none; }
+    #ov { position: absolute; inset: 0; }
+    #links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    /* 鏈上的三台：真框、粗描、依序編號 */
+    .eqb { position: absolute; border: 3px solid var(--accent); border-radius: 4px;
+      background: rgba(4,106,251,.10); box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(4,106,251,.35);
+      transition: border-color .2s, background .2s, box-shadow .2s; }
+    .eqb.done { border-color: var(--hi); background: rgba(18,161,80,.16);
+      box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(18,161,80,.45); }
+    .eqb .no { position: absolute; left: -11px; top: -11px; width: 22px; height: 22px; border-radius: 50%;
+      background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; display: grid;
+      place-items: center; border: 2px solid #fff; }
+    .eqb.done .no { background: var(--hi); }
+    .eqb .lb { position: absolute; left: -2px; bottom: 100%; margin-bottom: 3px; white-space: nowrap;
+      font-size: 11px; font-weight: 700; color: var(--accent); background: rgba(255,255,255,.94);
+      padding: 1px 5px; border-radius: 3px; border: 1px solid rgba(4,106,251,.3); }
+    .eqb.done .lb { color: #0B5A2E; border-color: rgba(18,161,80,.4); }
+    /* 建議值貼在框旁 */
+    .eqb .adv { position: absolute; left: calc(100% + 8px); top: -2px; white-space: nowrap;
+      background: var(--hi); color: #fff; font-size: 11.5px; font-weight: 700; padding: 3px 8px;
+      border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+    .eqb .adv small { font-weight: 400; opacity: .85; }
+    #links path { fill: none; stroke: #B8BFC8; stroke-width: 3; stroke-dasharray: 7 5; }
+    #links path.on { stroke: var(--hi); stroke-dasharray: none; }
+    #links text { fill: var(--hi); font-size: 13px; font-weight: 700; }
 
-    /* 製程鏈 */
-    .chain { display: flex; align-items: stretch; gap: 0; }
-    .eq { flex: 1; min-width: 0; }
-    .blk { border: 2px solid #8A94A0; border-radius: 10px; background: var(--panel);
-      padding: 12px 14px; position: relative; }
-    .blk .t { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
-    .blk .t b { font-size: 18px; letter-spacing: .3px; }
-    .blk .t span { color: var(--dim); font-size: 12px; }
-    .pt { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 3px 0;
-      border-top: 1px dashed var(--bdr); }
-    .pt:first-of-type { border-top: 0; }
-    .pt .k { color: var(--dim); }
-    .pt .v { font-weight: 600; font-variant-numeric: tabular-nums; }
-    .arr { width: 46px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
-      color: #8A94A0; position: relative; }
-    .arr::before { content: ''; position: absolute; left: 4px; right: 12px; top: 50%; height: 2px; background: currentColor; }
-    .arr::after { content: ''; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-      border: 6px solid transparent; border-left-color: currentColor; }
-    .arr.on { color: var(--accent); }
-    .arr .lb { position: absolute; top: calc(50% - 24px); left: 50%; transform: translateX(-50%);
-      font-size: 10px; color: var(--accent); white-space: nowrap; background: var(--bg); padding: 0 3px;
-      display: none; }
-    .arr.on .lb { display: block; }
+    /* 右：起承轉合 */
+    .side { width: clamp(360px, 40vw, 520px); flex-shrink: 0; border-left: 1px solid var(--bdr);
+      background: var(--panel); display: flex; flex-direction: column; }
+    .sbar { padding: 12px 15px; border-bottom: 1px solid var(--bdr); }
+    .sbar .row { display: flex; align-items: center; gap: 8px; }
+    .sbar h2 { font-size: 14px; font-weight: 700; }
+    .sbar .st { font-size: 11.5px; color: var(--dim); margin-top: 5px; }
+    .sbar .st b { color: var(--accent); }
+    .scroll { flex: 1; overflow-y: auto; padding: 14px 15px 40px; }
 
-    /* 建議卡 */
-    .card { border: 1.5px solid var(--hi); border-radius: 10px; background: rgba(18,161,80,0.06);
-      padding: 10px 12px; margin-top: 10px; }
-    .card .h { display: flex; align-items: baseline; gap: 8px; }
-    .card .h b { font-size: 15px; color: #0B5A2E; }
-    .card .h .m { font-size: 10.5px; color: var(--dim); margin-left: auto; }
-    .card .note { font-size: 12.5px; line-height: 1.7; margin-top: 4px; }
-    .card .prov { font-size: 10.5px; color: var(--dim); margin-top: 6px; border-top: 1px dashed rgba(18,161,80,.35); padding-top: 5px; }
-    .card .prov b { color: var(--text); font-weight: 600; }
-    .card .link { color: var(--accent); }
-    .blk.has { border-color: var(--hi); }
+    .step { border: 1px solid var(--bdr); border-radius: 10px; background: var(--panel2);
+      padding: 11px 13px; margin-bottom: 8px; position: relative; }
+    .step.on { border-color: var(--hi); background: rgba(18,161,80,.06); }
+    .step .h { display: flex; align-items: center; gap: 8px; }
+    .step .n { width: 20px; height: 20px; border-radius: 50%; background: #B8BFC8; color: #fff;
+      font-size: 11px; font-weight: 700; display: grid; place-items: center; flex-shrink: 0; }
+    .step.on .n { background: var(--hi); }
+    .step .h b { font-size: 15px; }
+    .step .h span { color: var(--dim); font-size: 12px; }
+    .step .h .role { margin-left: auto; font-size: 10.5px; color: var(--dim); }
+    .step .now { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 7px; font-size: 11.5px; }
+    .step .now i { font-style: normal; color: var(--dim); }
+    .step .now b { font-variant-numeric: tabular-nums; }
+    .adv-line { margin-top: 9px; padding-top: 8px; border-top: 1px dashed rgba(18,161,80,.4); }
+    .adv-line .big { font-size: 20px; font-weight: 700; color: #0B5A2E; letter-spacing: .3px; }
+    .adv-line .txt { font-size: 12.5px; line-height: 1.75; margin-top: 3px; }
+    .adv-line .prov { font-size: 10.5px; color: var(--dim); margin-top: 6px; }
+    .adv-line .prov b { color: var(--text); font-weight: 600; }
+    .carry { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--hi);
+      font-weight: 600; margin: -2px 0 8px 10px; }
+    .carry::before { content: '↓'; font-size: 14px; }
+    .carry.off { color: #C3CAD2; }
 
-    /* API 面板 */
-    .api { margin-top: 26px; }
-    .api summary { cursor: pointer; font-size: 12.5px; font-weight: 700; color: var(--accent); outline: none; padding: 6px 0; }
-    .api pre { background: #0E1524; color: #D7E3F4; border-radius: 10px; padding: 14px 16px;
-      font-size: 11.5px; line-height: 1.7; overflow-x: auto; margin-top: 8px;
+    .api { margin-top: 14px; }
+    .api summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--accent); outline: none; padding: 5px 0; }
+    .api pre { background: #0E1524; color: #D7E3F4; border-radius: 9px; padding: 12px 14px;
+      font-size: 11px; line-height: 1.65; overflow-x: auto; margin-top: 6px;
       font-family: "Cascadia Code", Consolas, monospace; }
-    .api .cap { font-size: 11px; color: var(--dim); margin-top: 6px; }
-    .empty { color: var(--dim); text-align: center; padding: 60px 0; }
   </style>
 </head>
 <body>
   <div class="top">
     <a class="brand-home" href="/" title="回首頁">⌂</a>
     <h1>製程建議</h1>
-    <span class="badge" id="demo-badge">示範資料</span>
+    <span class="tag real" id="tag-real">資產模型：載入中</span>
+    <span class="tag sim">點位數值：模擬</span>
     <span class="sp"></span>
-    <a class="mini-btn" href="/twin/mapping" style="text-decoration:none">← 點位對照</a>
+    <a class="mini-btn" href="/twin/mapping">← 點位對照</a>
     <span class="meta" id="ver"></span>
   </div>
 
-  <div class="wrap">
-    <div class="bar">
-      <button class="mini-btn primary" id="run" disabled>跑三段連鎖最佳化</button>
-      <button class="mini-btn" id="reset">重置</button>
-      <span class="st" id="st">載入中…</span>
-      <span class="sp" style="flex:1"></span>
-      <span class="hint">A 最佳化 → 最佳解沿製程鏈成為 B 的條件 → 再傳到 C。內建 AutoML 與外部模型走同一條承接 API。</span>
+  <div class="main">
+    <div class="canvas">
+      <div class="cbar">
+        <span class="seg" id="mode">
+          <button data-m="blind" class="on">盲重建</button>
+          <button data-m="annot">標示</button>
+          <button data-m="trace">描圖</button>
+        </span>
+        <span class="seg"><button id="zo">−</button><button id="zf">全圖</button><button id="zi">＋</button></span>
+        <span class="sp"></span>
+        <span class="hint" id="cap"></span>
+      </div>
+      <div id="stage" class="empty"><span>載入資產模型…</span></div>
     </div>
 
-    <div class="chain" id="chain"></div>
-
-    <details class="api" id="api-box" style="display:none">
-      <summary>承接 API 呼叫內容（POST /api/twin/result）</summary>
-      <div class="cap">每張建議卡＝一次 POST。外部模型（客戶自己的 AutoML、第三方服務）用同一個端點、同一個格式落結果。</div>
-      <pre id="api-pre"></pre>
-    </details>
+    <div class="side">
+      <div class="sbar">
+        <div class="row">
+          <h2>三段連鎖最佳化</h2>
+          <span class="sp" style="flex:1"></span>
+          <button class="mini-btn primary" id="run" disabled>開始</button>
+          <button class="mini-btn" id="reset">重置</button>
+        </div>
+        <div class="st" id="st">載入中…</div>
+      </div>
+      <div class="scroll" id="panel"></div>
+    </div>
   </div>
 
 <script>
@@ -117,70 +161,140 @@ async function getJSON(url, opt) { const r = await fetch(url, opt); const t = aw
 const fmt = v => v == null ? '—' : (Math.abs(v) >= 100 ? (+v).toFixed(0) : (+v).toFixed(2));
 const when = s => s ? String(s).replace('T', ' ').slice(5, 16) : '';
 const who = s => (s || '').split('@')[0] || '（免登入）';
+const ROLE = ['起', '承', '轉'];
 
-let state = null, results = [];
+let state = null, results = [], mode = 'blind', zoom = 1, baseW = 1600, baseH = 1131;
 
-function render() {
-  const c = $('chain');
-  if (!state) { c.innerHTML = '<div class="empty">載入失敗</div>'; return; }
-  const byAsset = {};
-  for (const r of results) byAsset[r.asset] = r;   // 每台顯示最新一張
-  const idOf = {};
-  for (const r of results) idOf[r.id] = r;
-  c.innerHTML = state.chain.map((eq, i) => {
-    const r = byAsset[eq.tag];
-    const upstream = r && r.based_on && idOf[r.based_on];
-    return `${i ? `<div class="arr ${r ? 'on' : ''}"><span class="lb">承接</span></div>` : ''}
-    <div class="eq"><div class="blk ${r ? 'has' : ''}">
-      <div class="t"><b>${esc(eq.tag)}</b><span>${esc(eq.name)}</span></div>
-      ${eq.points.map(p => `<div class="pt"><span class="k">${esc(p.label)}</span>
-        <span class="v">${fmt(p.mean)} ${esc(p.unit)}</span></div>`).join('')}
-    </div>
-    ${r ? `<div class="card">
-      <div class="h"><b>${esc(p2(r))}</b><span class="m">${esc(r.metric)}</span></div>
-      <div class="note">${esc(r.note || '')}</div>
-      <div class="prov">模型 <b>${esc(r.model)}</b>｜${esc(when(r.computed_at))}｜由 ${esc(who(r.by))} 承接入庫
-        ${r.point ? `｜依據 <b>${esc(r.point)}</b>` : ''}
-        ${upstream ? `<br>承接自 <span class="link">${esc(upstream.asset)} 的建議（${esc(upstream.id)}）</span>` : ''}</div>
-    </div>` : ''}</div>`;
-  }).join('');
-  const api = $('api-box');
-  if (results.length) {
-    api.style.display = '';
-    $('api-pre').textContent = results.map(r =>
-      'POST /api/twin/result\n' + JSON.stringify(r, null, 2)).join('\n\n');
-  } else api.style.display = 'none';
+// ---------------------------------------------------------- 左：真資產模型
+function imgUrl() {
+  const f = encodeURIComponent(state.drawing);
+  return mode === 'annot' ? `/api/pid/model/${f}/annotated.jpg?t=${Date.now()}`
+                          : `/api/pid/model/${f}/rebuild.svg?mode=${mode}&notes=0&t=${Date.now()}`;
 }
-function p2(r) { return (r.value == null ? '' : `${r.value} ${r.unit || ''}`).trim() || r.metric; }
+function loadImage() {
+  const st = $('stage');
+  if (!state.model_ok) {
+    st.className = 'empty';
+    st.innerHTML = '<span>這個網域還沒建立 M0200 的資產模型——先到判讀工作台建模，這裡才畫得出真圖</span>';
+    return;
+  }
+  st.className = '';
+  st.innerHTML = `<div id="wrap"><img id="img" src="${esc(imgUrl())}" draggable="false"/>
+    <svg id="links" preserveAspectRatio="none"></svg><div id="ov"></div></div>`;
+  const img = $('img');
+  img.onload = () => { baseW = img.naturalWidth || 1600; baseH = img.naturalHeight || Math.round(baseW * (state.aspect || .707)); fit(); draw(); };
+  img.onerror = () => { st.className = 'empty'; st.innerHTML = '<span>資產模型圖載入失敗</span>'; };
+  bindPan();
+}
+function applyZoom() { const i = $('img'); if (i) i.style.width = Math.round(baseW * zoom) + 'px'; }
+function fit() { zoom = Math.min(1, ($('stage').clientWidth - 24) / baseW); applyZoom(); }
+$('zi').onclick = () => { zoom = Math.min(zoom * 1.4, 6); applyZoom(); };
+$('zo').onclick = () => { zoom = Math.max(zoom / 1.4, .05); applyZoom(); };
+$('zf').onclick = fit;
+document.querySelectorAll('#mode button').forEach(b => b.onclick = () => {
+  mode = b.dataset.m;
+  document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b));
+  if (state && state.model_ok) $('img').src = imgUrl();
+});
+function bindPan() {
+  const st = $('stage'), ov = $('ov');
+  ov.addEventListener('pointerdown', e => {
+    if (e.target !== ov) return;
+    const sx = e.clientX, sy = e.clientY, l0 = st.scrollLeft, t0 = st.scrollTop;
+    ov.style.cursor = 'grabbing';
+    const mv = ev => { st.scrollLeft = l0 - (ev.clientX - sx); st.scrollTop = t0 - (ev.clientY - sy); };
+    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); ov.style.cursor = ''; };
+    addEventListener('pointermove', mv); addEventListener('pointerup', up);
+  });
+}
+function draw() {
+  const ov = $('ov'), sv = $('links');
+  if (!ov || !state.model_ok) return;
+  ov.innerHTML = '';
+  const byAsset = {}; results.forEach(r => byAsset[r.asset] = r);
+  state.chain.forEach((eq, i) => {
+    if (!eq.bbox) return;
+    const [x0, y0, x1, y1] = eq.bbox, r = byAsset[eq.tag];
+    const d = document.createElement('div');
+    d.className = 'eqb' + (r ? ' done' : '');
+    d.style.cssText = `left:${x0*100}%;top:${y0*100}%;width:${(x1-x0)*100}%;height:${(y1-y0)*100}%`;
+    d.innerHTML = `<span class="no">${i + 1}</span>
+      <span class="lb">${esc(eq.tag)}　${esc(eq.name)}</span>
+      ${r ? `<span class="adv">${esc(r.value)} ${esc(r.unit)} <small>建議</small></span>` : ''}`;
+    ov.appendChild(d);
+  });
+  // 鏈上的承接線（跟著真框畫）
+  const W = 1000, H = Math.round(W * (baseH / baseW));
+  sv.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  let g = '';
+  for (let i = 1; i < state.chain.length; i++) {
+    const a = state.chain[i - 1], b = state.chain[i];
+    if (!a.bbox || !b.bbox) continue;
+    const ax = (a.bbox[0] + a.bbox[2]) / 2 * W, ay = (a.bbox[1] + a.bbox[3]) / 2 * H;
+    const bx = (b.bbox[0] + b.bbox[2]) / 2 * W, by = (b.bbox[1] + b.bbox[3]) / 2 * H;
+    const on = byAsset[a.tag] && byAsset[b.tag];
+    const mx = (ax + bx) / 2, my = Math.min(ay, by) - Math.abs(bx - ax) * 0.18 - 20;
+    g += `<path class="${on ? 'on' : ''}" d="M${ax},${ay} Q${mx},${my} ${bx},${by}"/>`;
+    if (on) g += `<text x="${mx}" y="${my + 6}" text-anchor="middle">承接</text>`;
+  }
+  sv.innerHTML = g;
+}
 
+// ---------------------------------------------------------- 右：起承轉合
+function renderPanel() {
+  const byAsset = {}; results.forEach(r => byAsset[r.asset] = r);
+  const idOf = {}; results.forEach(r => idOf[r.id] = r);
+  $('panel').innerHTML = state.chain.map((eq, i) => {
+    const r = byAsset[eq.tag], up = r && r.based_on && idOf[r.based_on];
+    return `${i ? `<div class="carry ${r ? '' : 'off'}">${r ? `把上一台的建議條件帶進來` : '等上一台算完'}</div>` : ''}
+    <div class="step ${r ? 'on' : ''}">
+      <div class="h"><span class="n">${i + 1}</span><b>${esc(eq.tag)}</b>
+        <span>${esc(eq.name)}</span><span class="role">${ROLE[i] || ''}</span></div>
+      <div class="now">${eq.points.map(p => `<span><i>${esc(p.label)}</i> <b>${fmt(p.mean)}</b> ${esc(p.unit)}</span>`).join('')}</div>
+      ${r ? `<div class="adv-line">
+        <div class="big">${esc(r.value)} ${esc(r.unit)}</div>
+        <div class="txt">${esc(r.note || '')}</div>
+        <div class="prov">模型 <b>${esc(r.model)}</b>｜${esc(when(r.computed_at))}｜由 ${esc(who(r.by))} 承接入庫｜依據 <b>${esc(r.point)}</b>
+          ${up ? `<br>承接自 ${esc(up.asset)} 的建議（${esc(up.id)}）` : ''}</div>
+      </div>` : ''}
+    </div>`;
+  }).join('') + (results.length ? `
+    <details class="api"><summary>這三張卡怎麼進到平台的（POST /api/twin/result）</summary>
+      <pre>${esc(results.map(r => 'POST /api/twin/result\n' + JSON.stringify(r, null, 1)).join('\n\n'))}</pre>
+      <div class="hint" style="margin-top:6px">外部模型（客戶自己的 AutoML、第三方服務）用同一個端點、同一個格式落結果。</div>
+    </details>` : '');
+}
+function render() { renderPanel(); draw(); }
+
+// ---------------------------------------------------------- 載入與執行
 async function load() {
   try { state = await getJSON('/api/twin/advisor/demo'); }
   catch (e) { $('st').textContent = e.message; return; }
   results = state.results || [];
-  const training = Object.entries(state.models).filter(([, m]) => m.status !== 'done');
+  $('tag-real').textContent = state.model_ok ? '資產模型：真實（M0200）' : '資產模型：本網域尚未建模';
+  $('tag-real').className = 'tag ' + (state.model_ok ? 'real' : 'sim');
+  $('cap').textContent = state.model_ok ? `${state.drawing.replace(/\.pdf$/i, '')}　鏈上三台已框選` : '';
+  if (!$('img')) loadImage();
+  const total = Object.keys(state.models).length;
+  const done = Object.values(state.models).filter(m => m.status === 'done').length;
   if (!state.ready) {
-    $('st').innerHTML = `模型訓練中（${Object.keys(state.models).length - training.length}／${Object.keys(state.models).length}）…首次進入約需一分鐘`;
+    $('st').innerHTML = `模型訓練中 <b>${done}／${total}</b>…首次進入約一分鐘`;
     $('run').disabled = true;
     setTimeout(load, 3000);
   } else {
-    $('st').textContent = results.length ? `已有 ${results.length} 張建議卡` : '就緒';
+    $('st').innerHTML = results.length ? `已有 <b>${results.length}</b> 張建議` :
+      '按「開始」：209 找最省電轉速 → 條件傳給 210 → 再傳給 212';
     $('run').disabled = false;
   }
   render();
 }
-
 $('run').addEventListener('click', async () => {
-  $('run').disabled = true;
-  $('st').innerHTML = '呼叫 AutoML 尋優中…';
+  $('run').disabled = true; $('st').textContent = '呼叫 AutoML 尋優中…';
   try {
     const d = await getJSON('/api/twin/advisor/demo/run', { method: 'POST' });
-    // 三張卡依序亮（示範節奏）
     results = results.filter(r => !d.cards.some(c => c.asset === r.asset));
-    for (const card of d.cards) {
-      results.push(card); render();
-      await new Promise(z => setTimeout(z, 600));
-    }
-    $('st').textContent = `完成——三段合計的建議都在卡上`;
+    for (const c of d.cards) { results.push(c); render(); await new Promise(z => setTimeout(z, 700)); }
+    $('st').innerHTML = '完成——三段建議都在右邊，圖上綠框是被改的那三台';
   } catch (e) { $('st').textContent = e.message; }
   $('run').disabled = false;
 });
@@ -189,6 +303,7 @@ $('reset').addEventListener('click', async () => {
   results = []; render(); $('st').textContent = '已重置';
 });
 fetch('/api/version').then(r => r.json()).then(v => { $('ver').textContent = `v${v.version}`; }).catch(() => {});
+addEventListener('resize', () => { if (state && state.model_ok && $('img')) fit(); });
 load();
 </script>
 </body>

@@ -464,9 +464,11 @@ app.include_router(pid_notes_router)
 from .pid_mapping import router as pid_mapping_router  # noqa: E402
 
 from .data_inventory import router as data_inventory_router  # noqa: E402
+from .twin_advisor import router as twin_advisor_router  # noqa: E402
 
 app.include_router(pid_mapping_router)
 app.include_router(data_inventory_router)
+app.include_router(twin_advisor_router)
 
 # --------------------------------------------------------- 登入與權限（Google OAuth）
 from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
@@ -630,6 +632,7 @@ PAGES = {
     "/twin/pid/label2": "pid-label2.html",  # 產品3：P&ID 判讀工作台 新版面（階段式：①辨識②審核③資產模型④評註與說明）
     "/twin/pid/rebuild": "pid-rebuild.html",  # 產品3：盲測重建（模型 JSON → 重畫）
     "/twin/mapping": "pid-mapping.html",       # 點位對照：歷史數據欄位 ↔ P&ID 資產
+    "/twin/advisor": "twin-advisor.html",      # 製程建議：ML 結果承接＋三段連鎖最佳化示範
     "/data/inventory": "data-inventory.html",  # 資料盤點：收到的資料在時間上長什麼樣
     "/data": "data.html",      # 產品2：資料前處理
     "/docs": "docs.html",      # 操作說明（雙語）

@@ -330,7 +330,7 @@
               <li><a href="/data"><span class="i">1</span><span>上傳歷史數據</span></a></li>
               <li><a href="/twin/pid/label"><span class="i">2</span><span>判讀 P&amp;ID・建資產模型</span></a></li>
               <li><a href="/twin/mapping" class="primary"><span class="i">3</span><span>點位對照・確認單位與範圍</span></a></li>
-              <li><a href="/static/flowsheet_builder.html"><span class="i">4</span><span>綁定孿生・組 flowsheet</span></a></li>
+              <li><a href="/twin/advisor"><span class="i">4</span><span>製程建議・ML 結果承接</span></a></li>
             </ol>
           </div>
           <div class="card">
@@ -383,6 +383,7 @@
           <a href="/twin/pid"><b>P&amp;ID 工作流</b><span>OCR 自動建廠</span></a>
           <a href="/twin/pid/label"><b>P&amp;ID 判讀工作台</b><span>框選問 AI・審核入庫・資產模型</span></a>
           <a href="/twin/mapping"><b>點位對照</b><span>歷史數據欄位 ↔ 設備・單位・合理範圍</span></a>
+          <a href="/twin/advisor"><b>製程建議</b><span>ML 結果承接・三段連鎖最佳化示範</span></a>
         </div>
       </div>
     </section>
@@ -414,6 +415,7 @@
       { re: /健康|預警|PHM|異常|振動/i, url: '/static/block_health.html', t: '設備健康預警' },
       { re: /最佳化|優化|配方/i, url: '/static/incinerator_flowsheet.html', t: '智慧運轉 → 最佳化' },
       { re: /對照|點位|欄位|接數據|接資料/i, url: '/twin/mapping', t: '點位對照' },
+      { re: /建議|最佳化|承接|優化/i, url: '/twin/advisor', t: '製程建議' },
       { re: /判讀|標示|審核|框選/i, url: '/twin/pid/label', t: 'P&ID 判讀工作台' },
       { re: /P&?ID|圖面/i, url: '/twin/pid', t: 'P&ID 工作流' },
       { re: /設計器|組.*孿生|flowsheet/i, url: '/static/flowsheet_builder.html', t: 'Flowsheet 設計器' },

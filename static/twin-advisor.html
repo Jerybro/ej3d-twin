@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>製程建議｜Process Intelligence</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #F6F7FA; --panel: #fff; --panel2: #F1F3F6; --bdr: #DBDDE0;
+      --accent: #046AFB; --deep: #E3EDFE; --text: #061027; --dim: #5C6773;
+      --hi: #12A150; --mid: #E0A415; --lo: #D93F3F;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; background: var(--bg); color: var(--text);
+      font-family: Inter, "Noto Sans TC", "Microsoft JhengHei", sans-serif; font-size: 13px; }
+    .top { height: 52px; background: var(--panel); border-bottom: 1px solid var(--bdr);
+      display: flex; align-items: center; gap: 10px; padding: 0 16px; }
+    .brand-home { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px;
+      border-radius: 6px; background: rgba(4,106,251,0.08); border: 1px solid var(--bdr); color: var(--accent);
+      font-size: 15px; font-weight: 700; text-decoration: none; }
+    .top h1 { font-size: 14.5px; font-weight: 700; }
+    .badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 9px;
+      background: rgba(224,164,21,0.14); color: #7A5400; border: 1px solid rgba(224,164,21,0.45); }
+    .top .sp { flex: 1; }
+    .top .meta { font-size: 11px; color: var(--dim); }
+    .mini-btn { padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer;
+      background: var(--panel2); border: 1px solid var(--bdr); color: var(--text); font-family: inherit; }
+    .mini-btn:hover { border-color: var(--accent); }
+    .mini-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    .mini-btn:disabled { opacity: .4; pointer-events: none; }
+    .hint { font-size: 11.5px; color: var(--dim); line-height: 1.6; }
+
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 22px 20px 60px; }
+    .bar { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+    .bar .st { font-size: 12px; color: var(--dim); }
+    .bar .st b { color: var(--accent); }
+
+    /* 製程鏈 */
+    .chain { display: flex; align-items: stretch; gap: 0; }
+    .eq { flex: 1; min-width: 0; }
+    .blk { border: 2px solid #8A94A0; border-radius: 10px; background: var(--panel);
+      padding: 12px 14px; position: relative; }
+    .blk .t { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+    .blk .t b { font-size: 18px; letter-spacing: .3px; }
+    .blk .t span { color: var(--dim); font-size: 12px; }
+    .pt { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 3px 0;
+      border-top: 1px dashed var(--bdr); }
+    .pt:first-of-type { border-top: 0; }
+    .pt .k { color: var(--dim); }
+    .pt .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .arr { width: 46px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+      color: #8A94A0; position: relative; }
+    .arr::before { content: ''; position: absolute; left: 4px; right: 12px; top: 50%; height: 2px; background: currentColor; }
+    .arr::after { content: ''; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+      border: 6px solid transparent; border-left-color: currentColor; }
+    .arr.on { color: var(--accent); }
+    .arr .lb { position: absolute; top: calc(50% - 24px); left: 50%; transform: translateX(-50%);
+      font-size: 10px; color: var(--accent); white-space: nowrap; background: var(--bg); padding: 0 3px;
+      display: none; }
+    .arr.on .lb { display: block; }
+
+    /* 建議卡 */
+    .card { border: 1.5px solid var(--hi); border-radius: 10px; background: rgba(18,161,80,0.06);
+      padding: 10px 12px; margin-top: 10px; }
+    .card .h { display: flex; align-items: baseline; gap: 8px; }
+    .card .h b { font-size: 15px; color: #0B5A2E; }
+    .card .h .m { font-size: 10.5px; color: var(--dim); margin-left: auto; }
+    .card .note { font-size: 12.5px; line-height: 1.7; margin-top: 4px; }
+    .card .prov { font-size: 10.5px; color: var(--dim); margin-top: 6px; border-top: 1px dashed rgba(18,161,80,.35); padding-top: 5px; }
+    .card .prov b { color: var(--text); font-weight: 600; }
+    .card .link { color: var(--accent); }
+    .blk.has { border-color: var(--hi); }
+
+    /* API 面板 */
+    .api { margin-top: 26px; }
+    .api summary { cursor: pointer; font-size: 12.5px; font-weight: 700; color: var(--accent); outline: none; padding: 6px 0; }
+    .api pre { background: #0E1524; color: #D7E3F4; border-radius: 10px; padding: 14px 16px;
+      font-size: 11.5px; line-height: 1.7; overflow-x: auto; margin-top: 8px;
+      font-family: "Cascadia Code", Consolas, monospace; }
+    .api .cap { font-size: 11px; color: var(--dim); margin-top: 6px; }
+    .empty { color: var(--dim); text-align: center; padding: 60px 0; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <a class="brand-home" href="/" title="回首頁">⌂</a>
+    <h1>製程建議</h1>
+    <span class="badge" id="demo-badge">示範資料</span>
+    <span class="sp"></span>
+    <a class="mini-btn" href="/twin/mapping" style="text-decoration:none">← 點位對照</a>
+    <span class="meta" id="ver"></span>
+  </div>
+
+  <div class="wrap">
+    <div class="bar">
+      <button class="mini-btn primary" id="run" disabled>跑三段連鎖最佳化</button>
+      <button class="mini-btn" id="reset">重置</button>
+      <span class="st" id="st">載入中…</span>
+      <span class="sp" style="flex:1"></span>
+      <span class="hint">A 最佳化 → 最佳解沿製程鏈成為 B 的條件 → 再傳到 C。內建 AutoML 與外部模型走同一條承接 API。</span>
+    </div>
+
+    <div class="chain" id="chain"></div>
+
+    <details class="api" id="api-box" style="display:none">
+      <summary>承接 API 呼叫內容（POST /api/twin/result）</summary>
+      <div class="cap">每張建議卡＝一次 POST。外部模型（客戶自己的 AutoML、第三方服務）用同一個端點、同一個格式落結果。</div>
+      <pre id="api-pre"></pre>
+    </details>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+async function getJSON(url, opt) { const r = await fetch(url, opt); const t = await r.text(); let d = null; try { d = JSON.parse(t); } catch {} if (!r.ok) throw new Error((d && d.detail) || `伺服器錯誤 ${r.status}`); return d; }
+const fmt = v => v == null ? '—' : (Math.abs(v) >= 100 ? (+v).toFixed(0) : (+v).toFixed(2));
+const when = s => s ? String(s).replace('T', ' ').slice(5, 16) : '';
+const who = s => (s || '').split('@')[0] || '（免登入）';
+
+let state = null, results = [];
+
+function render() {
+  const c = $('chain');
+  if (!state) { c.innerHTML = '<div class="empty">載入失敗</div>'; return; }
+  const byAsset = {};
+  for (const r of results) byAsset[r.asset] = r;   // 每台顯示最新一張
+  const idOf = {};
+  for (const r of results) idOf[r.id] = r;
+  c.innerHTML = state.chain.map((eq, i) => {
+    const r = byAsset[eq.tag];
+    const upstream = r && r.based_on && idOf[r.based_on];
+    return `${i ? `<div class="arr ${r ? 'on' : ''}"><span class="lb">承接</span></div>` : ''}
+    <div class="eq"><div class="blk ${r ? 'has' : ''}">
+      <div class="t"><b>${esc(eq.tag)}</b><span>${esc(eq.name)}</span></div>
+      ${eq.points.map(p => `<div class="pt"><span class="k">${esc(p.label)}</span>
+        <span class="v">${fmt(p.mean)} ${esc(p.unit)}</span></div>`).join('')}
+    </div>
+    ${r ? `<div class="card">
+      <div class="h"><b>${esc(p2(r))}</b><span class="m">${esc(r.metric)}</span></div>
+      <div class="note">${esc(r.note || '')}</div>
+      <div class="prov">模型 <b>${esc(r.model)}</b>｜${esc(when(r.computed_at))}｜由 ${esc(who(r.by))} 承接入庫
+        ${r.point ? `｜依據 <b>${esc(r.point)}</b>` : ''}
+        ${upstream ? `<br>承接自 <span class="link">${esc(upstream.asset)} 的建議（${esc(upstream.id)}）</span>` : ''}</div>
+    </div>` : ''}</div>`;
+  }).join('');
+  const api = $('api-box');
+  if (results.length) {
+    api.style.display = '';
+    $('api-pre').textContent = results.map(r =>
+      'POST /api/twin/result\n' + JSON.stringify(r, null, 2)).join('\n\n');
+  } else api.style.display = 'none';
+}
+function p2(r) { return (r.value == null ? '' : `${r.value} ${r.unit || ''}`).trim() || r.metric; }
+
+async function load() {
+  try { state = await getJSON('/api/twin/advisor/demo'); }
+  catch (e) { $('st').textContent = e.message; return; }
+  results = state.results || [];
+  const training = Object.entries(state.models).filter(([, m]) => m.status !== 'done');
+  if (!state.ready) {
+    $('st').innerHTML = `模型訓練中（${Object.keys(state.models).length - training.length}／${Object.keys(state.models).length}）…首次進入約需一分鐘`;
+    $('run').disabled = true;
+    setTimeout(load, 3000);
+  } else {
+    $('st').textContent = results.length ? `已有 ${results.length} 張建議卡` : '就緒';
+    $('run').disabled = false;
+  }
+  render();
+}
+
+$('run').addEventListener('click', async () => {
+  $('run').disabled = true;
+  $('st').innerHTML = '呼叫 AutoML 尋優中…';
+  try {
+    const d = await getJSON('/api/twin/advisor/demo/run', { method: 'POST' });
+    // 三張卡依序亮（示範節奏）
+    results = results.filter(r => !d.cards.some(c => c.asset === r.asset));
+    for (const card of d.cards) {
+      results.push(card); render();
+      await new Promise(z => setTimeout(z, 600));
+    }
+    $('st').textContent = `完成——三段合計的建議都在卡上`;
+  } catch (e) { $('st').textContent = e.message; }
+  $('run').disabled = false;
+});
+$('reset').addEventListener('click', async () => {
+  await getJSON('/api/twin/advisor/demo/reset', { method: 'POST' }).catch(() => {});
+  results = []; render(); $('st').textContent = '已重置';
+});
+fetch('/api/version').then(r => r.json()).then(v => { $('ver').textContent = `v${v.version}`; }).catch(() => {});
+load();
+</script>
+</body>
+</html>

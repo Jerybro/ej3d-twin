@@ -1401,6 +1401,11 @@ def optimize(sid: str, mid: str, body: dict) -> dict:
 
     X, _ = _current_xy(sid, rec)
     base = _baseline(sid, rec)
+    # fixed＝把某些非可調特徵釘在指定值（例：上游設備的最佳解）再搜尋——
+    # 「上下文承接」在 ML 層的實體：下游的最佳化在上游建議條件下進行
+    for k, v in (body.get("fixed") or {}).items():
+        if k in base and v not in (None, ""):
+            base[k] = float(v)
     lo = {f: float(np.percentile(X[:, i], 1)) for i, f in enumerate(rec["features"])}
     hi = {f: float(np.percentile(X[:, i], 99)) for i, f in enumerate(rec["features"])}
     rng = np.random.RandomState(0)

@@ -142,6 +142,25 @@
     .sum h3 { font-size: 12px; font-weight: 700; color: #0B5A2E; margin-bottom: 8px; }
     .sum .row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
     .sum .row b { color: #0B5A2E; font-variant-numeric: tabular-nums; }
+    /* 專業術語一律：畫面上講人話，精確定義放 ? 滑過才看 */
+    .q { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%;
+      border: 1px solid var(--dim); color: var(--dim); font-size: 10px; font-weight: 700; cursor: help;
+      position: relative; vertical-align: 1px; margin-left: 5px; flex-shrink: 0; letter-spacing: 0; }
+    .q:hover { border-color: var(--accent); color: var(--accent); }
+    .q::after { content: attr(data-tip); position: absolute; right: -4px; top: calc(100% + 7px);
+      width: 264px; background: #061027; color: #fff; padding: 9px 11px; border-radius: 8px;
+      font-size: 11.5px; font-weight: 400; line-height: 1.7; text-align: left; letter-spacing: 0;
+      opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 60; white-space: normal;
+      box-shadow: 0 8px 24px rgba(6,16,39,.3); }
+    .q:hover::after { opacity: 1; }
+    .blk > h3 .q { margin-left: 0; }
+    /* 主要因子：名稱＋貢獻佔比條 */
+    .fi { display: grid; grid-template-columns: 1fr 80px 42px; gap: 4px 8px; align-items: center;
+      font-size: 11.5px; margin-top: 4px; }
+    .fi .bar { height: 6px; border-radius: 3px; background: #DDE3EA; overflow: hidden; }
+    .fi .bar i { display: block; height: 100%; background: var(--accent); }
+    .fi .pc { text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+
     .api summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--accent); outline: none; padding: 6px 0; }
     .api pre { background: #0E1524; color: #D7E3F4; border-radius: 9px; padding: 12px 14px;
       font-size: 10.5px; line-height: 1.6; overflow-x: auto; font-family: Consolas, monospace; max-height: 320px; }
@@ -201,6 +220,14 @@ async function getJSON(u, o) { const r = await fetch(u, o); const t = await r.te
 const f2 = v => v == null ? '—' : (Math.abs(v) >= 100 ? (+v).toFixed(0) : Math.abs(v) >= 10 ? (+v).toFixed(1) : (+v).toFixed(2));
 const when = s => s ? String(s).replace('T', ' ').slice(5, 16) : '';
 const who = s => (s || '').split('@')[0] || '（免登入）';
+// 術語小幫手：畫面寫人話，精確定義滑過 ? 才出現
+const q = t => '<span class="q" data-tip="' + esc(t) + '">?</span>';
+const pct1 = v => v == null ? '—' : (v * 100).toFixed(1) + '%';
+const TASK_TIP = {
+  optimize: '最佳化：告訴系統你要什麼（最省電、又要守住品質），系統反推設定該調到多少。',
+  soft_sensor: '虛擬量測：這個量現場量不到（沒儀器、或只能離線化驗），用量得到的其他數據即時推算出來。',
+  quality: '品質預測：在做完之前先預估品質會是多少，來得及在做壞之前調整。',
+};
 
 let state = null, results = [], mode = 'blind', view = 'nav', step = 0, zoom = 1, baseW = 1600, baseH = 1131;
 const byAsset = () => Object.fromEntries(results.map(r => [r.asset, r]));
@@ -302,7 +329,7 @@ function cardHTML(eq, r, i) {
   ${up && r && r.based_on ? `<div class="carry">↓ 承接 ${esc(up.tag)} ${esc(up.name)} 的建議條件</div>` : ''}
   <div class="blk head">
     <div class="eqline"><b>${esc(eq.tag)}</b><span>${esc(eq.name)}</span>
-      <span class="ttag ${esc(eq.task)}">${esc(eq.task_txt)}</span></div>
+      <span class="ttag ${esc(eq.task)}">${esc(eq.task_txt)}</span>${q(TASK_TIP[eq.task] || '')}</div>
     ${r ? `<div class="obj">目標：${esc(obj.text || '')}</div>
       <div class="reco"><span class="from">${esc(obj.now || '')}</span><span class="arrow">→</span>
         <span class="to">${esc(r.value)} ${esc(r.unit)}</span>
@@ -313,44 +340,55 @@ function cardHTML(eq, r, i) {
   </div>`;
   if (!r) return head;
   return head + `
-  <div class="blk"><h3>Y 怎麼建的 <i></i></h3>
-    <div class="kv"><span class="k">目標 Y</span><span class="v">${esc((d.y || {}).label || '')}（${esc((d.y || {}).col || '')}）</span></div>
-    <div class="kv"><span class="k">演算法</span><span class="v">${esc(m.algo || '')}</span></div>
-    <div class="kv"><span class="k">驗證</span><span class="v">R² ${m.r2 == null ? '—' : m.r2}　RMSE ${m.rmse == null ? '—' : m.rmse}</span></div>
-    <div class="kv"><span class="k">切分</span><span class="v" style="font-weight:400">${esc(m.val || '')}</span></div>
-    <div style="margin-top:6px"><span class="hint">X 因子：</span>
-      ${(m.features || []).map(f => `<span class="feat">${esc(f.label)}</span>`).join('')}</div>
+  <div class="blk"><h3>這個數字怎麼算出來的 <i></i>${q('平台拿歷史數據學出「這些條件 → 會得到什麼結果」的關係，再用它推算，或反推最省的設定。')}</h3>
+    <div class="kv"><span class="k">要預測的量</span>
+      <span class="v">${esc((d.y || {}).label || '')} <span class="hint" style="font-weight:400">${esc((d.y || {}).col || '')}</span></span></div>
+    <div class="kv"><span class="k">準不準<span class="q" data-tip="解釋力＝模型抓住了目標的多少變化，越接近 100% 越好（技術名稱 R²）。平均誤差＝預測值與實際值平均差多少，單位跟被預測的量相同（技術名稱 RMSE）。">?</span></span>
+      <span class="v ok">解釋力 ${pct1(m.r2)}　平均誤差 ±${m.rmse == null ? '—' : m.rmse} ${esc((d.y || {}).unit || '')}</span></div>
+    <div class="kv"><span class="k">怎麼考的<span class="q" data-tip="把歷史數據切 5 份，每次用 4 份教模型、留 1 份當考卷，輪 5 次。分數是拿「沒看過的資料」考出來的，不是背答案（技術名稱：5 折交叉驗證）。">?</span></span>
+      <span class="v" style="font-weight:400">切 5 份輪流當考卷${m.n_rows ? '　·　' + (+m.n_rows).toLocaleString() + ' 筆' : ''}</span></div>
+    <div class="kv"><span class="k">用哪種模型<span class="q" data-tip="XGB＝梯度提升樹：一堆小決策樹接力修正前一棵的錯，工業表格數據最常用、也最耐雜訊的一種。">?</span></span>
+      <span class="v" style="font-weight:400">${esc(m.algo || '')}</span></div>
+    <div style="margin-top:8px"><span class="hint">主要影響因子</span>
+      <span class="q" data-tip="訓練時能拿到的欄位會全部丟進去，這裡只列真正有貢獻的前幾個，百分比是相對貢獻度（把該欄的值打亂後模型變差多少來衡量）。">?</span>
+      ${(m.top_features || []).length ? `<div class="fi">${(m.top_features).map(f => `
+        <span>${esc(f.label)}</span>
+        <span class="bar"><i style="width:${Math.round(f.share * 100)}%"></i></span>
+        <span class="pc">${Math.round(f.share * 100)}%</span>`).join('')}</div>
+        <div class="hint" style="margin-top:4px">共 ${m.n_features} 個欄位進入訓練</div>`
+        : `<div style="margin-top:4px">${(m.features || []).map(f => `<span class="feat">${esc(f.label)}</span>`).join('')}</div>`}</div>
     ${d.why_soft ? `<div class="hint" style="margin-top:7px;color:#5B3BB8">${esc(d.why_soft)}</div>` : ''}
   </div>
 
-  <div class="blk"><h3>預測值 ± 變動 <i></i></h3>
-    <div class="kv"><span class="k">${esc((d.y || {}).label || '')}（採建議值後）</span>
+  <div class="blk"><h3>預測值與誤差範圍 <i></i>${q('模型給的是估計值不是保證值。談效益要看範圍，不能只看中間那個數字。')}</h3>
+    <div class="kv"><span class="k">${esc((d.y || {}).label || '')}（照建議設定後）</span>
       <span class="v">${f2(pr.value)} ${esc((d.y || {}).unit || '')}</span></div>
-    <div class="kv"><span class="k">95% 區間</span><span class="v">${f2(pr.lo)} ～ ${f2(pr.hi)}（±${f2(pr.band)}）</span></div>
+    <div class="kv"><span class="k">可能落在<span class="q" data-tip="用模型的平均誤差往上下各推 1.96 倍算出來的範圍，實際值大約有 95% 機率落在裡面（技術名稱：95% 信賴區間）。區間越窄代表越有把握。">?</span></span>
+      <span class="v">${f2(pr.lo)} ～ ${f2(pr.hi)}　<span class="hint">±${f2(pr.band)}</span></span></div>
     ${bandBar(pr)}
     ${d.constraint ? `<div class="kv"><span class="k">約束：${esc(d.constraint.label)} ${esc(d.constraint.rule)}</span>
       <span class="v ${d.constraint.ok ? 'ok' : 'no'}">預估 ${d.constraint.predicted}　${d.constraint.ok ? '通過' : '未過'}</span></div>` : ''}
   </div>
 
-  <div class="blk"><h3>實際 vs 回傳（模型還準不準） <i></i></h3>
-    <div class="kv"><span class="k">現場實際值（${esc(v.source || '')}）</span><span class="v">${f2(v.actual)} ${esc((d.y || {}).unit || '')}</span></div>
-    <div class="kv"><span class="k">模型回傳值（同一刻的 X）</span><span class="v">${f2(v.model)} ${esc((d.y || {}).unit || '')}</span></div>
-    <div class="kv"><span class="k">殘差 / 容許帶</span>
-      <span class="v ${v.ok ? 'ok' : 'no'}">${f2(v.resid)} / ±${f2(v.tol)}　${v.ok ? '模型有效' : '超出，建議重訓'}</span></div>
+  <div class="blk"><h3>拿現場實際值對一次 <i></i>${q('模型上線後會慢慢失準（設備老化、原料換批、季節變化）。定期拿同一時刻的現場實際值跟模型算的比一次，差太多就該重新訓練。')}</h3>
+    <div class="kv"><span class="k">現場量到的（${esc(v.source || '')}）</span><span class="v">${f2(v.actual)} ${esc((d.y || {}).unit || '')}</span></div>
+    <div class="kv"><span class="k">模型算出來的（同一刻）</span><span class="v">${f2(v.model)} ${esc((d.y || {}).unit || '')}</span></div>
+    <div class="kv"><span class="k">差多少<span class="q" data-tip="兩者的差（技術名稱：殘差）。只要在模型自己的平均誤差範圍內就代表還準；超出代表現場已經跟訓練當時不一樣，該重新訓練。">?</span></span>
+      <span class="v ${v.ok ? 'ok' : 'no'}">${f2(v.resid)}（容許 ±${f2(v.tol)}）　${v.ok ? '模型還準' : '超出，建議重訓'}</span></div>
   </div>
 
-  <div class="blk"><h3>X 因子檢查點 <i></i></h3>
+  <div class="blk"><h3>這條建議還算數嗎 <i></i>${q('建議是在「某些條件不變」的前提下算的。前提變了（例如進料量突然改），建議就不再成立，要重算。')}</h3>
     <div class="chk">
-      <span class="hd">因子</span><span class="hd n">建議 / 假設</span><span class="hd n">現在</span><span class="hd n">狀態</span>
-      ${(d.checks || []).map(c => `<span>${esc(c.label)}${c.is_knob ? '　<span class="hint">可調</span>' : ''}</span>
+      <span class="hd">條件</span><span class="hd n">建議時</span><span class="hd n">現在</span><span class="hd n">狀態</span>
+      ${(d.checks || []).map(c => `<span>${esc(c.label)}${c.is_knob ? ' <span class="hint">（可調）</span>' : ''}</span>
         <span class="n">${f2(c.at_reco)}</span><span class="n">${f2(c.now)}</span>
         <span class="st ${c.is_knob ? (c.applied ? 'ok' : '') : (c.ok ? 'ok' : 'no')}">${
-          c.is_knob ? (c.applied ? '已套用' : '待套用') : (c.ok ? '在帶內' : '偏離')}</span>`).join('')}
+          c.is_knob ? (c.applied ? '已套用' : '待套用') : (c.ok ? '正常' : '已偏離')}</span>`).join('')}
     </div>
-    <div class="hint" style="margin-top:6px">可調參數看的是「現場套用了沒」；其他 X 因子是**假設不變**的前提，容許帶＝近 7 天 ±2σ，偏離就代表這條建議的前提已變、該重算。</div>
+    <div class="hint" style="margin-top:6px">標「可調」的是要人去改的設定，看的是現場套用了沒；其他幾列是<b>假設不變</b>的條件，超出近 7 天的正常波動範圍就代表前提已變。</div>
   </div>
 
-  <div class="blk"><h3>怎麼進到平台的 <i></i></h3>
+  <div class="blk"><h3>這筆結果哪來的 <i></i>${q('不管是平台內建、你們自己的、還是第三方算的模型，都用同一支 API 把結果送進來，一定要記名字、時間、依據的點位——之後有爭議查得回去。')}</h3>
     <div class="kv"><span class="k">模型</span><span class="v">${esc(r.model)}</span></div>
     <div class="kv"><span class="k">承接時間 / 入庫者</span><span class="v">${esc(when(r.computed_at))}　${esc(who(r.by))}</span></div>
     <div class="kv"><span class="k">依據點位</span><span class="v">${esc(r.point)}</span></div>

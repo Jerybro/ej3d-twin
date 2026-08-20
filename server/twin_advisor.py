@@ -408,9 +408,18 @@ def _model_meta(mid: str) -> dict:
 
     rec = _load(DEMO_SID, mid)
     m = rec.get("metrics_cv") or {}
+    # 主要因子：實務上會把能拿到的欄位全丟進去訓練，列全部沒有意義——
+    # 用 permutation importance 排序、只列真正有貢獻的前幾個，並附貢獻佔比。
+    fi = (rec.get("plots") or {}).get("fi") or {}
+    names, vals = fi.get("names") or [], fi.get("values") or []
+    tot = sum(v for v in vals if v > 0) or 1.0
+    top = [{"col": n, **_p(n), "share": round(max(v, 0) / tot, 4)}
+           for n, v in zip(names, vals) if v > 0][:5]
     return {"algo": rec.get("algo", ""), "task": rec.get("task", ""),
             "r2": m.get("r2"), "rmse": m.get("rmse"), "mae": m.get("mae"),
-            "val": rec.get("val_desc", ""),
+            "val": rec.get("val_desc", ""), "n_rows": rec.get("n_rows"),
+            "n_features": len(rec.get("features", [])),
+            "top_features": top,
             "features": [{"col": f, **_p(f)} for f in rec.get("features", [])]}
 
 

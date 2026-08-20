@@ -19,7 +19,7 @@
     .top { height: 52px; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--bdr);
       display: flex; align-items: center; gap: 10px; padding: 0 16px; }
     .brand-home { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px;
-      border-radius: 6px; background: rgba(4,106,251,0.08); border: 1px solid var(--bdr); color: var(--accent);
+      border-radius: 6px; background: rgba(4,106,251,.08); border: 1px solid var(--bdr); color: var(--accent);
       font-size: 15px; font-weight: 700; text-decoration: none; }
     .top h1 { font-size: 14.5px; font-weight: 700; }
     .tag { font-size: 10.5px; padding: 2px 8px; border-radius: 9px; white-space: nowrap; }
@@ -40,7 +40,6 @@
     .hint { font-size: 11.5px; color: var(--dim); line-height: 1.6; }
 
     .main { display: flex; height: calc(100vh - 52px); }
-    /* 左：真資產模型 */
     .canvas { flex: 1; min-width: 0; display: flex; flex-direction: column; }
     .cbar { height: 42px; flex-shrink: 0; border-bottom: 1px solid var(--bdr); background: var(--panel);
       display: flex; align-items: center; gap: 10px; padding: 0 12px; font-size: 12px; }
@@ -50,68 +49,102 @@
     #wrap { position: relative; display: inline-block; }
     #img { display: block; user-select: none; -webkit-user-drag: none; }
     #ov { position: absolute; inset: 0; }
-    #links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-    /* 鏈上的三台：真框、粗描、依序編號 */
-    .eqb { position: absolute; border: 3px solid var(--accent); border-radius: 4px;
-      background: rgba(4,106,251,.10); box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(4,106,251,.35);
-      transition: border-color .2s, background .2s, box-shadow .2s; }
-    .eqb.done { border-color: var(--hi); background: rgba(18,161,80,.16);
-      box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(18,161,80,.45); }
-    .eqb .no { position: absolute; left: -11px; top: -11px; width: 22px; height: 22px; border-radius: 50%;
+
+    /* 聚光燈：框外整片壓暗，只留當前這一台。不畫連線、不重複設備名——
+       圖上本來就寫著位號與名稱，再疊一次只會糊掉。 */
+    .spot { position: absolute; border: 2.5px solid var(--accent); border-radius: 5px;
+      box-shadow: 0 0 0 3px rgba(255,255,255,.95), 0 0 0 9999px rgba(6,16,39,.42);
+      pointer-events: none; transition: all .35s cubic-bezier(.4,0,.2,1); }
+    .spot .no { position: absolute; left: -13px; top: -13px; width: 26px; height: 26px; border-radius: 50%;
+      background: var(--accent); color: #fff; font-size: 13px; font-weight: 700;
+      display: grid; place-items: center; border: 2px solid #fff; }
+    .spot .badge { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 10px);
+      white-space: nowrap; background: var(--accent); color: #fff; padding: 5px 11px; border-radius: 7px;
+      font-size: 13px; font-weight: 700; box-shadow: 0 3px 12px rgba(4,106,251,.35); }
+    .spot .badge s { text-decoration: none; opacity: .68; font-weight: 400; }
+    .spot.done { border-color: var(--hi); }
+    .spot.done .no, .spot.done .badge { background: var(--hi); box-shadow: 0 3px 12px rgba(18,161,80,.3); }
+    /* 總覽：三台同時亮，不壓暗 */
+    .mark { position: absolute; border: 2.5px solid var(--accent); border-radius: 5px;
+      box-shadow: 0 0 0 3px rgba(255,255,255,.9); cursor: pointer; }
+    .mark.done { border-color: var(--hi); }
+    .mark .no { position: absolute; left: -12px; top: -12px; width: 24px; height: 24px; border-radius: 50%;
       background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; display: grid;
       place-items: center; border: 2px solid #fff; }
-    .eqb.done .no { background: var(--hi); }
-    .eqb .lb { position: absolute; left: -2px; bottom: 100%; margin-bottom: 3px; white-space: nowrap;
-      font-size: 11px; font-weight: 700; color: var(--accent); background: rgba(255,255,255,.94);
-      padding: 1px 5px; border-radius: 3px; border: 1px solid rgba(4,106,251,.3); }
-    .eqb.done .lb { color: #0B5A2E; border-color: rgba(18,161,80,.4); }
-    /* 建議值貼在框旁 */
-    .eqb .adv { position: absolute; left: calc(100% + 8px); top: -2px; white-space: nowrap;
-      background: var(--hi); color: #fff; font-size: 11.5px; font-weight: 700; padding: 3px 8px;
-      border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,.18); }
-    .eqb .adv small { font-weight: 400; opacity: .85; }
-    #links path { fill: none; stroke: #B8BFC8; stroke-width: 3; stroke-dasharray: 7 5; }
-    #links path.on { stroke: var(--hi); stroke-dasharray: none; }
-    #links text { fill: var(--hi); font-size: 13px; font-weight: 700; }
+    .mark.done .no { background: var(--hi); }
 
-    /* 右：起承轉合 */
-    .side { width: clamp(360px, 40vw, 520px); flex-shrink: 0; border-left: 1px solid var(--bdr);
+    .side { width: clamp(400px, 42vw, 560px); flex-shrink: 0; border-left: 1px solid var(--bdr);
       background: var(--panel); display: flex; flex-direction: column; }
-    .sbar { padding: 12px 15px; border-bottom: 1px solid var(--bdr); }
-    .sbar .row { display: flex; align-items: center; gap: 8px; }
+    .sbar { padding: 11px 15px; border-bottom: 1px solid var(--bdr); display: flex; align-items: center; gap: 8px; }
     .sbar h2 { font-size: 14px; font-weight: 700; }
-    .sbar .st { font-size: 11.5px; color: var(--dim); margin-top: 5px; }
-    .sbar .st b { color: var(--accent); }
-    .scroll { flex: 1; overflow-y: auto; padding: 14px 15px 40px; }
+    .sbar .sp { flex: 1; }
+    .scroll { flex: 1; overflow-y: auto; padding: 14px 16px 40px; }
+    .navbar { display: flex; align-items: center; gap: 8px; padding: 9px 15px;
+      border-bottom: 1px solid var(--bdr); background: var(--panel2); }
+    .navbar .who { font-size: 12px; color: var(--dim); }
+    .navbar .who b { color: var(--text); font-size: 13px; }
+    .navbar .sp { flex: 1; }
+    .dots { display: inline-flex; gap: 5px; align-items: center; }
+    .dots i { width: 7px; height: 7px; border-radius: 50%; background: #C3CAD2; }
+    .dots i.on { background: var(--accent); width: 18px; border-radius: 4px; }
+    .dots i.done { background: var(--hi); }
 
-    .step { border: 1px solid var(--bdr); border-radius: 10px; background: var(--panel2);
-      padding: 11px 13px; margin-bottom: 8px; position: relative; }
-    .step.on { border-color: var(--hi); background: rgba(18,161,80,.06); }
-    .step .h { display: flex; align-items: center; gap: 8px; }
-    .step .n { width: 20px; height: 20px; border-radius: 50%; background: #B8BFC8; color: #fff;
-      font-size: 11px; font-weight: 700; display: grid; place-items: center; flex-shrink: 0; }
-    .step.on .n { background: var(--hi); }
-    .step .h b { font-size: 15px; }
-    .step .h span { color: var(--dim); font-size: 12px; }
-    .step .h .role { margin-left: auto; font-size: 10.5px; color: var(--dim); }
-    .step .now { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 7px; font-size: 11.5px; }
-    .step .now i { font-style: normal; color: var(--dim); }
-    .step .now b { font-variant-numeric: tabular-nums; }
-    .adv-line { margin-top: 9px; padding-top: 8px; border-top: 1px dashed rgba(18,161,80,.4); }
-    .adv-line .big { font-size: 20px; font-weight: 700; color: #0B5A2E; letter-spacing: .3px; }
-    .adv-line .txt { font-size: 12.5px; line-height: 1.75; margin-top: 3px; }
-    .adv-line .prov { font-size: 10.5px; color: var(--dim); margin-top: 6px; }
-    .adv-line .prov b { color: var(--text); font-weight: 600; }
-    .carry { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--hi);
-      font-weight: 600; margin: -2px 0 8px 10px; }
-    .carry::before { content: '↓'; font-size: 14px; }
-    .carry.off { color: #C3CAD2; }
-
-    .api { margin-top: 14px; }
-    .api summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--accent); outline: none; padding: 5px 0; }
+    /* 模型卡 */
+    .blk { border: 1px solid var(--bdr); border-radius: 10px; background: var(--panel2);
+      padding: 11px 13px; margin-bottom: 9px; }
+    .blk > h3 { font-size: 11px; font-weight: 700; color: var(--dim); letter-spacing: .6px;
+      margin-bottom: 7px; display: flex; align-items: center; gap: 7px; }
+    .blk > h3 i { flex: 1; height: 1px; background: var(--bdr); font-style: normal; }
+    .blk.head { background: var(--deep); border-color: rgba(4,106,251,.3); }
+    .eqline { display: flex; align-items: baseline; gap: 9px; }
+    .eqline b { font-size: 21px; letter-spacing: .3px; }
+    .eqline span { color: var(--dim); font-size: 13px; }
+    .ttag { margin-left: auto; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 8px;
+      background: var(--accent); color: #fff; white-space: nowrap; }
+    .ttag.soft_sensor { background: #7C4DFF; }
+    .ttag.quality { background: var(--mid); color: #3d2a00; }
+    .obj { font-size: 12.5px; line-height: 1.7; margin-top: 6px; }
+    .kv { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 4px 0;
+      border-top: 1px dashed var(--bdr); }
+    .kv:first-of-type { border-top: 0; }
+    .kv .k { color: var(--dim); }
+    .kv .v { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+    .kv .v.ok { color: #0B5A2E; } .kv .v.no { color: var(--lo); }
+    .reco { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding-top: 8px;
+      border-top: 1px dashed rgba(18,161,80,.45); flex-wrap: wrap; }
+    .reco .from { font-size: 15px; color: var(--dim); text-decoration: line-through; }
+    .reco .arrow { color: var(--dim); }
+    .reco .to { font-size: 24px; font-weight: 700; color: #0B5A2E; letter-spacing: .3px; }
+    .reco .eff { margin-left: auto; font-size: 12.5px; font-weight: 700; color: #0B5A2E;
+      background: rgba(18,161,80,.13); padding: 3px 10px; border-radius: 8px; }
+    .band { position: relative; height: 26px; margin: 8px 0 2px; }
+    .band .rail { position: absolute; left: 0; right: 0; top: 13px; height: 4px; border-radius: 2px; background: #DDE3EA; }
+    .band .in { position: absolute; top: 13px; height: 4px; border-radius: 2px; background: rgba(4,106,251,.35); }
+    .band .pin { position: absolute; top: 6px; width: 3px; height: 18px; border-radius: 2px; background: var(--accent); }
+    .band .lbl { position: absolute; top: 0; font-size: 10.5px; color: var(--dim); }
+    .chk { display: grid; grid-template-columns: 1fr auto auto auto; gap: 3px 10px; font-size: 11.5px; align-items: center; }
+    .chk .hd { color: var(--dim); font-size: 10.5px; }
+    .chk .n { font-variant-numeric: tabular-nums; text-align: right; }
+    .chk .st { font-weight: 700; }
+    .chk .st.ok { color: var(--hi); } .chk .st.no { color: var(--lo); }
+    .feat { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 7px;
+      background: #fff; border: 1px solid var(--bdr); margin: 2px 3px 0 0; }
+    .carry { font-size: 11.5px; color: var(--hi); font-weight: 600; margin-bottom: 8px; }
+    .ovcard { border: 1px solid var(--bdr); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
+      background: var(--panel2); cursor: pointer; }
+    .ovcard:hover { border-color: var(--accent); }
+    .ovcard.done { border-color: rgba(18,161,80,.5); background: rgba(18,161,80,.06); }
+    .ovcard .t { display: flex; align-items: baseline; gap: 8px; }
+    .ovcard .t b { font-size: 15px; }
+    .ovcard .t span { color: var(--dim); font-size: 12px; }
+    .sum { border: 1.5px solid var(--hi); border-radius: 10px; background: rgba(18,161,80,.07);
+      padding: 12px 14px; margin-top: 4px; }
+    .sum h3 { font-size: 12px; font-weight: 700; color: #0B5A2E; margin-bottom: 8px; }
+    .sum .row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
+    .sum .row b { color: #0B5A2E; font-variant-numeric: tabular-nums; }
+    .api summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--accent); outline: none; padding: 6px 0; }
     .api pre { background: #0E1524; color: #D7E3F4; border-radius: 9px; padding: 12px 14px;
-      font-size: 11px; line-height: 1.65; overflow-x: auto; margin-top: 6px;
-      font-family: "Cascadia Code", Consolas, monospace; }
+      font-size: 10.5px; line-height: 1.6; overflow-x: auto; font-family: Consolas, monospace; max-height: 320px; }
   </style>
 </head>
 <body>
@@ -133,7 +166,7 @@
           <button data-m="annot">標示</button>
           <button data-m="trace">描圖</button>
         </span>
-        <span class="seg"><button id="zo">−</button><button id="zc" class="on">聚焦這三台</button><button id="zf">全圖</button><button id="zi">＋</button></span>
+        <span class="seg"><button id="zo">−</button><button id="zi">＋</button><button id="zf">全圖</button></span>
         <span class="sp"></span>
         <span class="hint" id="cap"></span>
       </div>
@@ -142,13 +175,20 @@
 
     <div class="side">
       <div class="sbar">
-        <div class="row">
-          <h2>三段連鎖最佳化</h2>
-          <span class="sp" style="flex:1"></span>
-          <button class="mini-btn primary" id="run" disabled>開始</button>
-          <button class="mini-btn" id="reset">重置</button>
-        </div>
-        <div class="st" id="st">載入中…</div>
+        <h2 id="side-title">導覽</h2>
+        <span class="sp"></span>
+        <span class="seg" id="view">
+          <button data-v="nav" class="on">導覽</button>
+          <button data-v="all">總覽</button>
+        </span>
+        <button class="mini-btn primary" id="run">開始</button>
+      </div>
+      <div class="navbar" id="navbar" style="display:none">
+        <button class="mini-btn" id="prev">‹</button>
+        <span class="who" id="who"></span>
+        <span class="sp"></span>
+        <span class="dots" id="dots"></span>
+        <button class="mini-btn" id="next">›</button>
       </div>
       <div class="scroll" id="panel"></div>
     </div>
@@ -157,15 +197,15 @@
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-async function getJSON(url, opt) { const r = await fetch(url, opt); const t = await r.text(); let d = null; try { d = JSON.parse(t); } catch {} if (!r.ok) throw new Error((d && d.detail) || `伺服器錯誤 ${r.status}`); return d; }
-const fmt = v => v == null ? '—' : (Math.abs(v) >= 100 ? (+v).toFixed(0) : (+v).toFixed(2));
+async function getJSON(u, o) { const r = await fetch(u, o); const t = await r.text(); let d = null; try { d = JSON.parse(t); } catch {} if (!r.ok) throw new Error((d && d.detail) || ('伺服器錯誤 ' + r.status)); return d; }
+const f2 = v => v == null ? '—' : (Math.abs(v) >= 100 ? (+v).toFixed(0) : Math.abs(v) >= 10 ? (+v).toFixed(1) : (+v).toFixed(2));
 const when = s => s ? String(s).replace('T', ' ').slice(5, 16) : '';
 const who = s => (s || '').split('@')[0] || '（免登入）';
-const ROLE = ['起', '承', '轉'];
 
-let state = null, results = [], mode = 'blind', zoom = 1, baseW = 1600, baseH = 1131;
+let state = null, results = [], mode = 'blind', view = 'nav', step = 0, zoom = 1, baseW = 1600, baseH = 1131;
+const byAsset = () => Object.fromEntries(results.map(r => [r.asset, r]));
 
-// ---------------------------------------------------------- 左：真資產模型
+/* ---------------- 左：資產模型＋聚光燈 ---------------- */
 function imgUrl() {
   const f = encodeURIComponent(state.drawing);
   return mode === 'annot' ? `/api/pid/model/${f}/annotated.jpg?t=${Date.now()}`
@@ -173,158 +213,235 @@ function imgUrl() {
 }
 function loadImage() {
   const st = $('stage');
-  if (!state.model_ok) {
-    st.className = 'empty';
-    st.innerHTML = '<span>這個網域還沒建立 M0200 的資產模型——先到判讀工作台建模，這裡才畫得出真圖</span>';
-    return;
-  }
+  if (!state.model_ok) { st.className = 'empty'; st.innerHTML = '<span>這個網域還沒建立 M0200 資產模型</span>'; return; }
   st.className = '';
-  st.innerHTML = `<div id="wrap"><img id="img" src="${esc(imgUrl())}" draggable="false"/>
-    <svg id="links" preserveAspectRatio="none"></svg><div id="ov"></div></div>`;
+  st.innerHTML = `<div id="wrap"><img id="img" src="${esc(imgUrl())}" draggable="false"/><div id="ov"></div></div>`;
   const img = $('img');
-  img.onload = () => { baseW = img.naturalWidth || 1600; baseH = img.naturalHeight || Math.round(baseW * (state.aspect || .707)); fitChain(); draw(); };
+  img.onload = () => { baseW = img.naturalWidth || 1600; baseH = img.naturalHeight || Math.round(baseW * (state.aspect || .707)); drawStage(); };
   img.onerror = () => { st.className = 'empty'; st.innerHTML = '<span>資產模型圖載入失敗</span>'; };
   bindPan();
 }
 function applyZoom() { const i = $('img'); if (i) i.style.width = Math.round(baseW * zoom) + 'px'; }
-function fit() { zoom = Math.min(1, ($('stage').clientWidth - 24) / baseW); applyZoom(); setZmode('zf'); }
-// 全圖縮放下這三台只有幾十像素，看不清楚——預設放大到剛好裝下這條鏈
-function chainRegion() {
-  const bs = state.chain.map(e => e.bbox).filter(Boolean);
-  if (!bs.length) return null;
-  const pad = 0.05;
-  return [Math.max(0, Math.min(...bs.map(b => b[0])) - pad), Math.max(0, Math.min(...bs.map(b => b[1])) - pad),
-          Math.min(1, Math.max(...bs.map(b => b[2])) + pad), Math.min(1, Math.max(...bs.map(b => b[3])) + pad)];
-}
-function fitChain() {
-  const st = $('stage'), r = chainRegion();
-  if (!r) return fit();
-  zoom = Math.min(3, Math.max(.05, Math.min((st.clientWidth - 24) / (baseW * (r[2] - r[0])),
-                                            (st.clientHeight - 24) / (baseH * (r[3] - r[1])))));
-  applyZoom();
-  // 不用 rAF：頁面在背景分頁／未合成時 rAF 不觸發，捲動就不會套用
-  const go = () => { st.scrollLeft = r[0] * baseW * zoom - 12; st.scrollTop = r[1] * baseH * zoom - 12; };
-  setTimeout(go, 0); setTimeout(go, 150);
-  setZmode('zc');
-}
-function setZmode(id) { ['zc', 'zf'].forEach(k => $(k).classList.toggle('on', k === id)); }
-$('zi').onclick = () => { zoom = Math.min(zoom * 1.4, 6); applyZoom(); setZmode(''); };
-$('zo').onclick = () => { zoom = Math.max(zoom / 1.4, .05); applyZoom(); setZmode(''); };
-$('zf').onclick = fit;
-$('zc').onclick = fitChain;
-document.querySelectorAll('#mode button').forEach(b => b.onclick = () => {
-  mode = b.dataset.m;
-  document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b));
-  if (state && state.model_ok) $('img').src = imgUrl();
-});
 function bindPan() {
   const st = $('stage'), ov = $('ov');
   ov.addEventListener('pointerdown', e => {
     if (e.target !== ov) return;
-    const sx = e.clientX, sy = e.clientY, l0 = st.scrollLeft, t0 = st.scrollTop;
-    ov.style.cursor = 'grabbing';
+    const sx = e.clientX, sy = e.clientY, l0 = st.scrollLeft, t0 = st.scrollTop; ov.style.cursor = 'grabbing';
     const mv = ev => { st.scrollLeft = l0 - (ev.clientX - sx); st.scrollTop = t0 - (ev.clientY - sy); };
     const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); ov.style.cursor = ''; };
     addEventListener('pointermove', mv); addEventListener('pointerup', up);
   });
 }
-function draw() {
-  const ov = $('ov'), sv = $('links');
-  if (!ov || !state.model_ok) return;
+function zoomTo(box, padRatio) {
+  const st = $('stage'), pad = padRatio == null ? .9 : padRatio;
+  const w = (box[2] - box[0]) / pad, h = (box[3] - box[1]) / pad;
+  zoom = Math.min(4, Math.max(.05, Math.min((st.clientWidth - 20) / (baseW * w), (st.clientHeight - 20) / (baseH * h))));
+  applyZoom();
+  const cx = (box[0] + box[2]) / 2 * baseW * zoom, cy = (box[1] + box[3]) / 2 * baseH * zoom;
+  const go = () => { st.scrollLeft = cx - st.clientWidth / 2; st.scrollTop = cy - st.clientHeight / 2; };
+  setTimeout(go, 0); setTimeout(go, 180);
+}
+function allBox() {
+  const bs = state.chain.map(e => e.bbox).filter(Boolean);
+  return bs.length ? [Math.min(...bs.map(b => b[0])), Math.min(...bs.map(b => b[1])),
+                      Math.max(...bs.map(b => b[2])), Math.max(...bs.map(b => b[3]))] : null;
+}
+function drawStage() {
+  const ov = $('ov'); if (!ov || !state.model_ok) return;
+  const done = byAsset();
   ov.innerHTML = '';
-  const byAsset = {}; results.forEach(r => byAsset[r.asset] = r);
-  state.chain.forEach((eq, i) => {
-    if (!eq.bbox) return;
-    const [x0, y0, x1, y1] = eq.bbox, r = byAsset[eq.tag];
+  if (view === 'nav') {
+    const eq = state.chain[step]; if (!eq || !eq.bbox) return;
+    const r = done[eq.tag], b = eq.bbox;
     const d = document.createElement('div');
-    d.className = 'eqb' + (r ? ' done' : '');
-    d.style.cssText = `left:${x0*100}%;top:${y0*100}%;width:${(x1-x0)*100}%;height:${(y1-y0)*100}%`;
-    d.innerHTML = `<span class="no">${i + 1}</span>
-      <span class="lb">${esc(eq.tag)}　${esc(eq.name)}</span>
-      ${r ? `<span class="adv">${esc(r.value)} ${esc(r.unit)} <small>建議</small></span>` : ''}`;
+    d.className = 'spot' + (r ? ' done' : '');
+    d.style.cssText = `left:${b[0]*100}%;top:${b[1]*100}%;width:${(b[2]-b[0])*100}%;height:${(b[3]-b[1])*100}%`;
+    const now = r && r.detail && r.detail.objective ? r.detail.objective.now : '';
+    d.innerHTML = `<span class="no">${step + 1}</span>` +
+      (r ? `<span class="badge"><s>${esc(eq.knob.label)} ${esc(now)}</s> → ${esc(r.value)} ${esc(r.unit)}</span>` : '');
     ov.appendChild(d);
-  });
-  // 鏈上的承接線（跟著真框畫）
-  const W = 1000, H = Math.round(W * (baseH / baseW));
-  sv.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  let g = '';
-  for (let i = 1; i < state.chain.length; i++) {
-    const a = state.chain[i - 1], b = state.chain[i];
-    if (!a.bbox || !b.bbox) continue;
-    const ax = (a.bbox[0] + a.bbox[2]) / 2 * W, ay = (a.bbox[1] + a.bbox[3]) / 2 * H;
-    const bx = (b.bbox[0] + b.bbox[2]) / 2 * W, by = (b.bbox[1] + b.bbox[3]) / 2 * H;
-    const on = byAsset[a.tag] && byAsset[b.tag];
-    const mx = (ax + bx) / 2, my = Math.min(ay, by) - Math.abs(bx - ax) * 0.18 - 20;
-    g += `<path class="${on ? 'on' : ''}" d="M${ax},${ay} Q${mx},${my} ${bx},${by}"/>`;
-    if (on) g += `<text x="${mx}" y="${my + 6}" text-anchor="middle">承接</text>`;
+    zoomTo(b, .5);
+  } else {
+    state.chain.forEach((eq, i) => {
+      if (!eq.bbox) return;
+      const r = done[eq.tag], b = eq.bbox;
+      const d = document.createElement('div');
+      d.className = 'mark' + (r ? ' done' : '');
+      d.style.cssText = `left:${b[0]*100}%;top:${b[1]*100}%;width:${(b[2]-b[0])*100}%;height:${(b[3]-b[1])*100}%`;
+      d.innerHTML = `<span class="no">${i + 1}</span>`;
+      d.onclick = () => { step = i; setView('nav'); };
+      ov.appendChild(d);
+    });
+    const bb = allBox(); if (bb) zoomTo(bb, .82);
   }
-  sv.innerHTML = g;
 }
+document.querySelectorAll('#mode button').forEach(b => b.onclick = () => {
+  mode = b.dataset.m;
+  document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b));
+  if (state && state.model_ok && $('img')) { const i = $('img'); i.onload = () => drawStage(); i.src = imgUrl(); }
+});
+$('zi').onclick = () => { zoom = Math.min(zoom * 1.3, 6); applyZoom(); };
+$('zo').onclick = () => { zoom = Math.max(zoom / 1.3, .05); applyZoom(); };
+$('zf').onclick = () => zoomTo([0, 0, 1, 1], 1);
 
-// ---------------------------------------------------------- 右：起承轉合
-function renderPanel() {
-  const byAsset = {}; results.forEach(r => byAsset[r.asset] = r);
-  const idOf = {}; results.forEach(r => idOf[r.id] = r);
-  $('panel').innerHTML = state.chain.map((eq, i) => {
-    const r = byAsset[eq.tag], up = r && r.based_on && idOf[r.based_on];
-    return `${i ? `<div class="carry ${r ? '' : 'off'}">${r ? `把上一台的建議條件帶進來` : '等上一台算完'}</div>` : ''}
-    <div class="step ${r ? 'on' : ''}">
-      <div class="h"><span class="n">${i + 1}</span><b>${esc(eq.tag)}</b>
-        <span>${esc(eq.name)}</span><span class="role">${ROLE[i] || ''}</span></div>
-      <div class="now">${eq.points.map(p => `<span><i>${esc(p.label)}</i> <b>${fmt(p.mean)}</b> ${esc(p.unit)}</span>`).join('')}</div>
-      ${r ? `<div class="adv-line">
-        <div class="big">${esc(r.value)} ${esc(r.unit)}</div>
-        <div class="txt">${esc(r.note || '')}</div>
-        <div class="prov">模型 <b>${esc(r.model)}</b>｜${esc(when(r.computed_at))}｜由 ${esc(who(r.by))} 承接入庫｜依據 <b>${esc(r.point)}</b>
-          ${up ? `<br>承接自 ${esc(up.asset)} 的建議（${esc(up.id)}）` : ''}</div>
-      </div>` : ''}
+/* ---------------- 右：模型卡 ---------------- */
+function bandBar(p) {
+  if (!p || p.value == null) return '';
+  const span = (p.hi - p.lo) || 1;
+  const pos = Math.max(0, Math.min(100, (p.value - p.lo) / span * 100));
+  return `<div class="band"><div class="rail"></div><div class="in" style="left:6%;right:6%"></div>
+    <div class="pin" style="left:calc(6% + ${(pos * .88).toFixed(1)}%)"></div>
+    <div class="lbl" style="left:0">${f2(p.lo)}</div>
+    <div class="lbl" style="right:0">${f2(p.hi)}</div></div>`;
+}
+function cardHTML(eq, r, i) {
+  const d = (r && r.detail) || {};
+  const m = d.model || {}, pr = d.pred || {}, v = d.verify || {}, obj = d.objective || {};
+  const up = i > 0 ? state.chain[i - 1] : null;
+  const head = `
+  ${up && r && r.based_on ? `<div class="carry">↓ 承接 ${esc(up.tag)} ${esc(up.name)} 的建議條件</div>` : ''}
+  <div class="blk head">
+    <div class="eqline"><b>${esc(eq.tag)}</b><span>${esc(eq.name)}</span>
+      <span class="ttag ${esc(eq.task)}">${esc(eq.task_txt)}</span></div>
+    ${r ? `<div class="obj">目標：${esc(obj.text || '')}</div>
+      <div class="reco"><span class="from">${esc(obj.now || '')}</span><span class="arrow">→</span>
+        <span class="to">${esc(r.value)} ${esc(r.unit)}</span>
+        <span class="eff">${esc(obj.effect || '')}</span></div>
+      <div class="hint" style="margin-top:5px">可調參數：${esc((obj.knob || {}).label || '')}（${esc(eq.knob.col)}）</div>`
+    : `<div class="obj">目標 Y：${esc(eq.y.label)}　可調：${esc(eq.knob.label)}</div>
+       <div class="hint">按右上「開始」跑這一段</div>`}
+  </div>`;
+  if (!r) return head;
+  return head + `
+  <div class="blk"><h3>Y 怎麼建的 <i></i></h3>
+    <div class="kv"><span class="k">目標 Y</span><span class="v">${esc((d.y || {}).label || '')}（${esc((d.y || {}).col || '')}）</span></div>
+    <div class="kv"><span class="k">演算法</span><span class="v">${esc(m.algo || '')}</span></div>
+    <div class="kv"><span class="k">驗證</span><span class="v">R² ${m.r2 == null ? '—' : m.r2}　RMSE ${m.rmse == null ? '—' : m.rmse}</span></div>
+    <div class="kv"><span class="k">切分</span><span class="v" style="font-weight:400">${esc(m.val || '')}</span></div>
+    <div style="margin-top:6px"><span class="hint">X 因子：</span>
+      ${(m.features || []).map(f => `<span class="feat">${esc(f.label)}</span>`).join('')}</div>
+    ${d.why_soft ? `<div class="hint" style="margin-top:7px;color:#5B3BB8">${esc(d.why_soft)}</div>` : ''}
+  </div>
+
+  <div class="blk"><h3>預測值 ± 變動 <i></i></h3>
+    <div class="kv"><span class="k">${esc((d.y || {}).label || '')}（採建議值後）</span>
+      <span class="v">${f2(pr.value)} ${esc((d.y || {}).unit || '')}</span></div>
+    <div class="kv"><span class="k">95% 區間</span><span class="v">${f2(pr.lo)} ～ ${f2(pr.hi)}（±${f2(pr.band)}）</span></div>
+    ${bandBar(pr)}
+    ${d.constraint ? `<div class="kv"><span class="k">約束：${esc(d.constraint.label)} ${esc(d.constraint.rule)}</span>
+      <span class="v ${d.constraint.ok ? 'ok' : 'no'}">預估 ${d.constraint.predicted}　${d.constraint.ok ? '通過' : '未過'}</span></div>` : ''}
+  </div>
+
+  <div class="blk"><h3>實際 vs 回傳（模型還準不準） <i></i></h3>
+    <div class="kv"><span class="k">現場實際值（${esc(v.source || '')}）</span><span class="v">${f2(v.actual)} ${esc((d.y || {}).unit || '')}</span></div>
+    <div class="kv"><span class="k">模型回傳值（同一刻的 X）</span><span class="v">${f2(v.model)} ${esc((d.y || {}).unit || '')}</span></div>
+    <div class="kv"><span class="k">殘差 / 容許帶</span>
+      <span class="v ${v.ok ? 'ok' : 'no'}">${f2(v.resid)} / ±${f2(v.tol)}　${v.ok ? '模型有效' : '超出，建議重訓'}</span></div>
+  </div>
+
+  <div class="blk"><h3>X 因子檢查點 <i></i></h3>
+    <div class="chk">
+      <span class="hd">因子</span><span class="hd n">建議當下</span><span class="hd n">現在</span><span class="hd n">狀態</span>
+      ${(d.checks || []).map(c => `<span>${esc(c.label)}</span>
+        <span class="n">${f2(c.at_reco)}</span><span class="n">${f2(c.now)}</span>
+        <span class="st ${c.ok ? 'ok' : 'no'}">${c.ok ? '在帶內' : '偏離'}</span>`).join('')}
+    </div>
+    <div class="hint" style="margin-top:6px">容許帶＝近 7 天 ±2σ。任一因子偏離＝建立這條建議的前提已變，該重算。</div>
+  </div>
+
+  <div class="blk"><h3>怎麼進到平台的 <i></i></h3>
+    <div class="kv"><span class="k">模型</span><span class="v">${esc(r.model)}</span></div>
+    <div class="kv"><span class="k">承接時間 / 入庫者</span><span class="v">${esc(when(r.computed_at))}　${esc(who(r.by))}</span></div>
+    <div class="kv"><span class="k">依據點位</span><span class="v">${esc(r.point)}</span></div>
+    ${r.based_on ? `<div class="kv"><span class="k">承接自</span><span class="v">${esc(r.based_on)}</span></div>` : ''}
+    <details class="api"><summary>POST /api/twin/result</summary>
+      <pre>${esc(JSON.stringify(r, null, 1))}</pre></details>
+  </div>`;
+}
+function overviewHTML() {
+  const done = byAsset();
+  const cards = state.chain.map((eq, i) => {
+    const r = done[eq.tag], obj = (r && r.detail && r.detail.objective) || {};
+    return `<div class="ovcard ${r ? 'done' : ''}" data-i="${i}">
+      <div class="t"><b>${esc(eq.tag)}</b><span>${esc(eq.name)}</span>
+        <span class="ttag ${esc(eq.task)}" style="margin-left:auto">${esc(eq.task_txt)}</span></div>
+      ${r ? `<div class="reco" style="border:0;padding-top:6px;margin-top:4px">
+        <span class="from">${esc(obj.now || '')}</span><span class="arrow">→</span>
+        <span class="to" style="font-size:19px">${esc(r.value)} ${esc(r.unit)}</span>
+        <span class="eff">${esc(obj.effect || '')}</span></div>`
+      : `<div class="hint" style="margin-top:4px">目標 Y：${esc(eq.y.label)}　可調：${esc(eq.knob.label)}</div>`}
     </div>`;
-  }).join('') + (results.length ? `
-    <details class="api"><summary>這三張卡怎麼進到平台的（POST /api/twin/result）</summary>
-      <pre>${esc(results.map(r => 'POST /api/twin/result\n' + JSON.stringify(r, null, 1)).join('\n\n'))}</pre>
-      <div class="hint" style="margin-top:6px">外部模型（客戶自己的 AutoML、第三方服務）用同一個端點、同一個格式落結果。</div>
-    </details>` : '');
+  }).join('');
+  const rows = state.chain.map(eq => {
+    const r = done[eq.tag], o = (r && r.detail && r.detail.objective) || {};
+    return r ? `<div class="row"><span>${esc(eq.tag)} ${esc(eq.name)}</span><b>${esc(o.effect || '')}</b></div>` : '';
+  }).join('');
+  const sum = results.length === 3 ? `<div class="sum"><h3>三段合計（守品質規格前提下）</h3>${rows}
+      <div class="hint" style="margin-top:7px">換算成金額需要電價／燃氣單價／回料處理成本——那是廠端資料，接上就能算。</div>
+    </div>` : '';
+  return cards + sum;
 }
-function render() { renderPanel(); draw(); }
+function renderPanel() {
+  const done = byAsset();
+  if (view === 'all') {
+    $('side-title').textContent = '總覽';
+    $('navbar').style.display = 'none';
+    $('panel').innerHTML = overviewHTML();
+    $('panel').querySelectorAll('.ovcard').forEach(c => c.onclick = () => { step = +c.dataset.i; setView('nav'); });
+    return;
+  }
+  const eq = state.chain[step], r = done[eq.tag];
+  $('side-title').textContent = `導覽　${step + 1}／${state.chain.length}`;
+  $('navbar').style.display = '';
+  $('who').innerHTML = `<b>${esc(eq.tag)}</b>　${esc(eq.name)}`;
+  $('dots').innerHTML = state.chain.map((e, i) =>
+    `<i class="${i === step ? 'on' : ''} ${done[e.tag] && i !== step ? 'done' : ''}"></i>`).join('');
+  $('prev').disabled = step === 0;
+  $('next').disabled = step === state.chain.length - 1;
+  $('panel').innerHTML = cardHTML(eq, r, step);
+  $('panel').scrollTop = 0;
+}
+function render() { renderPanel(); drawStage(); }
+function setView(v) {
+  view = v;
+  document.querySelectorAll('#view button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  render();
+}
+document.querySelectorAll('#view button').forEach(b => b.onclick = () => setView(b.dataset.v));
+$('prev').onclick = () => { if (step > 0) { step--; render(); } };
+$('next').onclick = () => { if (step < state.chain.length - 1) { step++; render(); } };
+addEventListener('keydown', e => {
+  if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
+  if (e.key === 'ArrowLeft') $('prev').click();
+  if (e.key === 'ArrowRight') $('next').click();
+});
 
-// ---------------------------------------------------------- 載入與執行
+/* ---------------- 載入與執行 ---------------- */
 async function load() {
   try { state = await getJSON('/api/twin/advisor/demo'); }
-  catch (e) { $('st').textContent = e.message; return; }
+  catch (e) { $('panel').innerHTML = `<div class="hint">${esc(e.message)}</div>`; return; }
   results = state.results || [];
   $('tag-real').textContent = state.model_ok ? '資產模型：真實（M0200）' : '資產模型：本網域尚未建模';
   $('tag-real').className = 'tag ' + (state.model_ok ? 'real' : 'sim');
-  $('cap').textContent = state.model_ok ? `${state.drawing.replace(/\.pdf$/i, '')}　鏈上三台已框選` : '';
+  $('cap').textContent = state.model_ok ? state.drawing.replace(/\.pdf$/i, '') : '';
   if (!$('img')) loadImage();
-  const total = Object.keys(state.models).length;
-  const done = Object.values(state.models).filter(m => m.status === 'done').length;
-  if (!state.ready) {
-    $('st').innerHTML = `模型訓練中 <b>${done}／${total}</b>…首次進入約一分鐘`;
-    $('run').disabled = true;
-    setTimeout(load, 3000);
-  } else {
-    $('st').innerHTML = results.length ? `已有 <b>${results.length}</b> 張建議` :
-      '按「開始」：209 找最省電轉速 → 條件傳給 210 → 再傳給 212';
-    $('run').disabled = false;
-  }
+  const tot = Object.keys(state.models).length, ok = Object.values(state.models).filter(m => m.status === 'done').length;
+  $('run').disabled = !state.ready;
+  $('run').textContent = state.ready ? (results.length ? '重跑' : '開始') : `訓練中 ${ok}／${tot}`;
+  if (!state.ready) setTimeout(load, 3000);
   render();
 }
-$('run').addEventListener('click', async () => {
-  $('run').disabled = true; $('st').textContent = '呼叫 AutoML 尋優中…';
+$('run').onclick = async () => {
+  $('run').disabled = true; $('run').textContent = '尋優中…';
   try {
     const d = await getJSON('/api/twin/advisor/demo/run', { method: 'POST' });
-    results = results.filter(r => !d.cards.some(c => c.asset === r.asset));
-    for (const c of d.cards) { results.push(c); render(); await new Promise(z => setTimeout(z, 700)); }
-    $('st').innerHTML = '完成——三段建議都在右邊，圖上綠框是被改的那三台';
-  } catch (e) { $('st').textContent = e.message; }
-  $('run').disabled = false;
-});
-$('reset').addEventListener('click', async () => {
-  await getJSON('/api/twin/advisor/demo/reset', { method: 'POST' }).catch(() => {});
-  results = []; render(); $('st').textContent = '已重置';
-});
+    results = d.cards;
+    for (let i = 0; i < d.cards.length; i++) { step = i; setView('nav'); await new Promise(z => setTimeout(z, 1500)); }
+    setView('all');
+  } catch (e) { $('panel').innerHTML = `<div class="hint">${esc(e.message)}</div>`; }
+  $('run').disabled = false; $('run').textContent = '重跑';
+};
 fetch('/api/version').then(r => r.json()).then(v => { $('ver').textContent = `v${v.version}`; }).catch(() => {});
-addEventListener('resize', () => { if (state && state.model_ok && $('img')) ($('zc').classList.contains('on') ? fitChain : fit)(); });
 load();
 </script>
 </body>

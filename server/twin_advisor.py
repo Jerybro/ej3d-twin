@@ -78,6 +78,8 @@ class ResultReq(BaseModel):
     evidence: list = Field(default_factory=list)
     based_on: str = ""               # 上游結果 id（上下文承接鏈）
     note: str = ""
+    task: str = ""                   # optimize | soft_sensor | quality（這是哪一種 AI 用法）
+    detail: dict = Field(default_factory=dict)   # 模型卡：怎麼建的／預測±／實際vs回傳／X 檢查點
 
 
 def _result_key(req_scope: str, drawing: str) -> str:
@@ -149,19 +151,25 @@ def delete_result(rid: str, request: Request, scope: str = "demo", drawing: str 
 # 「細粉率」對應圖上真的有的「106.1 回料太空包／細粉回料」。
 DEMO_DRAWING = "R-M0200-00-000-000-00 礦化及造粒系統流程圖_20260408.pdf"
 
+# 一條鏈示範三種 AI 用法：最佳化／虛擬量測／品質預測（Jery 2026-08-20 確認）
+TASK_TXT = {"optimize": "最佳化", "soft_sensor": "虛擬量測", "quality": "品質預測"}
+
 CHAIN = [
-    {"tag": "209", "name": "捏和擠出機", "points": {
+    {"tag": "209", "name": "捏和擠出機", "task": "optimize",
+     "y": "209_10_amp_mean", "knob": "209_10_hz_mean", "points": {
         "209_10_feed_mean": {"label": "進料量", "unit": "t/h"},
         "209_10_hz_mean": {"label": "螺桿頻率", "unit": "Hz"},
         "209_10_amp_mean": {"label": "電流", "unit": "A"},
         "209_10_ok_frac": {"label": "粒徑合格率", "unit": "%"},
     }},
-    {"tag": "210", "name": "隧道式烘箱帶運機 65M", "points": {
+    {"tag": "210", "name": "隧道式烘箱帶運機 65M", "task": "soft_sensor",
+     "y": "210_10_moist_mean", "knob": "210_10_temp_mean", "points": {
         "210_10_temp_mean": {"label": "爐溫", "unit": "°C"},
         "210_10_gas_mean": {"label": "燃氣", "unit": "m³/h"},
         "210_10_moist_mean": {"label": "出料含水", "unit": "%"},
     }},
-    {"tag": "212", "name": "雙軸破碎機", "points": {
+    {"tag": "212", "name": "雙軸破碎機", "task": "quality",
+     "y": "212_10_fine_frac", "knob": "212_10_hz_mean", "points": {
         "212_10_hz_mean": {"label": "破碎頻率", "unit": "Hz"},
         "212_10_amp_mean": {"label": "電流", "unit": "A"},
         "212_10_fine_frac": {"label": "細粉率（回料）", "unit": "%"},
@@ -338,6 +346,9 @@ def demo_state(request: Request) -> dict:
                 "min": (stats.get(col) or {}).get("min"), "max": (stats.get(col) or {}).get("max")}
                for col, info in eq["points"].items()]
         chain.append({"tag": eq["tag"], "name": b.get("name") or eq["name"],
+                      "task": eq["task"], "task_txt": TASK_TXT.get(eq["task"], ""),
+                      "y": {"col": eq["y"], **_p(eq["y"])},
+                      "knob": {"col": eq["knob"], **_p(eq["knob"])},
                       "spec": b.get("spec", ""), "bbox": b.get("bbox"), "points": pts})
 
     return {"sid": DEMO_SID, "meta": meta, "chain": chain, "models": models,
@@ -358,6 +369,85 @@ def demo_reset(request: Request) -> dict:
 
 def _fmt(v, nd=2):
     return None if v is None else round(float(v), nd)
+
+
+# 欄位 → 中文標籤／單位／所屬設備（模型卡到處要用）
+POINTS = {col: {**info, "tag": eq["tag"]} for eq in CHAIN for col, info in eq["points"].items()}
+
+
+def _p(col: str) -> dict:
+    return POINTS.get(col, {"label": col, "unit": "", "tag": ""})
+
+
+def _last_row() -> dict:
+    """資料最後一筆＝「現場此刻」。接真廠端時這裡換成即時值，其餘不用動。"""
+    import pandas as pd
+
+    df = pd.read_parquet(DATA_DIR / f"{DEMO_SID}.parquet")
+    row = df.tail(1).iloc[0]
+    return {c: float(row[c]) for c in df.columns if c not in ("__id__", "time")}
+
+
+def _bands(k: float = 2.0) -> dict:
+    """近 7 天每欄的 ±kσ 容許帶——X 因子檢查點的判準。"""
+    import pandas as pd
+
+    df = pd.read_parquet(DATA_DIR / f"{DEMO_SID}.parquet").tail(7 * 24 * 60)
+    out = {}
+    for c in df.columns:
+        if c in ("__id__", "time"):
+            continue
+        m, sd = float(df[c].mean()), float(df[c].std())
+        out[c] = (m - k * sd, m + k * sd)
+    return out
+
+
+def _model_meta(mid: str) -> dict:
+    """這個 Y 是怎麼建的：演算法、樣本數、驗證分數、用了哪些 X。"""
+    from .automl import _load
+
+    rec = _load(DEMO_SID, mid)
+    m = rec.get("metrics_cv") or {}
+    return {"algo": rec.get("algo", ""), "task": rec.get("task", ""),
+            "r2": m.get("r2"), "rmse": m.get("rmse"), "mae": m.get("mae"),
+            "val": rec.get("val_desc", ""),
+            "features": [{"col": f, **_p(f)} for f in rec.get("features", [])]}
+
+
+def _card(task: str, mid: str, y_col: str, pred: float, x_at_reco: dict,
+          actual_src: str = "廠內 sensor") -> dict:
+    """一步的模型卡：Y 怎麼建的／預測±變動／實際 vs 回傳／X 因子檢查點。"""
+    from .automl import whatif
+
+    meta = _model_meta(mid)
+    rmse = float(meta.get("rmse") or 0)
+    last, bands = _last_row(), _bands()
+    feats = [f["col"] for f in meta["features"]]
+    # 實際 vs 回傳：拿現場此刻的 X 餵模型，跟同一刻的實際 Y 比——殘差在容許帶內＝模型還準
+    back = whatif(DEMO_SID, mid, {"values": {f: last[f] for f in feats if f in last}})["pred"]
+    actual = last.get(y_col)
+    resid = None if actual is None else round(float(back) - float(actual), 4)
+    tol = round(1.96 * rmse, 4)
+    checks = []
+    for f in feats:
+        lo, hi = bands.get(f, (None, None))
+        at, now = x_at_reco.get(f), last.get(f)
+        checks.append({"col": f, **_p(f), "at_reco": None if at is None else round(float(at), 3),
+                       "now": None if now is None else round(float(now), 3),
+                       "lo": None if lo is None else round(lo, 3),
+                       "hi": None if hi is None else round(hi, 3),
+                       "ok": bool(now is not None and lo is not None and lo <= now <= hi)})
+    return {
+        "task": task, "task_txt": TASK_TXT.get(task, task),
+        "y": {"col": y_col, **_p(y_col)},
+        "model": meta,
+        "pred": {"value": round(float(pred), 4), "lo": round(float(pred) - tol, 4),
+                 "hi": round(float(pred) + tol, 4), "band": tol},
+        "verify": {"source": actual_src, "actual": None if actual is None else round(float(actual), 4),
+                   "model": round(float(back), 4), "resid": resid, "tol": tol,
+                   "ok": bool(resid is not None and abs(resid) <= tol)},
+        "checks": checks,
+    }
 
 
 def _recent_means() -> dict:
@@ -395,7 +485,8 @@ def demo_run(request: Request) -> dict:
     cur = _recent_means()          # 近 7 天現行條件——三張卡都對比它
     feed = round(cur["209_10_feed_mean"], 2)
 
-    # ---- A｜901 擠出機：現行進料下找最省電的螺桿頻率；合格率 ≥98 才收
+    # ================================================= ① 209 擠出機｜最佳化
+    # 目標 Y＝電流（能耗）；可調 X＝螺桿頻率；約束＝粒徑合格率 ≥98%
     o = optimize(DEMO_SID, mid["amp"], {"mode": "min", "knobs": ["209_10_hz_mean"],
                                         "fixed": {"209_10_feed_mean": feed}})
     hz_now = cur["209_10_hz_mean"]
@@ -413,38 +504,59 @@ def demo_run(request: Request) -> dict:
     amp_best = whatif(DEMO_SID, mid["amp"], {"values": {"209_10_feed_mean": feed,
                                                         "209_10_hz_mean": hz_best}})["pred"]
     saving_a = _pct(amp_now, amp_best)
+    card_a = _card("optimize", mid["amp"], "209_10_amp_mean", amp_best,
+                   {"209_10_feed_mean": feed, "209_10_hz_mean": hz_best})
+    card_a["objective"] = {"text": "電流最低（守粒徑合格率 ≥98%）", "knob": {"col": "209_10_hz_mean", **_p("209_10_hz_mean")},
+                           "now": _fmt(hz_now, 1), "reco": _fmt(hz_best, 1),
+                           "effect": f"電流 {_sgn(saving_a)}", "current_y": _fmt(amp_now)}
+    card_a["constraint"] = {"col": "209_10_ok_frac", **_p("209_10_ok_frac"),
+                            "rule": "≥ 98", "predicted": _fmt(ok_at, 1),
+                            "ok": bool(ok_at >= 98.0)}
     ra = store_result(dom, actor, ResultReq(
         scope="demo", asset="209", point="209_10_hz_mean", metric="optimal_setpoint",
-        value=_fmt(hz_best, 1), unit="Hz", model="platform-automl/XGB",
+        value=_fmt(hz_best, 1), unit="Hz", model="platform-automl/XGB", task="optimize",
+        detail=card_a,
         evidence=[{"point": "209_10_amp_mean", "current": _fmt(amp_now),
                    "optimized": _fmt(amp_best), "saving_pct": _fmt(saving_a, 1)},
                   {"point": "209_10_ok_frac", "predicted": _fmt(ok_at, 1), "constraint": ">=98"}],
         note=f"進料 {feed} t/h 下，螺桿 {_fmt(hz_now, 1)}→{_fmt(hz_best, 1)} Hz，"
              f"電流 {_sgn(saving_a)}，合格率預估 {_fmt(ok_at, 1)}%"))
 
-    # ---- B｜903 烘箱：承接 A（產線維持現行進料），找「含水 ≤0.8%」的最低爐溫
+    # ================================================= ② 210 烘箱｜虛擬量測
+    # 廠內沒有含水儀 → 用爐溫＋進料量推算出料含水（軟測），再反算保 0.8% 的最低爐溫
     ob = optimize(DEMO_SID, mid["moist"], {"mode": "target", "value": 0.8,
                                            "knobs": ["210_10_temp_mean"],
                                            "fixed": {"209_10_feed_mean": feed}})
     temp_now = cur["210_10_temp_mean"]
     temp_best = ob["best"]["210_10_temp_mean"]
+    moist_now = whatif(DEMO_SID, mid["moist"], {"values": {"210_10_temp_mean": temp_now,
+                                                           "209_10_feed_mean": feed}})["pred"]
     gas_now = whatif(DEMO_SID, mid["gas"], {"values": {"210_10_temp_mean": temp_now,
                                                        "209_10_feed_mean": feed}})["pred"]
     gas_best = whatif(DEMO_SID, mid["gas"], {"values": {"210_10_temp_mean": temp_best,
                                                         "209_10_feed_mean": feed}})["pred"]
     saving_b = _pct(gas_now, gas_best)
+    card_b = _card("soft_sensor", mid["moist"], "210_10_moist_mean", ob["pred"],
+                   {"210_10_temp_mean": temp_best, "209_10_feed_mean": feed},
+                   actual_src="離線化驗（每班一次）")
+    card_b["objective"] = {"text": "出料含水推到 0.8%（規格上限），爐溫能降就降",
+                           "knob": {"col": "210_10_temp_mean", **_p("210_10_temp_mean")},
+                           "now": _fmt(temp_now, 1), "reco": _fmt(temp_best, 1),
+                           "effect": f"燃氣 {_sgn(saving_b)}", "current_y": _fmt(moist_now, 2)}
+    card_b["why_soft"] = "這台廠內沒有含水量測儀，含水只能靠離線化驗（每班一次）；虛擬量測用爐溫與進料量每分鐘推算一次，才有辦法即時控。"
+    ra_id = ra["id"]
     rb = store_result(dom, actor, ResultReq(
         scope="demo", asset="210", point="210_10_temp_mean", metric="optimal_setpoint",
-        value=_fmt(temp_best, 1), unit="°C", model="platform-automl/XGB",
-        based_on=ra["id"],
+        value=_fmt(temp_best, 1), unit="°C", model="platform-automl/XGB", task="soft_sensor",
+        based_on=ra_id, detail=card_b,
         evidence=[{"point": "210_10_moist_mean", "target": 0.8, "predicted": ob["pred"]},
                   {"point": "210_10_gas_mean", "current": _fmt(gas_now),
                    "optimized": _fmt(gas_best), "saving_pct": _fmt(saving_b, 1)}],
         note=f"承接 209 條件（{feed} t/h）：爐溫 {_fmt(temp_now, 1)}→{_fmt(temp_best, 1)}°C "
              f"即保含水 ≤0.8%，燃氣 {_sgn(saving_b)}"))
 
-    # ---- C｜212 雙軸破碎機：承接 B 的含水 0.8%，守細粉率規格 ≤2.0% 下可提的轉速。
-    # 料沒那麼乾＝不易碎成細粉＝破碎機可以開快一點，產能上去、回料下來。
+    # ================================================= ③ 212 破碎機｜品質預測
+    # Y＝細粉率（回料），承接 ② 推算出的含水 0.8%；守規格下算可提的轉速
     FINE_SPEC = 2.0
     chz_now = cur["212_10_hz_mean"]
     fine_now = whatif(DEMO_SID, mid["fine"], {"values": {
@@ -454,10 +566,19 @@ def demo_run(request: Request) -> dict:
                                           "fixed": {"210_10_moist_mean": 0.8}})
     chz_best = oc["best"]["212_10_hz_mean"]
     up = _pct(chz_now, chz_best)
+    card_c = _card("quality", mid["fine"], "212_10_fine_frac", oc["pred"],
+                   {"210_10_moist_mean": 0.8, "212_10_hz_mean": chz_best})
+    card_c["objective"] = {"text": f"細粉率守規格 ≤{FINE_SPEC}%，在此前提下轉速能提就提",
+                           "knob": {"col": "212_10_hz_mean", **_p("212_10_hz_mean")},
+                           "now": _fmt(chz_now, 1), "reco": _fmt(chz_best, 1),
+                           "effect": f"產能 +{_fmt(abs(up), 1)}%", "current_y": _fmt(fine_now, 2)}
+    card_c["constraint"] = {"col": "212_10_fine_frac", **_p("212_10_fine_frac"),
+                            "rule": f"≤ {FINE_SPEC}", "predicted": _fmt(oc["pred"], 2),
+                            "ok": bool(oc["pred"] <= FINE_SPEC + 1e-6)}
     rc = store_result(dom, actor, ResultReq(
         scope="demo", asset="212", point="212_10_hz_mean", metric="optimal_setpoint",
-        value=_fmt(chz_best, 1), unit="Hz", model="platform-automl/XGB",
-        based_on=rb["id"],
+        value=_fmt(chz_best, 1), unit="Hz", model="platform-automl/XGB", task="quality",
+        based_on=rb["id"], detail=card_c,
         evidence=[{"point": "212_10_fine_frac", "spec": FINE_SPEC,
                    "current": _fmt(fine_now, 2), "predicted": oc["pred"]},
                   {"point": "212_10_hz_mean", "current": _fmt(chz_now, 1),

@@ -202,10 +202,9 @@ function fitChain() {
   zoom = Math.min(3, Math.max(.05, Math.min((st.clientWidth - 24) / (baseW * (r[2] - r[0])),
                                             (st.clientHeight - 24) / (baseH * (r[3] - r[1])))));
   applyZoom();
-  requestAnimationFrame(() => {
-    st.scrollLeft = r[0] * baseW * zoom - 12;
-    st.scrollTop = r[1] * baseH * zoom - 12;
-  });
+  // 不用 rAF：頁面在背景分頁／未合成時 rAF 不觸發，捲動就不會套用
+  const go = () => { st.scrollLeft = r[0] * baseW * zoom - 12; st.scrollTop = r[1] * baseH * zoom - 12; };
+  setTimeout(go, 0); setTimeout(go, 150);
   setZmode('zc');
 }
 function setZmode(id) { ['zc', 'zf'].forEach(k => $(k).classList.toggle('on', k === id)); }

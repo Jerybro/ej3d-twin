@@ -365,7 +365,8 @@ function cardHTML(eq, r, i) {
     <div class="kv"><span class="k">要預測的量</span>
       <span class="v">${esc((d.y || {}).label || '')} <span class="hint" style="font-weight:400">${esc((d.y || {}).col || '')}</span></span></div>
     <div class="kv"><span class="k">準不準<span class="q" data-tip="解釋力＝模型抓住了目標的多少變化，越接近 100% 越好（技術名稱 R²）。平均誤差＝預測值與實際值平均差多少，單位跟被預測的量相同（技術名稱 RMSE）。">?</span></span>
-      <span class="v ok">解釋力 ${pct1(m.r2)}　平均誤差 ±${m.rmse == null ? '—' : m.rmse} ${esc((d.y || {}).unit || '')}</span></div>
+      <span class="v ok">解釋力 ${pct1(m.r2)} <span class="hint" style="font-weight:400">R² ${m.r2 == null ? '—' : m.r2}</span>
+        　平均誤差 ±${m.rmse == null ? '—' : m.rmse} ${esc((d.y || {}).unit || '')} <span class="hint" style="font-weight:400">RMSE</span></span></div>
     <div class="kv"><span class="k">怎麼考的<span class="q" data-tip="把歷史數據切 5 份，每次用 4 份教模型、留 1 份當考卷，輪 5 次。分數是拿「沒看過的資料」考出來的，不是背答案（技術名稱：5 折交叉驗證）。">?</span></span>
       <span class="v" style="font-weight:400">切 5 份輪流當考卷${m.n_rows ? '　·　' + (+m.n_rows).toLocaleString() + ' 筆' : ''}</span></div>
     <div class="kv"><span class="k">用哪種模型<span class="q" data-tip="XGB＝梯度提升樹：一堆小決策樹接力修正前一棵的錯，工業表格數據最常用、也最耐雜訊的一種。">?</span></span>

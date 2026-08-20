@@ -154,6 +154,23 @@
       box-shadow: 0 8px 24px rgba(6,16,39,.3); }
     .q:hover::after { opacity: 1; }
     .blk > h3 .q { margin-left: 0; }
+    /* 來源綁定 */
+    .srcrow { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 0;
+      border-top: 1px dashed var(--bdr); }
+    .srcrow .k { color: var(--dim); }
+    .srcrow .sp { flex: 1; }
+    .conn { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 8px;
+      background: rgba(92,103,115,.12); color: var(--dim); white-space: nowrap; }
+    .conn.live { background: rgba(18,161,80,.14); color: #0B5A2E; }
+    .srcform { border: 1px solid var(--accent); border-radius: 9px; background: #fff;
+      padding: 10px 11px; margin-top: 8px; }
+    .srcform select, .srcform input { width: 100%; padding: 6px 8px; border-radius: 6px;
+      border: 1px solid var(--bdr); background: var(--panel2); font-size: 12px; }
+    .srcform .g { display: grid; grid-template-columns: 92px 1fr; gap: 6px; align-items: center;
+      margin-top: 6px; font-size: 11.5px; }
+    .srcform .g span { color: var(--dim); }
+    .srcform .act { display: flex; gap: 6px; margin-top: 9px; }
+    .srcform .act .mini-btn { flex: 1; text-align: center; }
     /* 主要因子：名稱＋貢獻佔比條 */
     .fi { display: grid; grid-template-columns: 1fr 80px 42px; gap: 4px 8px; align-items: center;
       font-size: 11.5px; margin-top: 4px; }
@@ -360,6 +377,19 @@ function cardHTML(eq, r, i) {
     ${d.why_soft ? `<div class="hint" style="margin-top:7px;color:#5B3BB8">${esc(d.why_soft)}</div>` : ''}
   </div>
 
+  ${!d.search ? '' : `
+  <div class="blk"><h3>怎麼找出這個建議的 <i></i>${q('不是拍腦袋：系統在「做得到的操作範圍」內大量試算，每一組都用模型算一次結果，挑出最符合目標又不違反約束的那一組。')}</h3>
+    <div class="kv"><span class="k">調整對象</span><span class="v">${esc(d.search.knob.label)}
+      <span class="hint" style="font-weight:400">${esc(d.search.knob.col)}</span></span></div>
+    <div class="kv"><span class="k">可動範圍<span class="q" data-tip="${esc(d.search.range_src)}">?</span></span>
+      <span class="v">${f2(d.search.range.lo)} ～ ${f2(d.search.range.hi)} ${esc(d.search.knob.unit || '')}</span></div>
+    <div class="kv"><span class="k">找什麼</span><span class="v" style="font-weight:400">${esc(d.search.mode)}</span></div>
+    ${(d.search.fixed || []).length ? `<div class="kv"><span class="k">釘住不動的條件<span class="q" data-tip="上游傳下來、或現場當下就是這個值的條件。搜尋時把它固定住，算出來的建議才跟現況相容。">?</span></span>
+      <span class="v" style="font-weight:400">${d.search.fixed.map(x => esc(x.label) + ' ' + x.value + ' ' + esc(x.unit || '')).join('　')}</span></div>` : ''}
+    <div class="kv"><span class="k">試了幾組<span class="q" data-tip="先在整個可動範圍內隨機撒點粗掃，再針對表現最好的幾組在它附近密集細搜——比逐格掃描快，也不會卡在局部最佳。">?</span></span>
+      <span class="v" style="font-weight:400">${esc(d.search.method)}</span></div>
+  </div>`}
+
   <div class="blk"><h3>預測值與誤差範圍 <i></i>${q('模型給的是估計值不是保證值。談效益要看範圍，不能只看中間那個數字。')}</h3>
     <div class="kv"><span class="k">${esc((d.y || {}).label || '')}（照建議設定後）</span>
       <span class="v">${f2(pr.value)} ${esc((d.y || {}).unit || '')}</span></div>
@@ -370,11 +400,18 @@ function cardHTML(eq, r, i) {
       <span class="v ${d.constraint.ok ? 'ok' : 'no'}">預估 ${d.constraint.predicted}　${d.constraint.ok ? '通過' : '未過'}</span></div>` : ''}
   </div>
 
-  <div class="blk"><h3>拿現場實際值對一次 <i></i>${q('模型上線後會慢慢失準（設備老化、原料換批、季節變化）。定期拿同一時刻的現場實際值跟模型算的比一次，差太多就該重新訓練。')}</h3>
-    <div class="kv"><span class="k">現場量到的（${esc(v.source || '')}）</span><span class="v">${f2(v.actual)} ${esc((d.y || {}).unit || '')}</span></div>
-    <div class="kv"><span class="k">模型算出來的（同一刻）</span><span class="v">${f2(v.model)} ${esc((d.y || {}).unit || '')}</span></div>
-    <div class="kv"><span class="k">差多少<span class="q" data-tip="兩者的差（技術名稱：殘差）。只要在模型自己的平均誤差範圍內就代表還準；超出代表現場已經跟訓練當時不一樣，該重新訓練。">?</span></span>
+  <div class="blk"><h3>現場實際值 <i></i>${q('模型上線後會慢慢失準。拿同一時刻的現場值跟模型算的比一次，差太多就該重訓。')}</h3>
+    <div class="kv"><span class="k">現場值</span><span class="v">${f2(v.actual)} ${esc((d.y || {}).unit || '')}</span></div>
+    <div class="kv"><span class="k">模型值（同一刻）</span><span class="v">${f2(v.model)} ${esc((d.y || {}).unit || '')}</span></div>
+    <div class="kv"><span class="k">差</span>
       <span class="v ${v.ok ? 'ok' : 'no'}">${f2(v.resid)}（容許 ±${f2(v.tol)}）　${v.ok ? '模型還準' : '超出，建議重訓'}</span></div>
+    <div class="srcrow"><span class="k">出處</span><span>${esc((d.source || {}).kind_txt || '平台歷史資料')}</span>
+      <span class="sp"></span>
+      <span class="conn ${(d.source || {}).connected ? 'live' : ''}">${(d.source || {}).connected ? '已連線' : '未連線'}</span>
+      <button class="mini-btn" data-src="${esc((d.source || {}).point || '')}">設定來源</button></div>
+    ${((d.source || {}).config && Object.keys(d.source.config).length)
+      ? `<div class="hint" style="margin-top:4px">${Object.entries(d.source.config).map(([k, val]) => esc(k) + '=' + esc(val)).join('　')}</div>` : ''}
+    <div id="srcbox"></div>
   </div>
 
   <div class="blk"><h3>這條建議還算數嗎 <i></i>${q('建議是在「某些條件不變」的前提下算的。前提變了（例如進料量突然改），建議就不再成立，要重算。')}</h3>
@@ -397,6 +434,55 @@ function cardHTML(eq, r, i) {
       <pre>${esc(JSON.stringify(r, null, 1))}</pre></details>
   </div>`;
 }
+/* ---- 現場值來源：協定選單＋點位位址，可人工覆寫 ---- */
+let SRC = { kinds: {}, sources: {} };
+async function loadSources() { try { SRC = await getJSON('/api/twin/source'); } catch {} }
+function srcFormHTML(point) {
+  const cur = SRC.sources[point] || { kind: 'history', config: {}, value: null };
+  const kinds = SRC.kinds || {};
+  const fields = (kinds[cur.kind] || {}).fields || [];
+  return `<div class="srcform">
+    <div class="g"><span>來源</span>
+      <select id="sk">${Object.entries(kinds).map(([k, v]) =>
+        `<option value="${esc(k)}" ${k === cur.kind ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</select></div>
+    ${fields.map(f => `<div class="g"><span>${esc(f.label)}</span>
+      <input data-f="${esc(f.key)}" placeholder="${esc(f.ph)}" value="${esc((cur.config || {})[f.key] || '')}"/></div>`).join('')}
+    ${cur.kind === 'manual' ? `<div class="g"><span>目前值</span>
+      <input id="sv" type="number" step="any" value="${cur.value == null ? '' : cur.value}"/></div>` : ''}
+    <div class="act"><button class="mini-btn primary" id="ssave">儲存</button>
+      <button class="mini-btn" id="scancel">取消</button></div>
+    <div class="hint" style="margin-top:6px">目前只存綁定設定與人工值；即時連線讀值是下一步（平台已有 OPC UA／Modbus 連線元件）。</div>
+  </div>`;
+}
+function bindSrc() {
+  document.querySelectorAll('[data-src]').forEach(b => b.onclick = () => {
+    const point = b.dataset.src, box = $('srcbox');
+    if (box.dataset.open === point) { box.innerHTML = ''; box.dataset.open = ''; return; }
+    box.dataset.open = point; box.innerHTML = srcFormHTML(point);
+    $('sk').onchange = () => {
+      SRC.sources[point] = { ...(SRC.sources[point] || {}), kind: $('sk').value,
+        config: SRC.sources[point] ? SRC.sources[point].config : {} };
+      box.innerHTML = srcFormHTML(point); bindSrcForm(point);
+    };
+    bindSrcForm(point);
+  });
+}
+function bindSrcForm(point) {
+  $('scancel').onclick = () => { $('srcbox').innerHTML = ''; $('srcbox').dataset.open = ''; };
+  $('ssave').onclick = async () => {
+    const cfg = {};
+    document.querySelectorAll('.srcform [data-f]').forEach(i => { if (i.value.trim()) cfg[i.dataset.f] = i.value.trim(); });
+    const body = { point, kind: $('sk').value, config: cfg };
+    const sv = $('sv'); if (sv && sv.value !== '') body.value = parseFloat(sv.value);
+    try {
+      await getJSON('/api/twin/source', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      await loadSources();
+      $('srcbox').innerHTML = ''; $('srcbox').dataset.open = '';
+      await load();
+    } catch (e) { alert(e.message); }
+  };
+}
+
 function overviewHTML() {
   const done = byAsset();
   const cards = state.chain.map((eq, i) => {
@@ -439,6 +525,7 @@ function renderPanel() {
   $('next').disabled = step === state.chain.length - 1;
   $('panel').innerHTML = cardHTML(eq, r, step);
   $('panel').scrollTop = 0;
+  bindSrc();
 }
 function render() { renderPanel(); drawStage(); }
 function setView(v) {
@@ -457,6 +544,7 @@ addEventListener('keydown', e => {
 
 /* ---------------- 載入與執行 ---------------- */
 async function load() {
+  if (!Object.keys(SRC.kinds || {}).length) await loadSources();
   try { state = await getJSON('/api/twin/advisor/demo'); }
   catch (e) { $('panel').innerHTML = `<div class="hint">${esc(e.message)}</div>`; return; }
   results = state.results || [];

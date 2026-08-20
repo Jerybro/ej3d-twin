@@ -141,6 +141,81 @@ def delete_result(rid: str, request: Request, scope: str = "demo", drawing: str 
     return {"ok": True}
 
 
+# ------------------------------------------------------------------ 現場值來源綁定
+# 「實際值」從哪來，要能指定：平台歷史資料／OPC UA／Modbus TCP／MQTT／REST／人工輸入。
+# 這裡先做「綁定與手改」——存協定與點位位址、值可人工覆寫；真的連線讀值是下一步
+# （sources.py 已有 OpcUaSource/ModbusSource 骨架，接上去即可）。
+SOURCE_KINDS = {
+    "history": {"label": "平台歷史資料", "fields": []},
+    "manual": {"label": "人工輸入（離線化驗）", "fields": []},
+    "opcua": {"label": "OPC UA", "fields": [
+        {"key": "endpoint", "label": "Endpoint", "ph": "opc.tcp://192.168.1.10:4840"},
+        {"key": "node", "label": "NodeId", "ph": "ns=2;s=Dryer.Moisture.PV"}]},
+    "modbus": {"label": "Modbus TCP", "fields": [
+        {"key": "host", "label": "Host", "ph": "192.168.1.20"},
+        {"key": "port", "label": "Port", "ph": "502"},
+        {"key": "unit", "label": "Unit", "ph": "1"},
+        {"key": "address", "label": "位址", "ph": "40001"},
+        {"key": "scale", "label": "倍率", "ph": "0.1"}]},
+    "mqtt": {"label": "MQTT", "fields": [
+        {"key": "broker", "label": "Broker", "ph": "mqtt://192.168.1.30:1883"},
+        {"key": "topic", "label": "Topic", "ph": "plant/dryer/moisture"}]},
+    "rest": {"label": "REST API", "fields": [
+        {"key": "url", "label": "URL", "ph": "https://mes.local/api/tag/xxx"},
+        {"key": "path", "label": "取值路徑", "ph": "data.value"}]},
+}
+
+
+class SourceReq(BaseModel):
+    point: str                       # 綁哪個點位（欄名）
+    kind: str = "history"            # history | manual | opcua | modbus | mqtt | rest
+    config: dict = Field(default_factory=dict)
+    value: float | None = None       # kind=manual 時的人工值
+    note: str = ""
+
+
+def _sources_path(domain: str) -> Path:
+    return _result_path(domain, "sources")
+
+
+def _load_sources(domain: str) -> dict:
+    p = _sources_path(domain)
+    if not p.exists():
+        return {}
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+@router.get("/source")
+def list_sources(request: Request) -> dict:
+    from .auth import current_domain
+
+    return {"kinds": SOURCE_KINDS, "sources": _load_sources(current_domain(request))}
+
+
+@router.put("/source")
+def put_source(req: SourceReq, request: Request) -> dict:
+    from .auth import current_actor, current_domain
+
+    if req.kind not in SOURCE_KINDS:
+        raise HTTPException(422, f"未知的來源類型 {req.kind}")
+    dom = current_domain(request)
+    rec = {"point": req.point, "kind": req.kind, "config": req.config,
+           "value": req.value, "note": req.note,
+           "by": current_actor(request), "at": _now()}
+    with _LOCK:
+        cur = _load_sources(dom)
+        cur[req.point] = rec
+        p = _sources_path(dom)
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.replace(p)
+    return {"ok": True, **rec}
+
+
 # ------------------------------------------------------------------ 示範場景
 # **資產模型是真的**（潤泰 M0200 礦化及造粒，已審核 68 個框），
 # **點位數值是模擬的**（真資料只有馬達電流/頻率，沒有溫度/含水/品質，
@@ -423,8 +498,21 @@ def _model_meta(mid: str) -> dict:
             "features": [{"col": f, **_p(f)} for f in rec.get("features", [])]}
 
 
+def _search_info(o: dict, knob: str, mode_txt: str, fixed: dict) -> dict:
+    """把 automl.optimize 實際怎麼找的寫出來——不是黑箱，人要看得懂它試了什麼。"""
+    b = (o.get("bounds") or {}).get(knob) or [None, None]
+    return {
+        "knob": {"col": knob, **_p(knob)},
+        "range": {"lo": b[0], "hi": b[1]},
+        "mode": mode_txt,
+        "method": "隨機搜尋 3,000 組 → 取最好的 50 組各再細搜 40 組（共約 5,000 組候選）",
+        "range_src": "可調範圍取自歷史數據的 P1～P99（做得到的操作範圍，不外推）",
+        "fixed": [{"col": k, **_p(k), "value": round(float(v), 3)} for k, v in (fixed or {}).items()],
+    }
+
+
 def _card(task: str, mid: str, y_col: str, pred: float, x_at_reco: dict,
-          actual_src: str = "廠內 sensor", knob: str = "") -> dict:
+          actual_src: str = "廠內 sensor", knob: str = "", domain: str = "") -> dict:
     """一步的模型卡：Y 怎麼建的／預測±變動／實際 vs 回傳／X 因子檢查點。"""
     from .automl import whatif
 
@@ -434,7 +522,11 @@ def _card(task: str, mid: str, y_col: str, pred: float, x_at_reco: dict,
     feats = [f["col"] for f in meta["features"]]
     # 實際 vs 回傳：拿現場此刻的 X 餵模型，跟同一刻的實際 Y 比——殘差在容許帶內＝模型還準
     back = whatif(DEMO_SID, mid, {"values": {f: last[f] for f in feats if f in last}})["pred"]
+    # 實際值：人工覆寫優先，其次平台歷史資料。之後接 OPC UA／Modbus 時在這裡取即時值。
+    src = _load_sources(domain).get(y_col) or {}
     actual = last.get(y_col)
+    if src.get("kind") == "manual" and src.get("value") is not None:
+        actual = float(src["value"])
     resid = None if actual is None else round(float(back) - float(actual), 4)
     tol = round(1.96 * rmse, 4)
     checks = []
@@ -461,6 +553,10 @@ def _card(task: str, mid: str, y_col: str, pred: float, x_at_reco: dict,
         "model": meta,
         "pred": {"value": round(float(pred), 4), "lo": round(float(pred) - tol, 4),
                  "hi": round(float(pred) + tol, 4), "band": tol},
+        "source": {"point": y_col, "kind": src.get("kind", "history"),
+                   "kind_txt": SOURCE_KINDS.get(src.get("kind", "history"), {}).get("label", ""),
+                   "config": src.get("config", {}), "by": src.get("by", ""), "at": src.get("at", ""),
+                   "note": src.get("note", "") or actual_src, "connected": False},
         "verify": {"source": actual_src, "actual": None if actual is None else round(float(actual), 4),
                    "model": round(float(back), 4), "resid": resid, "tol": tol,
                    "ok": bool(resid is not None and abs(resid) <= tol)},
@@ -523,10 +619,12 @@ def demo_run(request: Request) -> dict:
                                                         "209_10_hz_mean": hz_best}})["pred"]
     saving_a = _pct(amp_now, amp_best)
     card_a = _card("optimize", mid["amp"], "209_10_amp_mean", amp_best,
-                   {"209_10_feed_mean": feed, "209_10_hz_mean": hz_best}, knob="209_10_hz_mean")
+                   {"209_10_feed_mean": feed, "209_10_hz_mean": hz_best}, knob="209_10_hz_mean", domain=dom)
     card_a["objective"] = {"text": "電流最低（守粒徑合格率 ≥98%）", "knob": {"col": "209_10_hz_mean", **_p("209_10_hz_mean")},
                            "now": _fmt(hz_now, 1), "reco": _fmt(hz_best, 1),
                            "effect": f"電流 {_sgn(saving_a)}", "current_y": _fmt(amp_now)}
+    card_a["search"] = _search_info(o, "209_10_hz_mean", "把電流壓到最低",
+                                    {"209_10_feed_mean": feed})
     card_a["constraint"] = {"col": "209_10_ok_frac", **_p("209_10_ok_frac"),
                             "rule": "≥ 98", "predicted": _fmt(ok_at, 1),
                             "ok": bool(ok_at >= 98.0)}
@@ -556,11 +654,13 @@ def demo_run(request: Request) -> dict:
     saving_b = _pct(gas_now, gas_best)
     card_b = _card("soft_sensor", mid["moist"], "210_10_moist_mean", ob["pred"],
                    {"210_10_temp_mean": temp_best, "209_10_feed_mean": feed},
-                   actual_src="離線化驗（每班一次）", knob="210_10_temp_mean")
+                   actual_src="離線化驗（每班一次）", knob="210_10_temp_mean", domain=dom)
     card_b["objective"] = {"text": "出料含水推到 0.8%（規格上限），爐溫能降就降",
                            "knob": {"col": "210_10_temp_mean", **_p("210_10_temp_mean")},
                            "now": _fmt(temp_now, 1), "reco": _fmt(temp_best, 1),
                            "effect": f"燃氣 {_sgn(saving_b)}", "current_y": _fmt(moist_now, 2)}
+    card_b["search"] = _search_info(ob, "210_10_temp_mean", "讓出料含水剛好等於 0.8%（規格上限）",
+                                    {"209_10_feed_mean": feed})
     card_b["why_soft"] = "這台廠內沒有含水量測儀，含水只能靠離線化驗（每班一次）；虛擬量測用爐溫與進料量每分鐘推算一次，才有辦法即時控。"
     ra_id = ra["id"]
     rb = store_result(dom, actor, ResultReq(
@@ -585,11 +685,13 @@ def demo_run(request: Request) -> dict:
     chz_best = oc["best"]["212_10_hz_mean"]
     up = _pct(chz_now, chz_best)
     card_c = _card("quality", mid["fine"], "212_10_fine_frac", oc["pred"],
-                   {"210_10_moist_mean": 0.8, "212_10_hz_mean": chz_best}, knob="212_10_hz_mean")
+                   {"210_10_moist_mean": 0.8, "212_10_hz_mean": chz_best}, knob="212_10_hz_mean", domain=dom)
     card_c["objective"] = {"text": f"細粉率守規格 ≤{FINE_SPEC}%，在此前提下轉速能提就提",
                            "knob": {"col": "212_10_hz_mean", **_p("212_10_hz_mean")},
                            "now": _fmt(chz_now, 1), "reco": _fmt(chz_best, 1),
                            "effect": f"產能 +{_fmt(abs(up), 1)}%", "current_y": _fmt(fine_now, 2)}
+    card_c["search"] = _search_info(oc, "212_10_hz_mean", f"讓細粉率剛好等於規格上限 {FINE_SPEC}%",
+                                    {"210_10_moist_mean": 0.8})
     card_c["constraint"] = {"col": "212_10_fine_frac", **_p("212_10_fine_frac"),
                             "rule": f"≤ {FINE_SPEC}", "predicted": _fmt(oc["pred"], 2),
                             "ok": bool(oc["pred"] <= FINE_SPEC + 1e-6)}

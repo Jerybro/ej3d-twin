@@ -52,27 +52,48 @@
 
     /* 聚光燈：框外整片壓暗，只留當前這一台。不畫連線、不重複設備名——
        圖上本來就寫著位號與名稱，再疊一次只會糊掉。 */
-    .spot { position: absolute; border: 2.5px solid var(--accent); border-radius: 5px;
+    /* 框的顏色＝這台用的是哪一種 AI（跟右邊徽章同一套色）：
+       藍＝最佳化、紫＝虛擬量測、琥珀＝品質預測。還沒算的用虛線灰框。 */
+    .spot, .mark { --c: #8A94A0; }
+    .spot.optimize, .mark.optimize { --c: #046AFB; }
+    .spot.soft_sensor, .mark.soft_sensor { --c: #7C4DFF; }
+    .spot.quality, .mark.quality { --c: #E0A415; }
+    .spot { position: absolute; border: 2.5px solid var(--c); border-radius: 5px;
       box-shadow: 0 0 0 3px rgba(255,255,255,.95), 0 0 0 9999px rgba(6,16,39,.42);
       pointer-events: none; transition: all .35s cubic-bezier(.4,0,.2,1); }
+    .spot:not(.done) { border-style: dashed; }
     .spot .no { position: absolute; left: -13px; top: -13px; width: 26px; height: 26px; border-radius: 50%;
-      background: var(--accent); color: #fff; font-size: 13px; font-weight: 700;
+      background: var(--c); color: #fff; font-size: 13px; font-weight: 700;
       display: grid; place-items: center; border: 2px solid #fff; }
+    .spot.quality .no, .mark.quality .no { color: #3d2a00; }
     .spot .badge { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 10px);
-      white-space: nowrap; background: var(--accent); color: #fff; padding: 5px 11px; border-radius: 7px;
-      font-size: 13px; font-weight: 700; box-shadow: 0 3px 12px rgba(4,106,251,.35); }
+      white-space: nowrap; background: var(--c); color: #fff; padding: 5px 11px; border-radius: 7px;
+      font-size: 13px; font-weight: 700; box-shadow: 0 3px 14px rgba(6,16,39,.28); }
+    .spot.quality .badge { color: #3d2a00; }
     .spot .badge s { text-decoration: none; opacity: .68; font-weight: 400; }
-    .spot.done { border-color: var(--hi); }
-    .spot.done .no, .spot.done .badge { background: var(--hi); box-shadow: 0 3px 12px rgba(18,161,80,.3); }
+    .spot .badge em { font-style: normal; font-size: 10.5px; font-weight: 700; opacity: .85;
+      display: block; text-align: center; letter-spacing: .5px; }
     /* 總覽：三台同時亮，不壓暗 */
-    .mark { position: absolute; border: 2.5px solid var(--accent); border-radius: 5px;
+    .mark { position: absolute; border: 2.5px solid var(--c); border-radius: 5px;
       box-shadow: 0 0 0 3px rgba(255,255,255,.9); cursor: pointer; }
-    .mark.done { border-color: var(--hi); }
+    .mark:not(.done) { border-style: dashed; }
     .mark .no { position: absolute; left: -12px; top: -12px; width: 24px; height: 24px; border-radius: 50%;
-      background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; display: grid;
+      background: var(--c); color: #fff; font-size: 12px; font-weight: 700; display: grid;
       place-items: center; border: 2px solid #fff; }
-    .mark.done .no { background: var(--hi); }
+    .lg { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--dim); }
+    .lg i { width: 11px; height: 9px; border-radius: 2px; border: 2px solid; display: inline-block; }
 
+    /* 製程說明：判讀工作台 ④ 產生的那份，這裡可開可關 */
+    #descp { display: none; flex-shrink: 0; border-top: 1px solid var(--bdr); background: var(--panel);
+      max-height: 34vh; flex-direction: column; }
+    #descp.on { display: flex; }
+    #descp .dh { display: flex; align-items: center; gap: 9px; padding: 8px 13px; font-size: 12.5px;
+      border-bottom: 1px solid var(--bdr); }
+    #descp .dh .sp { flex: 1; }
+    #descp .db { padding: 11px 14px 16px; overflow-y: auto; font-size: 12.5px; line-height: 1.9;
+      white-space: pre-wrap; }
+    #descp .db mark { background: rgba(4,106,251,.16); color: inherit; border-bottom: 2px solid var(--accent);
+      padding: 1px 2px; border-radius: 2px; }
     .side { width: clamp(400px, 42vw, 560px); flex-shrink: 0; border-left: 1px solid var(--bdr);
       background: var(--panel); display: flex; flex-direction: column; }
     .sbar { padding: 11px 15px; border-bottom: 1px solid var(--bdr); display: flex; align-items: center; gap: 8px; }
@@ -208,10 +229,21 @@
         </span>
         <span class="seg"><button id="zo">−</button><button id="zi">＋</button><button id="zf">全圖</button></span>
         <span class="seg"><button id="arrows">流向箭頭</button></span>
+        <button class="mini-btn" id="desc-btn">製程說明</button>
         <span class="sp"></span>
+        <span class="lg"><i style="border-color:#046AFB"></i>最佳化</span>
+        <span class="lg"><i style="border-color:#7C4DFF"></i>虛擬量測</span>
+        <span class="lg"><i style="border-color:#E0A415"></i>品質預測</span>
         <span class="hint" id="cap"></span>
       </div>
       <div id="stage" class="empty"><span>載入資產模型…</span></div>
+      <section id="descp">
+        <div class="dh"><b>製程說明</b><span class="hint" id="dstate"></span>
+          <span class="sp"></span>
+          <span class="hint" id="dhit"></span>
+          <button class="mini-btn" id="dclose">關閉</button></div>
+        <div class="db" id="dbody"></div>
+      </section>
     </div>
 
     <div class="side">
@@ -315,7 +347,7 @@ function drawStage() {
       state.chain.forEach((x, i) => {
         if (!x.bbox) return;
         const b = x.bbox, dm = document.createElement('div');
-        dm.className = 'mark' + (done[x.tag] ? ' done' : '');
+        dm.className = 'mark ' + x.task + (done[x.tag] ? ' done' : '');
         dm.style.cssText = `left:${b[0]*100}%;top:${b[1]*100}%;width:${(b[2]-b[0])*100}%;height:${(b[3]-b[1])*100}%;opacity:.45`;
         dm.innerHTML = `<span class="no">${i + 1}</span>`;
         ov.appendChild(dm);
@@ -325,11 +357,11 @@ function drawStage() {
     }
     const r = done[eq.tag], b = eq.bbox;
     const d = document.createElement('div');
-    d.className = 'spot' + (r ? ' done' : '');
+    d.className = 'spot ' + esc(eq.task) + (r ? ' done' : '');
     d.style.cssText = `left:${b[0]*100}%;top:${b[1]*100}%;width:${(b[2]-b[0])*100}%;height:${(b[3]-b[1])*100}%`;
     const now = r && r.detail && r.detail.objective ? r.detail.objective.now : '';
     d.innerHTML = `<span class="no">${step + 1}</span>` +
-      (r ? `<span class="badge"><s>${esc(eq.knob.label)} ${esc(now)}</s> → ${esc(r.value)} ${esc(r.unit)}</span>` : '');
+      (r ? `<span class="badge"><em>${esc(eq.task_txt)}</em><s>${esc(eq.knob.label)} ${esc(now)}</s> → ${esc(r.value)} ${esc(r.unit)}</span>` : '');
     ov.appendChild(d);
     zoomTo(b, .5);
   } else {
@@ -337,7 +369,7 @@ function drawStage() {
       if (!eq.bbox) return;
       const r = done[eq.tag], b = eq.bbox;
       const d = document.createElement('div');
-      d.className = 'mark' + (r ? ' done' : '');
+      d.className = 'mark ' + esc(eq.task) + (r ? ' done' : '');
       d.style.cssText = `left:${b[0]*100}%;top:${b[1]*100}%;width:${(b[2]-b[0])*100}%;height:${(b[3]-b[1])*100}%`;
       d.innerHTML = `<span class="no">${i + 1}</span>`;
       d.onclick = () => { step = i; setView('nav'); };
@@ -474,6 +506,46 @@ function cardHTML(eq, r, i) {
       <pre>${esc(JSON.stringify(r, null, 1))}</pre></details>
   </div>`;
 }
+/* ---- 製程說明：判讀工作台 ④ 產生的那份；預設關，開了會記住 ---- */
+let descText = '', descMeta = null;
+let descOpen = localStorage.getItem('advisor.desc') === '1';
+async function loadDesc() {
+  if (!state || !state.drawing) return;
+  try {
+    descMeta = await getJSON(`/api/pid/vlm/describe/${encodeURIComponent(state.drawing)}`);
+    descText = (descMeta && descMeta.text) || '';
+  } catch { descText = ''; }
+  paintDesc();
+}
+function paintDesc() {
+  const el = $('descp'); if (!el) return;
+  el.classList.toggle('on', descOpen);
+  $('desc-btn').classList.toggle('on', descOpen);
+  if (!descOpen) return;
+  const tag = (state.chain[step] || {}).tag || '';
+  if (!descText) {
+    $('dstate').textContent = '這張圖還沒產生製程說明';
+    $('dhit').textContent = '';
+    $('dbody').innerHTML = `<span class="hint">到判讀工作台 ④ 評註與說明 按「AI 產生預設製程說明」，產生後這裡就看得到。</span>`;
+    return;
+  }
+  $('dstate').textContent = (descMeta && descMeta.at ? when(descMeta.at) : '') +
+    (descMeta && descMeta.confirmed_at ? `　已確認 · ${who(descMeta.confirmed_by)}` : '　未確認');
+  // 目前這一台在說明裡被提到的地方標起來
+  const re = tag ? new RegExp('(^|[^0-9A-Za-z.])(' + tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')(?![0-9A-Za-z.])', 'g') : null;
+  let n = 0;
+  const html = esc(descText).replace(/⟦N\d+⟧/g, '').replace(re || /$^/g, (m0, a, b) => { n++; return a + '<mark>' + b + '</mark>'; });
+  $('dhit').textContent = tag ? `提到 ${tag}：${n} 處` : '';
+  $('dbody').innerHTML = html;
+  const first = $('dbody').querySelector('mark');
+  if (first) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+$('desc-btn').onclick = () => {
+  descOpen = !descOpen; localStorage.setItem('advisor.desc', descOpen ? '1' : '0');
+  paintDesc(); if (descOpen && !descText) loadDesc();
+};
+$('dclose').onclick = () => { descOpen = false; localStorage.setItem('advisor.desc', '0'); paintDesc(); };
+
 /* ---- 現場值來源：協定選單＋點位位址，可人工覆寫 ---- */
 let SRC = { kinds: {}, sources: {} };
 async function loadSources() { try { SRC = await getJSON('/api/twin/source'); } catch {} }
@@ -566,6 +638,7 @@ function renderPanel() {
   $('panel').innerHTML = cardHTML(eq, r, step);
   $('panel').scrollTop = 0;
   bindSrc();
+  paintDesc();
 }
 function render() { renderPanel(); drawStage(); }
 function setView(v) {
@@ -592,6 +665,7 @@ async function load() {
   $('tag-real').className = 'tag ' + (state.model_ok ? 'real' : 'sim');
   $('cap').textContent = state.model_ok ? state.drawing.replace(/\.pdf$/i, '') : '';
   if (!$('img')) loadImage();
+  if (descText === '' && descMeta === null) loadDesc();
   const tot = Object.keys(state.models).length, ok = Object.values(state.models).filter(m => m.status === 'done').length;
   $('run').disabled = !state.ready;
   $('run').textContent = state.ready ? (results.length ? '重跑' : '開始') : `訓練中 ${ok}／${tot}`;

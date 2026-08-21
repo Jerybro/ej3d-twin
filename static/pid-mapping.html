@@ -163,6 +163,27 @@
     .drop b { display: block; font-size: 12.5px; }
     .drop .m { color: var(--dim); font-size: 11px; margin-top: 3px; }
     .pick .item .m { color: var(--dim); font-size: 11px; margin-top: 2px; }
+    /* 術語一律：畫面講人話，精確定義滑過 ? 才看 */
+    .q { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%;
+      border: 1px solid var(--dim); color: var(--dim); font-size: 10px; font-weight: 700; cursor: help;
+      position: relative; vertical-align: 1px; margin-left: 5px; letter-spacing: 0; }
+    .q:hover { border-color: var(--accent); color: var(--accent); }
+    .q::after { content: attr(data-tip); position: absolute; left: -6px; top: calc(100% + 7px);
+      width: 288px; background: #061027; color: #fff; padding: 9px 11px; border-radius: 8px;
+      font-size: 11.5px; font-weight: 400; line-height: 1.7; text-align: left; letter-spacing: 0;
+      opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 60; white-space: normal;
+      box-shadow: 0 8px 24px rgba(6,16,39,.3); }
+    .q:hover::after { opacity: 1; }
+    /* 自動對應清單：每一欄對到誰、幾成把握 */
+    .gl summary { cursor: pointer; font-size: 12px; color: var(--accent); outline: none; padding: 4px 0; }
+    .glist { border: 1px solid var(--bdr); border-radius: 8px; overflow: hidden; margin-top: 4px; }
+    .gi { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 6px 9px; font-size: 11.5px;
+      border-top: 1px solid var(--bdr); background: var(--panel); }
+    .gi:first-child { border-top: 0; }
+    .gi .c { font-family: Consolas, monospace; font-size: 11px; color: var(--dim); }
+    .gi .p { font-weight: 700; color: #0B5A2E; font-variant-numeric: tabular-nums; align-self: center; }
+    .gi .a { grid-column: 1 / -1; }
+    .gi .a b { font-weight: 600; }
   </style>
 </head>
 <body>
@@ -426,9 +447,14 @@ function renderPanel() {
     ${e ? (pts.length ? pts.map(ptCard).join('') + '<canvas id="series"></canvas><div class="hint" id="series-cap">點任一卡片看趨勢</div>' : '<div class="empty">這台設備還沒有數據欄位。把下面「未歸戶」的欄位拖到左圖它的方塊上。</div>') : ''}
     <div class="section-title">未歸戶欄位（${pool.length}）<span class="hint" style="font-weight:400;letter-spacing:0">　拖到左圖方塊上綁定；全廠狀態欄可忽略</span></div>
     <div class="pool">${pool.length ? pool.map(p => `<span class="chip" draggable="true" data-col="${esc(p.col)}" title="平均 ${fmt(p.stats.mean)}｜${fmt(p.stats.min)}～${fmt(p.stats.max)}">${esc(p.col)}<span class="m">${fmt(p.stats.mean)}</span><span class="x" data-ign="${esc(p.col)}" title="忽略">×</span></span>`).join('') : '<span class="hint">全部欄位都歸戶了。</span>'}</div>
-    ${guessedAll.length ? `<div class="section-title">系統猜的（${guessedAll.length}）</div>
-      <button class="mini-btn primary" id="confirm-all" style="width:100%">把 ${guessedAll.length} 個高信心猜測全部確認並簽名</button>
-      <div class="hint" style="margin-top:4px">${[...new Set(guessedAll.map(p => p.tag))].map(t => `${esc(t)}×${guessedAll.filter(p => p.tag === t).length}`).join('、')}</div>` : ''}
+    ${guessedAll.length ? `<div class="section-title">自動對應待確認（${guessedAll.length} 欄）<span class="q" data-tip="把握度怎麼算：欄名開頭（最多前三段）和資產庫裡的位號完全一樣＝90%；第一段就是位號＝85%。位號只出現在欄名中間的只有 60%，不會列在這裡，要自己逐欄看。">?</span></div>
+      <div class="hint" style="margin-bottom:6px">這些欄的<b>欄名開頭就是資產庫裡的位號</b>，系統直接對上了。確認＝記上你的簽名，之後不再重猜。</div>
+      <details class="gl"><summary>看這 ${guessedAll.length} 欄各自對到誰</summary>
+        <div class="glist">${guessedAll.map(p => `<div class="gi">
+          <span class="c">${esc(p.col)}</span><span class="p">${Math.round((p.guess_conf || 0) * 100)}%</span>
+          <span class="a">→ <b>${esc(p.tag)}</b> ${esc(p.tag_name || '')}${p.sub ? '・' + esc(p.sub) : ''}${p.measure ? '　' + esc(p.measure) : ''}${p.unit ? ' ' + esc(p.unit) : ''}</span>
+        </div>`).join('')}</div></details>
+      <button class="mini-btn primary" id="confirm-all" style="width:100%;margin-top:7px">全部確認並簽名（${guessedAll.length} 欄）</button>` : ''}
     <div class="hint" style="margin-top:12px">左圖顏色：綠＝有已確認點位、琥珀＝只有猜的、灰＝沒數據。方塊旁的小表＝各點位平均值（右上「數據狀態」可關）。</div>
     ${auditList()}`;
   bindPanel();
@@ -483,7 +509,7 @@ function bindPanel() {
   P.querySelectorAll('.pt').forEach(card => card.addEventListener('click', e => { if (e.target.closest('input,select,button,.x')) return; showSeries(card.dataset.col); }));
   const ca = $('confirm-all'); if (ca) ca.onclick = async () => {
     const cols = map.points.filter(p => p.guess && p.tag && !p.ignored && (p.guess_conf || 0) >= 0.85).map(p => p.col);
-    if (!confirm(`把 ${cols.length} 個系統猜測直接確認並以你的名義簽名？之後仍可逐個改。`)) return;
+    if (!confirm(`把這 ${cols.length} 欄的自動對應確認並以你的名義簽名？\n\n（這些是欄名開頭就對到位號的，把握度 85% 以上；之後仍可逐欄修改）`)) return;
     await bulk(cols, 'confirm'); await reloadMap();
   };
 }

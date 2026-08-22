@@ -151,10 +151,58 @@ PUBLIC_PREFIXES = ("/login", "/logout", "/static/", "/favicon", "/api/me", "/hea
                    "/api/version")   # 版號不是機密，登入頁也要顯示得出來
 
 
+# 金鑰身分：程式與 AI 代理沒有瀏覽器、拿不到 session cookie，改帶 Bearer。
+# 驗過就把 owner 塞進這個 request 的 session，後面所有既有函式（current_user／
+# current_domain／restricted_files）原封不動就認得——金鑰是身分，不是旁路。
+_SCOPE: contextvars.ContextVar = contextvars.ContextVar("key_scope", default="")
+
+WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE")
+
+
+def key_scope() -> str:
+    """這個請求若由金鑰驗證，回它的權限級別；session 登入回空字串。"""
+    return _SCOPE.get()
+
+
+def _apply_key(request: Request) -> dict | None:
+    from .apikeys import key_from_header, verify
+
+    token = key_from_header(request)
+    if not token:
+        return None
+    rec = verify(token)
+    if not rec:
+        return None
+    users = _load_users()
+    u = users.get(rec.get("owner") or "")
+    if not u or not u.get("is_active", True):
+        return None
+    request.scope["session"] = {"email": rec["owner"]}
+    return rec
+
+
 async def auth_guard(request: Request, call_next):
     if AUTH_DISABLED or any(
             request.url.path.startswith(p) for p in PUBLIC_PREFIXES):
         return await call_next(request)
+    key = None
+    if not request.session.get("email"):
+        key = _apply_key(request)
+    if key:
+        scope = key.get("scope", "read")
+        # read 級只能讀。/mcp 例外——MCP 全部走 POST（JSON-RPC），
+        # 讀寫要在工具那一層分，不能用 HTTP 方法判。
+        if (scope != "write:result" and request.method in WRITE_METHODS
+                and not request.url.path.startswith("/mcp")):
+            return JSONResponse({"detail": "這把金鑰是唯讀的（scope=read）"}, status_code=403)
+        # 金鑰不得碰帳號與金鑰管理本身（避免用一把 key 生出更大權限的 key）
+        if request.url.path.startswith(("/api/admin", "/api/keys")):
+            return JSONResponse({"detail": "金鑰不能用於帳號或金鑰管理"}, status_code=403)
+        tok = _SCOPE.set(scope)
+        try:
+            return await call_next(request)
+        finally:
+            _SCOPE.reset(tok)
     if not current_user(request):
         if (request.url.path.startswith("/api/") or request.url.path.startswith("/ws")
                 or request.url.path.startswith("/agatha")):

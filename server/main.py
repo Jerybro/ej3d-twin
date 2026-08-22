@@ -475,8 +475,12 @@ from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
 
 from .auth import auth_guard, secret_key  # noqa: E402
 from .auth import router as auth_router  # noqa: E402
+from .apikeys import router as apikeys_router  # noqa: E402
+from .mcp_server import router as mcp_router  # noqa: E402
 
 app.include_router(auth_router)
+app.include_router(apikeys_router)
+app.include_router(mcp_router)
 app.middleware("http")(auth_guard)                      # 內層：登入守衛
 app.add_middleware(SessionMiddleware, secret_key=secret_key(),
                    same_site="lax", https_only=False)   # 外層：簽名 cookie session
@@ -633,6 +637,7 @@ PAGES = {
     "/twin/pid/rebuild": "pid-rebuild.html",  # 產品3：盲測重建（模型 JSON → 重畫）
     "/twin/mapping": "pid-mapping.html",       # 點位對照：歷史數據欄位 ↔ P&ID 資產
     "/twin/advisor": "twin-advisor.html",      # 製程建議：ML 結果承接＋三段連鎖最佳化示範
+    "/keys": "apikeys.html",                   # API 金鑰／MCP：讓客戶接自己的 AI
     "/data/inventory": "data-inventory.html",  # 資料盤點：收到的資料在時間上長什麼樣
     "/data": "data.html",      # 產品2：資料前處理
     "/docs": "docs.html",      # 操作說明（雙語）
